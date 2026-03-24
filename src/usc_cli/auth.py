@@ -899,9 +899,23 @@ class USCAuth:
         if not has_session:
             raise AuthError("SAMLResponse POST did not set d2lSessionVal — login may have failed")
 
+        # Explicitly parse and store cookies from Set-Cookie headers into the client
+        # jar — httpx may not do this automatically when follow_redirects=False.
+        import http.cookiejar as _cj
+        from urllib.request import Request as _Req
+        for raw_cookie in set_cookies:
+            # Parse name=value (everything before first semicolon)
+            parts = raw_cookie.split(";")
+            nv = parts[0].strip()
+            if "=" in nv:
+                name, value = nv.split("=", 1)
+                self._http.cookies.set(
+                    name.strip(), value.strip(), domain="brightspace.usc.edu", path="/"
+                )
+
         logger.debug(
-            "Session established (d2lSessionVal present, redirect to: %s)",
-            resp.headers.get("location", "unknown"),
+            "Session established — cookies: %s",
+            [c.name for c in self._http.cookies.jar],
         )
 
     # ------------------------------------------------------------------
