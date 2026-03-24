@@ -1,6 +1,6 @@
 # usc-cli
 
-CLI for programmatic interaction with USC's university portal (Brightspace D2L).
+CLI for USC university services. Handles USC SSO login and persists your session on-device so other commands don't require re-authentication.
 
 ## Install
 
@@ -13,7 +13,7 @@ pip install -e ".[dev]"
 ```bash
 usc --help
 usc login
-usc courses
+usc status
 ```
 
 ## Development
@@ -26,5 +26,7 @@ pytest
 ## Architecture
 
 - `src/usc_cli/cli.py` — Click CLI entrypoint
-- `src/usc_cli/client.py` — HTTP client (httpx) for Brightspace D2L API
-- Auth flow: USC Shibboleth SSO → D2L session (TBD)
+- `src/usc_cli/client.py` — HTTP client (httpx); handles session persistence
+- `src/usc_cli/auth.py` — USC Shibboleth SSO + Duo MFA login flow
+- Session cookies stored at `~/.config/usc-cli/session.json`
+- Auth flow: USC Shibboleth SSO → Duo MFA → session cookies saved on-device

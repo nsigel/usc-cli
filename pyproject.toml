@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "usc-cli"
 version = "0.1.0"
-description = "CLI for programmatic interaction with USC's university portal (Brightspace D2L)"
+description = "CLI for USC university services — login and on-device session management"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
@@ -21,6 +21,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
+    "pytest-httpx>=0.30",
     "ruff>=0.4",
 ]
 
