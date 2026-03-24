@@ -29,7 +29,7 @@ import httpx
 logger = logging.getLogger(__name__)
 
 # Static USC/Duo constants
-USC_SSO_BASE = "https://brightspace.usc.edu"  # SSO entry point (follows SAML chain to login.usc.edu)
+USC_BASE = "https://my.usc.edu"  # Fixed SSO entry point — not configurable
 LOGIN_BASE = "https://login.usc.edu"
 
 # Duo frameless client sends this akey (USC's Duo application key)
@@ -110,8 +110,7 @@ class USCAuth:
         import html as html_module
 
         resp = self._http.get(
-            f"{USC_SSO_BASE}/d2l/login",
-            params={"sessionExpired": "0", "target": "/d2l/home"},
+            USC_BASE,
             headers=BASE_HEADERS,
             follow_redirects=True,
         )
@@ -724,8 +723,7 @@ class USCAuth:
                 )
 
         if not post_url:
-            # Default USC SAML endpoint
-            post_url = f"{USC_SSO_BASE}/d2l/lp/auth/login/samlLogin.d2l"
+            raise AuthError("Could not find SAML POST URL in login response")
 
         # Make absolute
         if post_url.startswith("/"):
