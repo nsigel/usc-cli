@@ -76,25 +76,47 @@ class USCAuth:
         """Run the full auth flow. Mutates the http client's cookie jar."""
         logger.debug("Starting USC SSO login for %s", username)
 
-        # Step 1: navigate to USC SSO entry → follow SAML redirect chain → arrive
-        # at login.usc.edu/login/login with service + goto params
-        login_url = self._get_saml_login_url()
+        # Step 1: navigate to USC SSO entry → follow SAML redirect chain
+        try:
+            login_url = self._get_saml_login_url()
+        except Exception as e:
+            raise AuthError(f"[step 1/5] SSO redirect failed: {e}") from e
         logger.debug("SAML login URL: %s", login_url)
 
         # Step 2: POST credentials
-        duo_oauth_url = self._post_credentials(login_url, username, password)
+        try:
+            duo_oauth_url = self._post_credentials(login_url, username, password)
+        except AuthError:
+            raise
+        except Exception as e:
+            raise AuthError(f"[step 2/5] Credentials POST failed: {e}") from e
         logger.debug("Duo OAuth URL: %s", duo_oauth_url[:80])
 
-        # Step 3: Duo frameless v4 MFA with bypass code
-        duo_code, state = self._do_duo_bypass(duo_oauth_url, bypass_code)
+        # Step 3: Duo MFA
+        try:
+            duo_code, state = self._do_duo_bypass(duo_oauth_url, bypass_code)
+        except AuthError:
+            raise
+        except Exception as e:
+            raise AuthError(f"[step 3/5] Duo MFA failed: {e}") from e
         logger.debug("duo_code=%s state=%s", duo_code[:8], state[:12])
 
         # Step 4: Exchange duo_code → SAML assertion
-        saml_response, saml_post_url, relay_state = self._exchange_duo_code(duo_code, state)
+        try:
+            saml_response, saml_post_url, relay_state = self._exchange_duo_code(duo_code, state)
+        except AuthError:
+            raise
+        except Exception as e:
+            raise AuthError(f"[step 4/5] Duo code exchange failed: {e}") from e
         logger.debug("SAMLResponse obtained, posting to %s", saml_post_url)
 
-        # Step 5: POST SAMLResponse → USC session cookies established
-        self._post_saml(saml_post_url, saml_response, relay_state)
+        # Step 5: POST SAMLResponse → session established
+        try:
+            self._post_saml(saml_post_url, saml_response, relay_state)
+        except AuthError:
+            raise
+        except Exception as e:
+            raise AuthError(f"[step 5/5] SAML POST failed: {e}") from e
         logger.debug("Login complete")
 
     # ------------------------------------------------------------------
