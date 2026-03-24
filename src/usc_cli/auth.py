@@ -798,6 +798,12 @@ class USCAuth:
         logger.debug("SSORedirect POST landed at: %s", str(resp.url)[:100])
 
         saml_response, post_url, relay_state = self._extract_saml_response(resp)
+        # RelayState must be sent for Brightspace to redirect to /d2l/home on success.
+        # Fall back to the value captured from the original SAMLRequest redirect.
+        if not relay_state and self._relay_state:
+            relay_state = self._relay_state
+            logger.debug("Using relay_state from initial SAML redirect: %s", relay_state)
+        logger.debug("relay_state=%s", relay_state)
         return saml_response, post_url, relay_state
 
     def _extract_saml_response(self, resp: httpx.Response) -> tuple[str, str, str | None]:
@@ -893,22 +899,10 @@ class USCAuth:
         if not has_session:
             raise AuthError("SAMLResponse POST did not set d2lSessionVal — login may have failed")
 
-        # Follow the redirect so the server can finalize the session state.
-        # Brightspace redirects to /d2l/error/500 — that's expected, ignore it.
-        location = resp.headers.get("location", "")
-        if location:
-            if location.startswith("/"):
-                location = f"{BRIGHTSPACE_BASE}{location}"
-            try:
-                self._http.get(
-                    location,
-                    headers={**BASE_HEADERS, "Referer": f"{BRIGHTSPACE_BASE}/"},
-                    follow_redirects=True,
-                )
-            except Exception:
-                pass  # /d2l/error/500 raises — ignore it
-
-        logger.debug("Session established (d2lSessionVal present)")
+        logger.debug(
+            "Session established (d2lSessionVal present, redirect to: %s)",
+            resp.headers.get("location", "unknown"),
+        )
 
     # ------------------------------------------------------------------
     # Step 6: verify session is live

@@ -530,13 +530,6 @@ class TestPostSaml:
                 "set-cookie": "d2lSessionVal=abc123; path=/; secure; HttpOnly",
             },
         )
-        # Follow-up GET to finalize session (we ignore the 500)
-        httpx_mock.add_response(
-            method="GET",
-            url=f"{BRIGHTSPACE}/d2l/error/500",
-            status_code=500,
-            text="<html>error</html>",
-        )
         client = _make_client()
         auth = USCAuth(client)
         # Should not raise — 303 + d2lSessionVal cookie = success
