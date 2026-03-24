@@ -106,6 +106,10 @@ class USCAuth:
         logger.debug("SAMLResponse obtained, posting to %s", saml_post_url)
 
         # Step 5: POST SAMLResponse → session established
+        logger.debug(
+            "POSTing SAMLResponse: len=%d relay_state=%r post_url=%s",
+            len(saml_response), relay_state, saml_post_url,
+        )
         self._post_saml(saml_post_url, saml_response, relay_state)
 
         # Step 6: verify session is live
@@ -797,7 +801,10 @@ class USCAuth:
         resp.raise_for_status()
         logger.debug("SSORedirect POST landed at: %s", str(resp.url)[:100])
 
+        logger.debug("SSORedirect POST response size=%d url=%s", len(resp.text), str(resp.url)[:100])
+        logger.debug("SSORedirect POST response snippet: %s", resp.text[:500])
         saml_response, post_url, relay_state = self._extract_saml_response(resp)
+        logger.debug("Extracted SAMLResponse len=%d post_url=%s relay_state=%r", len(saml_response), post_url, relay_state)
         # RelayState must be sent for Brightspace to redirect to /d2l/home on success.
         # Fall back to the value captured from the original SAMLRequest redirect.
         if not relay_state and self._relay_state:
