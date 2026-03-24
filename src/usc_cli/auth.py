@@ -838,7 +838,7 @@ class USCAuth:
             re.IGNORECASE,
         )
         if match:
-            saml_response = (match.group(1) or match.group(2)).strip()
+            saml_response = html_module.unescape((match.group(1) or match.group(2)).strip())
         else:
             # Try JSON/JS embedded SAMLResponse
             match = re.search(r'"SAMLResponse"\s*:\s*"([^"]+)"', html)
