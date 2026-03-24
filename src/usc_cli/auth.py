@@ -107,6 +107,9 @@ class USCAuth:
 
         # Step 5: POST SAMLResponse → session established
         self._post_saml(saml_post_url, saml_response, relay_state)
+
+        # Step 6: verify session is live
+        self._verify_session()
         logger.debug("Login complete")
 
     # ------------------------------------------------------------------
@@ -897,3 +900,37 @@ class USCAuth:
                 raise AuthError("SAMLResponse POST did not set d2lSessionVal — login may have failed")
 
         logger.debug("Session established (d2lSessionVal present)")
+
+    # ------------------------------------------------------------------
+    # Step 6: verify session is live
+    # ------------------------------------------------------------------
+
+    def _verify_session(self) -> dict:
+        """GET /d2l/api/lp/1.x/users/whoami to confirm the session is authenticated.
+
+        Returns the parsed whoami JSON dict. Raises AuthError if the session
+        is not valid (redirect to login or non-200 response).
+        """
+        whoami_url = f"{BRIGHTSPACE_BASE}/d2l/api/lp/1.x/users/whoami"
+        resp = self._http.get(
+            whoami_url,
+            headers={**BASE_HEADERS, "Accept": "application/json"},
+            follow_redirects=False,
+        )
+
+        if resp.status_code in (301, 302, 303):
+            raise AuthError("Session not authenticated — /whoami redirected to login")
+
+        if resp.status_code != 200:
+            raise AuthError(
+                f"Session verification failed: /whoami returned {resp.status_code}"
+            )
+
+        data = resp.json()
+        logger.debug(
+            "Session verified: %s %s (%s)",
+            data.get("FirstName"),
+            data.get("LastName"),
+            data.get("UniqueName"),
+        )
+        return data
