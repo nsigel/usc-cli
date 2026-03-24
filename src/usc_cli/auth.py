@@ -31,7 +31,8 @@ logger = logging.getLogger(__name__)
 
 # Static USC/Duo constants
 BRIGHTSPACE_BASE = "https://brightspace.usc.edu"
-BRIGHTSPACE_HOME = f"{BRIGHTSPACE_BASE}/d2l/home"
+# /d2l/home returns 200 with JS-triggered redirect; /d2l/login always fires the SAML chain directly
+BRIGHTSPACE_LOGIN = f"{BRIGHTSPACE_BASE}/d2l/login?sessionExpired=0&target=%2fd2l%2fhome"
 LOGIN_BASE = "https://login.usc.edu"
 
 # Duo frameless client sends this akey (USC's Duo application key)
@@ -138,24 +139,25 @@ class USCAuth:
         # Walk the redirect chain manually so we can capture the SAMLRequest
         # before it disappears into the SSORedirect page's JavaScript.
         resp = self._http.get(
-            BRIGHTSPACE_HOME,
-            headers={**BASE_HEADERS, "Referer": ""},
+            BRIGHTSPACE_LOGIN,
+            headers={**BASE_HEADERS, "Referer": BRIGHTSPACE_BASE + "/"},
             follow_redirects=False,
         )
 
         saml_request_b64: str | None = None
         relay_state: str | None = None
 
-        # Follow redirects manually, looking for the SAMLRequest
+        # Follow redirects manually so we can capture SAMLRequest before it's consumed by JS
         for _ in range(10):
             loc = resp.headers.get("location", "")
             if not loc:
+                # Stopped at a non-redirect — check we're somewhere useful
                 break
             if loc.startswith("/"):
                 parsed_cur = urlparse(str(resp.url))
                 loc = f"{parsed_cur.scheme}://{parsed_cur.netloc}{loc}"
 
-            # Capture SAMLRequest + RelayState when we see them
+            # Capture SAMLRequest + RelayState when we see them in a redirect target
             parsed_loc = urlparse(loc)
             qs = parse_qs(parsed_loc.query, keep_blank_values=True)
             if "SAMLRequest" in qs and saml_request_b64 is None:
@@ -164,8 +166,12 @@ class USCAuth:
                 logger.debug("Captured SAMLRequest (len=%d)", len(saml_request_b64))
 
             resp = self._http.get(loc, headers=BASE_HEADERS, follow_redirects=False)
-            if resp.status_code == 200:
+            if resp.status_code == 200 and "login.usc.edu" in str(resp.url):
                 break
+            if resp.status_code == 200 and "brightspace.usc.edu" in str(resp.url):
+                raise AuthError(
+                    f"Landed back on Brightspace without going through SSO: {resp.url}"
+                )
 
         resp.raise_for_status()
         final_url = str(resp.url)
