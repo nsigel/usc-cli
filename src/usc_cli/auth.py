@@ -934,8 +934,12 @@ class USCAuth:
             # Fallback: look for XSRF.Token anywhere in the page
             xsrf_match = re.search(r"""["']XSRF\.Token["'][^"']*["']([A-Za-z0-9+/=_-]{20,})["']""", home_resp.text)
         if not xsrf_match:
-            logger.debug("/d2l/home snippet: %s", home_resp.text[8800:9200])
-            raise AuthError("Could not extract XSRF.Token from /d2l/home")
+            snippet = home_resp.text[8700:9300] if len(home_resp.text) > 8700 else home_resp.text[:600]
+            raise AuthError(
+                f"Could not extract XSRF.Token from /d2l/home "
+                f"(page size={len(home_resp.text)}, url={home_resp.url})\n"
+                f"Snippet: {snippet}"
+            )
         xsrf_token = xsrf_match.group(1)
         logger.debug("Extracted XSRF.Token: %s", xsrf_token[:12])
 
