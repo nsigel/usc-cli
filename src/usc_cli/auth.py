@@ -713,11 +713,14 @@ class USCAuth:
     ) -> tuple[str, str, str | None]:
         """Exchange duo_code → SAML assertion.
 
-        Flow:
-          GET /login/authduo → 302 → saml2/continue (follow the redirect chain)
-          GET secondVisitUrl (the SSORedirect) → auto-submit form with SAMLResponse
+        Actual flow (from HAR):
+          1. GET /login/authduo → 302 → saml2/continue
+          2. GET saml2/continue (follows redirect) → HTML page with JS that POSTs saml2Request
+          3. POST secondVisitUrl (SSORedirect?ReqID=...) with saml2Request in body
+             → HTML page with SAMLResponse auto-submit form targeting the SP
+          4. Caller POSTs that SAMLResponse to the SP
         """
-        # Step 1: GET authduo — follow through to saml2/continue
+        # Step 1: GET authduo — follows to saml2/continue
         resp = self._http.get(
             f"{LOGIN_BASE}/login/authduo",
             params={"state": state, "duo_code": duo_code},
@@ -727,19 +730,26 @@ class USCAuth:
         resp.raise_for_status()
         logger.debug("authduo landed at: %s", str(resp.url)[:100])
 
-        # Step 2: GET the secondVisitUrl (SSORedirect with ReqID) — USC's server
-        # has the AuthnRequest stored under the ReqID. After Duo auth, the session
-        # cookie allows this to succeed and return an auto-submit SAMLResponse form.
-        if self._second_visit_url:
-            ssored_url = f"{LOGIN_BASE}{self._second_visit_url}"
-            logger.debug("GETting secondVisitUrl: %s", ssored_url[:100])
-            resp = self._http.get(
-                ssored_url,
-                headers={**BASE_HEADERS},
-                follow_redirects=True,
-            )
-            resp.raise_for_status()
-            logger.debug("secondVisitUrl landed at: %s", str(resp.url)[:100])
+        # Step 2: POST secondVisitUrl with saml2Request — this is what the JS does
+        # saml2/continue page JS auto-submits a form with the stored saml2Request
+        if not self._second_visit_url or not self._saml2_request:
+            raise AuthError("Missing secondVisitUrl or saml2Request from initial SSO flow")
+
+        ssored_url = f"{LOGIN_BASE}{self._second_visit_url}"
+        logger.debug("POSTing saml2Request to: %s", ssored_url[:100])
+        resp = self._http.post(
+            ssored_url,
+            data={"saml2Request": self._saml2_request},
+            headers={
+                **BASE_HEADERS,
+                "Origin": LOGIN_BASE,
+                "Referer": str(resp.url),
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            follow_redirects=True,
+        )
+        resp.raise_for_status()
+        logger.debug("SSORedirect POST landed at: %s", str(resp.url)[:100])
 
         saml_response, post_url, relay_state = self._extract_saml_response(resp)
         return saml_response, post_url, relay_state
