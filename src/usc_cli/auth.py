@@ -1,579 +1,558 @@
-"""
-USC Brightspace authentication flow.
-
-Implements headless SAML 2.0 SSO + Duo MFA (bypass code) login.
+"""USC Brightspace SSO + Duo MFA authentication flow.
 
 Flow:
-  1. GET  brightspace.usc.edu/d2l/home  → 302 → SAML initiation
-  2. GET  /d2l/lp/auth/saml/initiate-login → 302 → login.usc.edu SSO redirect
-  3. GET  login.usc.edu SSO redirect    → extracts login page URL + goto param
-  4. POST login.usc.edu/login/authuserpassword  (j_username, j_password)
-       → 302 → Duo OAuth authorize URL (contains sid + tx JWT)
-  5. GET  duosecurity.com/oauth/v1/authorize  → 303 → frameless/v4/auth?sid=&tx=
-  6. GET  frameless/v4/auth  → extract _xsrf cookie
-  7. POST frameless/v4/auth  (tx, parent=None, _xsrf, browser hints)
-       → 303 → /frame/v4/preauth/healthcheck?sid=
-  8. GET  /frame/v4/auth/prompt/data  (get prompt context)
-  9. POST /frame/v4/prompt  (factor=Passcode, passcode=<bypass_code>, sid)
-       → {txid: "..."}
- 10. POST /frame/v4/status  (txid, sid)  → poll until result.status == "allow"
- 11. POST /frame/v4/oidc/exit  (sid, txid, factor="Bypass Code", _xsrf)
-       → 303 → login.usc.edu/login/authduo?state=...&duo_code=...
- 12. GET  /login/authduo?state=...&duo_code=...
-       → 302 → /sso/saml2/continue/...
- 13. GET  /sso/saml2/continue/...
-       → page with JS form that POSTs SAMLResponse
- 14. POST brightspace.usc.edu/d2l/lp/auth/login/samlLogin.d2l (SAMLResponse)
-       → 302 → /d2l/home  (session established, d2lSessionVal cookie set)
+  1. GET brightspace.usc.edu/d2l/home → follow SAML chain to login.usc.edu
+  2. POST /login/authuserpassword (j_username, j_password) → redirect to Duo OAuth
+  3. Duo frameless v4:
+       a. Extract sid + tx from OAuth redirect
+       b. GET frameless auth page → parse _xsrf
+       c. POST frameless init (tx, _xsrf, akey) → healthcheck redirect
+       d. GET preauth/healthcheck, GET return, follow to auth/prompt
+       e. GET prompt/data to confirm Passcode factor available
+       f. POST /frame/v4/prompt with bypass passcode → get txid
+       g. POST /frame/v4/status → confirm allow
+       h. POST /frame/v4/oidc/exit → get duo_code + state
+  4. GET login.usc.edu/login/authduo?state=...&duo_code=... → SAML chain
+  5. GET saml2/continue → parse SAMLResponse from HTML form
+  6. POST brightspace samlLogin.d2l with SAMLResponse → session established
 """
 
 from __future__ import annotations
 
+import logging
 import re
 import time
-import urllib.parse
+from urllib.parse import parse_qs, urlparse
 
 import httpx
 
-DUO_HOST = "api-22627695.duosecurity.com"
-LOGIN_HOST = "login.usc.edu"
-BRIGHTSPACE_HOST = "brightspace.usc.edu"
+logger = logging.getLogger(__name__)
 
-# Minimal browser fingerprint — Duo validates these are present but doesn't
-# actually check the values for bypass-code flows.
-_BROWSER_FEATURES = (
+# Static USC/Duo constants
+BRIGHTSPACE_BASE = "https://brightspace.usc.edu"
+LOGIN_BASE = "https://login.usc.edu"
+
+# Duo frameless client sends this akey (USC's Duo application key)
+DUO_AKEY = "DAGV9PVTPM67AUM8L61P"
+
+BROWSER_FEATURES = (
     '{"touch_supported":false,'
     '"platform_authenticator_status":"unavailable",'
     '"webauthn_supported":true,'
-    '"screen_resolution_height":1080,'
-    '"screen_resolution_width":1920,'
+    '"screen_resolution_height":1440,'
+    '"screen_resolution_width":2560,'
     '"screen_color_depth":24,'
     '"is_uvpa_available":false,'
     '"client_capabilities_uvpa":false}'
 )
 
-_USER_AGENT = (
+USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/122.0.0.0 Safari/537.36"
+    "Chrome/124.0.0.0 Safari/537.36"
 )
+
+BASE_HEADERS = {
+    "User-Agent": USER_AGENT,
+    "Accept-Language": "en-US,en;q=0.9",
+}
 
 
 class AuthError(Exception):
-    """Raised when authentication fails at any step."""
+    """Raised when the auth flow fails."""
 
 
-def _raise_for(resp: httpx.Response, step: str) -> None:
-    if resp.status_code >= 400:
-        raise AuthError(
-            f"[{step}] HTTP {resp.status_code} from {resp.url}\n{resp.text[:400]}"
+class USCAuth:
+    """Handles the full SSO + Duo bypass-code login flow for Brightspace."""
+
+    def __init__(self, http: httpx.Client) -> None:
+        self._http = http
+
+    # ------------------------------------------------------------------
+    # Public entry point
+    # ------------------------------------------------------------------
+
+    def login(self, username: str, password: str, bypass_code: str) -> None:
+        """Run the full auth flow. Mutates the http client's cookie jar."""
+        logger.debug("Starting USC SSO login for %s", username)
+
+        # Step 1: navigate to Brightspace → follow SAML redirect chain → arrive
+        # at login.usc.edu/login/login with service + goto params
+        login_url = self._get_saml_login_url()
+        logger.debug("SAML login URL: %s", login_url)
+
+        # Step 2: POST credentials
+        duo_oauth_url = self._post_credentials(login_url, username, password)
+        logger.debug("Duo OAuth URL: %s", duo_oauth_url[:80])
+
+        # Step 3: Duo frameless v4 MFA with bypass code
+        duo_code, state = self._do_duo_bypass(duo_oauth_url, bypass_code)
+        logger.debug("duo_code=%s state=%s", duo_code[:8], state[:12])
+
+        # Step 4: Exchange duo_code → SAML assertion
+        saml_response, saml_post_url = self._exchange_duo_code(duo_code, state)
+        logger.debug("SAMLResponse obtained, posting to %s", saml_post_url)
+
+        # Step 5: POST SAMLResponse → Brightspace session cookies
+        self._post_saml(saml_post_url, saml_response)
+        logger.debug("Login complete")
+
+    # ------------------------------------------------------------------
+    # Step 1: walk the SAML redirect chain
+    # ------------------------------------------------------------------
+
+    def _get_saml_login_url(self) -> str:
+        """Navigate to Brightspace and follow SAML redirects to the USC login page."""
+        resp = self._http.get(
+            f"{BRIGHTSPACE_BASE}/d2l/home",
+            headers=BASE_HEADERS,
+            follow_redirects=True,
         )
+        resp.raise_for_status()
 
+        # After the redirect chain we should be at login.usc.edu
+        final_url = str(resp.url)
+        if "login.usc.edu" not in final_url:
+            raise AuthError(f"Unexpected landing URL after SAML redirect: {final_url}")
 
-def login(
-    username: str,
-    password: str,
-    bypass_code: str,
-) -> dict[str, str]:
-    """
-    Authenticate with USC Brightspace via SAML SSO + Duo bypass code.
+        return final_url
 
-    Returns a dict of session tokens/cookies:
-        d2lSessionVal, d2lSecureSessionVal, XSRF.Token, access_token, user_id
-    """
-    client = httpx.Client(
-        follow_redirects=False,
-        timeout=30.0,
-        headers={
-            "User-Agent": _USER_AGENT,
-            "Accept": (
-                "text/html,application/xhtml+xml,application/xml;"
-                "q=0.9,image/avif,image/webp,*/*;q=0.8"
-            ),
-            "Accept-Language": "en-US,en;q=0.9",
-        },
-    )
+    # ------------------------------------------------------------------
+    # Step 2: POST username/password
+    # ------------------------------------------------------------------
 
-    try:
-        return _do_login(client, username, password, bypass_code)
-    finally:
-        client.close()
+    def _post_credentials(self, login_url: str, username: str, password: str) -> str:
+        """POST to /login/authuserpassword and return the Duo OAuth redirect URL."""
+        # The action URL is always the same regardless of goto params
+        post_url = f"{LOGIN_BASE}/login/authuserpassword"
 
-
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-def _follow(client: httpx.Client, resp: httpx.Response) -> httpx.Response:
-    """Manually follow a single redirect, preserving cookies."""
-    loc = resp.headers.get("location", "")
-    if not loc:
-        raise AuthError(f"Expected redirect but got no Location from {resp.url}")
-    # Resolve relative URLs against the original request URL
-    next_url = str(httpx.URL(loc) if loc.startswith("http") else resp.url.copy_with(path=loc))
-    next_resp = client.get(next_url)
-    return next_resp
-
-
-def _extract_xsrf(client: httpx.Client) -> str:
-    """Return the _xsrf value from the Duo cookie jar."""
-    for cookie in client.cookies.jar:
-        if cookie.name == "_xsrf" and DUO_HOST in (cookie.domain or ""):
-            return cookie.value
-    # Try _xsrf without domain check
-    try:
-        return client.cookies[f"https://{DUO_HOST}"]["_xsrf"]
-    except Exception:
-        pass
-    # Fallback: iterate all
-    for cookie in client.cookies.jar:
-        if cookie.name == "_xsrf":
-            return cookie.value
-    raise AuthError("Could not find Duo _xsrf cookie after loading frameless auth page")
-
-
-def _do_login(
-    client: httpx.Client,
-    username: str,
-    password: str,
-    bypass_code: str,
-) -> dict[str, str]:
-
-    # -----------------------------------------------------------------------
-    # Step 1-3: Initiate SAML flow, get login page URL
-    # -----------------------------------------------------------------------
-    resp = client.get(f"https://{BRIGHTSPACE_HOST}/d2l/home")
-    # May get 200 if already logged in, or 302 to login
-    if resp.status_code == 200 and "/d2l/home" in str(resp.url):
-        raise AuthError(
-            "Got 200 on /d2l/home without auth — "
-            "session may already exist or something is wrong"
-        )
-
-    # Follow redirects manually so we can inspect each step
-    # Brightspace → /d2l/login → /d2l/lp/auth/saml/initiate-login
-    if resp.status_code in (302, 303):
-        resp = _follow(client, resp)
-    # → login.usc.edu SSO redirect (may be 302 again)
-    if resp.status_code in (302, 303):
-        resp = _follow(client, resp)
-    # Now at login.usc.edu SSO page — follow once more to the login form
-    if resp.status_code in (302, 303):
-        resp = _follow(client, resp)
-
-    _raise_for(resp, "saml-initiation")
-
-    # Parse the login page URL to extract `goto` param (needed for POST)
-    login_page_url = str(resp.url)
-    # (goto and service params extracted here if needed for future use)
-
-    # -----------------------------------------------------------------------
-    # Step 4: POST username + password
-    # -----------------------------------------------------------------------
-    post_url = f"https://{LOGIN_HOST}/login/authuserpassword"
-    resp = client.post(
-        post_url,
-        data={
-            "j_username": username,
-            "j_password": password,
-            "_eventId_proceed": "",
-        },
-        headers={
-            "Content-Type": "application/x-www-form-urlencoded",
-            "Origin": f"https://{LOGIN_HOST}",
-            "Referer": login_page_url,
-        },
-    )
-    # Expect 302 → Duo OAuth authorize URL
-    if resp.status_code not in (302, 303):
-        raise AuthError(
-            f"[auth-userpassword] Expected redirect, got {resp.status_code}. "
-            "Credentials may be wrong."
-        )
-
-    duo_authorize_url = resp.headers["location"]
-    if "duosecurity.com" not in duo_authorize_url:
-        raise AuthError(
-            f"[auth-userpassword] Expected redirect to Duo, got: {duo_authorize_url!r}"
-        )
-
-    # -----------------------------------------------------------------------
-    # Step 5: GET Duo OAuth authorize → 303 → frameless/v4/auth
-    # -----------------------------------------------------------------------
-    resp = client.get(duo_authorize_url, headers={"Referer": f"https://{LOGIN_HOST}/"})
-    if resp.status_code not in (302, 303):
-        raise AuthError(
-            f"[duo-authorize] Expected redirect, got {resp.status_code}"
-        )
-
-    frameless_url = f"https://{DUO_HOST}{resp.headers['location']}"
-    # Extract sid and tx from URL
-    parsed_fl = urllib.parse.urlparse(frameless_url)
-    fl_qs = urllib.parse.parse_qs(parsed_fl.query)
-    sid = fl_qs.get("sid", [""])[0]
-    tx = fl_qs.get("tx", [""])[0]
-
-    if not sid or not tx:
-        raise AuthError(f"[duo-authorize] Could not extract sid/tx from {frameless_url!r}")
-
-    # -----------------------------------------------------------------------
-    # Step 6: GET frameless/v4/auth — loads Duo frame, sets _xsrf cookie
-    # -----------------------------------------------------------------------
-    resp = client.get(
-        frameless_url,
-        headers={"Referer": f"https://{LOGIN_HOST}/"},
-    )
-    _raise_for(resp, "duo-frameless-get")
-
-    # _xsrf cookie is set by this page
-    xsrf = _extract_xsrf(client)
-
-    # -----------------------------------------------------------------------
-    # Step 7: POST frameless/v4/auth with tx + _xsrf → 303 → healthcheck
-    # -----------------------------------------------------------------------
-    resp = client.post(
-        frameless_url,
-        data={
-            "tx": tx,
-            "parent": "None",
-            "_xsrf": xsrf,
-            "version": "v4",
-            "akey": "",
-            "has_session_trust_analysis_feature": "False",
-            "session_trust_extension_id": "",
-            "java_version": "",
-            "flash_version": "",
-            "screen_resolution_width": "1920",
-            "screen_resolution_height": "1080",
-            "extension_instance_key": "",
-            "color_depth": "24",
-            "has_touch_capability": "false",
-            "ch_ua_error": "",
-            "client_hints": "",
-            "is_cef_browser": "false",
-            "is_ipad_os": "false",
-            "is_ie_compatibility_mode": "",
-            "is_user_verifying_platform_authenticator_available": "false",
-            "user_verifying_platform_authenticator_available_error": "",
-            "acting_ie_version": "",
-            "react_support": "true",
-            "react_support_error_message": "",
-        },
-        headers={
-            "Origin": f"https://{DUO_HOST}",
-            "Referer": frameless_url,
-            "Content-Type": "application/x-www-form-urlencoded",
-        },
-    )
-    if resp.status_code not in (302, 303):
-        raise AuthError(
-            f"[duo-frameless-post] Expected redirect, got {resp.status_code}: {resp.text[:200]}"
-        )
-
-    # Follow to healthcheck/preauth
-    healthcheck_path = resp.headers["location"]
-    healthcheck_url = (
-        healthcheck_path
-        if healthcheck_path.startswith("http")
-        else f"https://{DUO_HOST}{healthcheck_path}"
-    )
-    resp = client.get(healthcheck_url, headers={"Referer": frameless_url})
-    # healthcheck might redirect again to auth/prompt
-    if resp.status_code in (302, 303):
-        loc = resp.headers["location"]
-        url = loc if loc.startswith("http") else f"https://{DUO_HOST}{loc}"
-        resp = client.get(url, headers={"Referer": healthcheck_url})
-
-    # -----------------------------------------------------------------------
-    # Step 8: POST frameless/v4/auth again → 302 → /frame/v4/auth/prompt
-    # -----------------------------------------------------------------------
-    # After healthcheck, we need to POST frameless again with tx to reach auth prompt
-    resp2 = client.post(
-        frameless_url,
-        data={
-            "tx": tx,
-            "parent": "None",
-            "_xsrf": xsrf,
-            "version": "v4",
-            "akey": "",
-            "has_session_trust_analysis_feature": "False",
-            "session_trust_extension_id": "",
-            "java_version": "",
-            "flash_version": "",
-            "screen_resolution_width": "1920",
-            "screen_resolution_height": "1080",
-            "extension_instance_key": "",
-            "color_depth": "24",
-            "has_touch_capability": "false",
-            "ch_ua_error": "",
-            "client_hints": "",
-            "is_cef_browser": "false",
-            "is_ipad_os": "false",
-            "is_ie_compatibility_mode": "",
-            "is_user_verifying_platform_authenticator_available": "false",
-            "user_verifying_platform_authenticator_available_error": "",
-            "acting_ie_version": "",
-            "react_support": "true",
-            "react_support_error_message": "",
-        },
-        headers={
-            "Origin": f"https://{DUO_HOST}",
-            "Referer": frameless_url,
-            "Content-Type": "application/x-www-form-urlencoded",
-        },
-    )
-    if resp2.status_code in (302, 303):
-        auth_prompt_path = resp2.headers["location"]
-        auth_prompt_url = (
-            auth_prompt_path
-            if auth_prompt_path.startswith("http")
-            else f"https://{DUO_HOST}{auth_prompt_path}"
-        )
-        # GET the auth prompt page (loads React app)
-        client.get(auth_prompt_url, headers={"Referer": frameless_url})
-
-    # -----------------------------------------------------------------------
-    # Step 9: POST /frame/v4/prompt with Passcode (bypass code)
-    # -----------------------------------------------------------------------
-    prompt_url = f"https://{DUO_HOST}/frame/v4/prompt"
-    prompt_data = {
-        "passcode": bypass_code,
-        "device": "null",
-        "factor": "Passcode",
-        "postAuthDestination": "OIDC_EXIT",
-        "browser_features": _BROWSER_FEATURES,
-        "sid": sid,
-    }
-    resp = client.post(
-        prompt_url,
-        data=prompt_data,
-        headers={
-            "Origin": f"https://{DUO_HOST}",
-            "Referer": f"https://{DUO_HOST}/frame/v4/auth/prompt?sid={sid}",
-            "X-Xsrftoken": xsrf,
-            "Accept": "application/json, text/javascript, */*; q=0.01",
-            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-            "X-Requested-With": "XMLHttpRequest",
-        },
-    )
-    _raise_for(resp, "duo-prompt")
-    prompt_json = resp.json()
-    txid = prompt_json.get("response", {}).get("txid") or prompt_json.get("txid")
-    if not txid:
-        raise AuthError(
-            f"[duo-prompt] Could not get txid from response: {prompt_json}"
-        )
-
-    # -----------------------------------------------------------------------
-    # Step 10: POST /frame/v4/status — poll until "allow"
-    # -----------------------------------------------------------------------
-    status_url = f"https://{DUO_HOST}/frame/v4/status"
-    status_referer = f"https://{DUO_HOST}/frame/v4/auth/prompt?sid={sid}"
-
-    for attempt in range(10):
-        resp = client.post(
-            status_url,
-            data={"txid": txid, "sid": sid},
+        resp = self._http.post(
+            post_url,
+            data={
+                "j_username": username,
+                "j_password": password,
+                "_eventId_proceed": "",
+            },
             headers={
-                "Origin": f"https://{DUO_HOST}",
-                "Referer": status_referer,
+                **BASE_HEADERS,
+                "Origin": LOGIN_BASE,
+                "Referer": login_url,
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            follow_redirects=False,
+        )
+
+        # Expect a redirect to Duo OAuth
+        if resp.status_code not in (301, 302, 303):
+            # Could be a bad password — check for error text
+            if "incorrect" in resp.text.lower() or "invalid" in resp.text.lower():
+                raise AuthError("Invalid username or password")
+            raise AuthError(
+                f"Expected redirect after credentials POST, got {resp.status_code}"
+            )
+
+        location = resp.headers.get("location", "")
+        if not location:
+            raise AuthError("No Location header after credentials POST")
+
+        # Make absolute if relative
+        if location.startswith("/"):
+            location = f"{LOGIN_BASE}{location}"
+
+        if "duosecurity.com" not in location:
+            raise AuthError(f"Expected Duo redirect, got: {location[:100]}")
+
+        return location
+
+    # ------------------------------------------------------------------
+    # Step 3: Duo frameless v4 with bypass code
+    # ------------------------------------------------------------------
+
+    def _do_duo_bypass(self, duo_oauth_url: str, bypass_code: str) -> tuple[str, str]:
+        """Drive the Duo frameless v4 flow with a bypass code.
+
+        Returns (duo_code, state) to hand back to login.usc.edu.
+        """
+        duo_host, sid, tx = self._init_duo_session(duo_oauth_url)
+        xsrf = self._get_duo_xsrf(duo_host, sid, tx)
+        sid = self._post_duo_frameless_init(duo_host, sid, tx, xsrf)
+        self._duo_preauth_healthcheck(duo_host, sid)
+        txid = self._post_duo_prompt(duo_host, sid, xsrf, bypass_code)
+        self._poll_duo_status(duo_host, sid, txid)
+        duo_code, state = self._duo_oidc_exit(duo_host, sid, txid, xsrf)
+        return duo_code, state
+
+    def _init_duo_session(self, duo_oauth_url: str) -> tuple[str, str, str]:
+        """GET Duo OAuth URL → follow 303 → extract duo_host, sid, tx from final URL."""
+        resp = self._http.get(
+            duo_oauth_url,
+            headers={**BASE_HEADERS, "Referer": LOGIN_BASE + "/"},
+            follow_redirects=False,
+        )
+
+        if resp.status_code not in (301, 302, 303):
+            raise AuthError(f"Expected Duo OAuth redirect, got {resp.status_code}")
+
+        location = resp.headers.get("location", "")
+        # Make absolute if needed
+        parsed_oauth = urlparse(duo_oauth_url)
+        duo_host = parsed_oauth.netloc  # e.g. api-22627695.duosecurity.com
+
+        if location.startswith("/"):
+            frameless_url = f"https://{duo_host}{location}"
+        else:
+            frameless_url = location
+            duo_host = urlparse(frameless_url).netloc
+
+        # Parse sid and tx from frameless URL
+        parsed = urlparse(frameless_url)
+        params = parse_qs(parsed.query)
+
+        sid = params.get("sid", [None])[0]
+        tx = params.get("tx", [None])[0]
+
+        if not sid or not tx:
+            raise AuthError(f"Could not extract sid/tx from Duo URL: {frameless_url[:100]}")
+
+        logger.debug("Duo host=%s sid=%s", duo_host, sid)
+        return duo_host, sid, tx
+
+    def _get_duo_xsrf(self, duo_host: str, sid: str, tx: str) -> str:
+        """GET the Duo frameless page and extract _xsrf token."""
+        url = f"https://{duo_host}/frame/frameless/v4/auth"
+        resp = self._http.get(
+            url,
+            params={"sid": sid, "tx": tx},
+            headers={**BASE_HEADERS, "Referer": LOGIN_BASE + "/"},
+            follow_redirects=True,
+        )
+        resp.raise_for_status()
+
+        # _xsrf is set as a cookie by Duo
+        xsrf = self._http.cookies.get("_xsrf", domain=duo_host)
+        if xsrf:
+            return xsrf
+
+        # Fallback: parse from page HTML (some versions embed it)
+        match = re.search(r'["\']_xsrf["\']\s*[,:\s]+["\']([\w]+)["\']', resp.text)
+        if match:
+            return match.group(1)
+
+        # Last resort: try meta tag or hidden input
+        match = re.search(
+            r'name=["\']_xsrf["\'][^>]*value=["\']([\w]+)["\']'
+            r'|value=["\']([\w]+)["\'][^>]*name=["\']_xsrf["\']',
+            resp.text,
+        )
+        if match:
+            return match.group(1) or match.group(2)
+
+        raise AuthError("Could not extract _xsrf from Duo frameless page")
+
+    def _post_duo_frameless_init(
+        self, duo_host: str, sid: str, tx: str, xsrf: str
+    ) -> str:
+        """POST to frameless/v4/auth to initialize the session.
+
+        Returns the sid (may be updated in redirect location).
+        """
+        url = f"https://{duo_host}/frame/frameless/v4/auth"
+        resp = self._http.post(
+            url,
+            params={"sid": sid, "tx": tx},
+            data={
+                "tx": tx,
+                "parent": "None",
+                "_xsrf": xsrf,
+                "version": "v4",
+                "akey": DUO_AKEY,
+                "has_session_trust_analysis_feature": "False",
+                "session_trust_extension_id": "",
+                "java_version": "",
+                "flash_version": "",
+                "screen_resolution_width": "2560",
+                "screen_resolution_height": "1440",
+                "extension_instance_key": "",
+                "color_depth": "24",
+                "has_touch_capability": "false",
+                "ch_ua_error": "",
+                "is_cef_browser": "false",
+                "is_ipad_os": "false",
+                "is_user_verifying_platform_authenticator_available": "false",
+                "react_support": "true",
+                "react_support_error_message": "",
+            },
+            headers={
+                **BASE_HEADERS,
+                "Origin": f"https://{duo_host}",
+                "Referer": f"https://{duo_host}/frame/frameless/v4/auth?sid={sid}&tx={tx}",
+            },
+            follow_redirects=False,
+        )
+
+        if resp.status_code not in (301, 302, 303):
+            raise AuthError(
+                f"Expected redirect from Duo frameless init, got {resp.status_code}"
+            )
+
+        location = resp.headers.get("location", "")
+        # Extract updated sid if present
+        if "sid=" in location:
+            params = parse_qs(urlparse(location).query)
+            new_sid = params.get("sid", [sid])[0]
+            return new_sid
+
+        return sid
+
+    def _duo_preauth_healthcheck(self, duo_host: str, sid: str) -> None:
+        """Walk the preauth healthcheck + return redirect chain."""
+        base = f"https://{duo_host}"
+
+        # GET preauth/healthcheck → might redirect
+        resp = self._http.get(
+            f"{base}/frame/v4/preauth/healthcheck",
+            params={"sid": sid},
+            headers={**BASE_HEADERS, "Referer": f"{base}/frame/frameless/v4/auth?sid={sid}"},
+            follow_redirects=True,
+        )
+        resp.raise_for_status()
+
+        # GET return (navigates back to frameless which then lands at auth/prompt)
+        resp = self._http.get(
+            f"{base}/frame/v4/return",
+            params={"sid": sid},
+            headers={**BASE_HEADERS, "Referer": f"{base}/frame/v4/preauth/healthcheck?sid={sid}"},
+            follow_redirects=True,
+        )
+        resp.raise_for_status()
+
+    def _post_duo_prompt(
+        self, duo_host: str, sid: str, xsrf: str, bypass_code: str
+    ) -> str:
+        """POST the bypass code to /frame/v4/prompt. Returns txid."""
+        base = f"https://{duo_host}"
+
+        resp = self._http.post(
+            f"{base}/frame/v4/prompt",
+            data={
+                "passcode": bypass_code,
+                "device": "null",
+                "factor": "Passcode",
+                "postAuthDestination": "OIDC_EXIT",
+                "browser_features": BROWSER_FEATURES,
+                "sid": sid,
+            },
+            headers={
+                **BASE_HEADERS,
+                "Origin": base,
+                "Referer": f"{base}/frame/v4/auth/prompt?sid={sid}",
                 "X-Xsrftoken": xsrf,
-                "Accept": "application/json, text/javascript, */*; q=0.01",
-                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-                "X-Requested-With": "XMLHttpRequest",
+                "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+                "Accept": "*/*",
             },
         )
-        _raise_for(resp, "duo-status")
-        status_json = resp.json()
-        stat = (
-            status_json.get("response", {}).get("result")
-            or status_json.get("stat")
-            or ""
-        )
-        result_code = status_json.get("response", {}).get("result", "")
-        if result_code == "SUCCESS" or stat == "OK":
-            break
-        if result_code in ("DENY", "FAILURE"):
-            raise AuthError(
-                f"[duo-status] Duo denied auth: {status_json}"
-            )
-        # Still pending — wait and retry
-        time.sleep(1.5)
-    else:
-        raise AuthError("[duo-status] Timed out waiting for Duo approval")
+        resp.raise_for_status()
 
-    # -----------------------------------------------------------------------
-    # Step 11: POST /frame/v4/oidc/exit → redirect to login.usc.edu/authduo
-    # -----------------------------------------------------------------------
-    exit_url = f"https://{DUO_HOST}/frame/v4/oidc/exit"
-    resp = client.post(
-        exit_url,
-        data={
-            "sid": sid,
-            "txid": txid,
-            "factor": "Bypass Code",
-            "device_key": "",
-            "_xsrf": xsrf,
-            "dampen_choice": "true",
-        },
-        headers={
-            "Origin": f"https://{DUO_HOST}",
-            "Referer": status_referer,
-            "Content-Type": "application/x-www-form-urlencoded",
-        },
-    )
-    if resp.status_code not in (302, 303):
-        raise AuthError(
-            f"[duo-oidc-exit] Expected redirect, got {resp.status_code}: {resp.text[:200]}"
-        )
+        data = resp.json()
+        if data.get("stat") != "OK":
+            msg = data.get("message") or data.get("response", {}).get("message", "unknown")
+            raise AuthError(f"Duo prompt rejected: {msg}")
 
-    authduo_url = resp.headers["location"]
-    if not authduo_url.startswith("http"):
-        authduo_url = f"https://{LOGIN_HOST}{authduo_url}"
+        txid = data.get("response", {}).get("txid")
+        if not txid:
+            raise AuthError(f"No txid in Duo prompt response: {data}")
 
-    # -----------------------------------------------------------------------
-    # Step 12: GET /login/authduo?state=...&duo_code=... → 302 → SAML continue
-    # -----------------------------------------------------------------------
-    resp = client.get(
-        authduo_url,
-        headers={"Referer": f"https://{DUO_HOST}/"},
-    )
-    if resp.status_code in (302, 303):
-        saml_continue_url = resp.headers["location"]
-        if not saml_continue_url.startswith("http"):
-            saml_continue_url = f"https://{LOGIN_HOST}{saml_continue_url}"
-    else:
-        _raise_for(resp, "authduo")
-        # Might be a direct page load
-        saml_continue_url = str(resp.url)
+        return txid
 
-    # -----------------------------------------------------------------------
-    # Step 13: GET SAML continue page → extract SAMLResponse + RelayState
-    # -----------------------------------------------------------------------
-    resp = client.get(
-        saml_continue_url,
-        headers={"Referer": authduo_url},
-    )
-    _raise_for(resp, "saml-continue")
+    def _poll_duo_status(
+        self,
+        duo_host: str,
+        sid: str,
+        txid: str,
+        max_wait: int = 30,
+        interval: float = 1.5,
+    ) -> None:
+        """Poll /frame/v4/status until allowed or timeout."""
+        base = f"https://{duo_host}"
+        deadline = time.monotonic() + max_wait
 
-    # Page may still 302 to the SSO SSORedirect endpoint
-    if resp.status_code in (302, 303):
-        next_url = resp.headers["location"]
-        if not next_url.startswith("http"):
-            next_url = f"https://{LOGIN_HOST}{next_url}"
-        resp = client.get(next_url, headers={"Referer": saml_continue_url})
-        _raise_for(resp, "saml-redirect")
-        saml_continue_url = str(resp.url)
-
-    # The page should now contain a form that auto-POSTs SAMLResponse
-    # We may need to follow additional intermediate pages
-    # Check if we got an HTML page with a SAMLResponse form
-    saml_html = resp.text if resp.status_code == 200 else ""
-    saml_response, relay_state, saml_post_url = _extract_saml_form(saml_html)
-
-    if not saml_response:
-        # Try POSTing the saml2Request form (intermediate page)
-        saml2_request = _extract_input(saml_html, "saml2Request")
-        if saml2_request:
-            # This is the login.usc.edu → Brightspace intermediate POST
-            # Find the form action
-            form_action = _extract_form_action(saml_html) or saml_continue_url
-            resp = client.post(
-                form_action if form_action.startswith("http") else f"https://{LOGIN_HOST}{form_action}",
-                data={"saml2Request": saml2_request},
+        while time.monotonic() < deadline:
+            resp = self._http.post(
+                f"{base}/frame/v4/status",
+                data={"txid": txid, "sid": sid},
                 headers={
-                    "Content-Type": "application/x-www-form-urlencoded",
-                    "Origin": f"https://{LOGIN_HOST}",
-                    "Referer": saml_continue_url,
+                    **BASE_HEADERS,
+                    "Origin": base,
+                    "Referer": f"{base}/frame/v4/auth/prompt?sid={sid}",
+                    "Accept": "*/*",
                 },
             )
-            saml_html = resp.text if resp.status_code == 200 else ""
-            saml_response, relay_state, saml_post_url = _extract_saml_form(saml_html)
+            resp.raise_for_status()
 
-    if not saml_response:
-        raise AuthError(
-            "[saml-form] Could not extract SAMLResponse from HTML. "
-            f"URL was: {resp.url}, Status: {resp.status_code}"
+            data = resp.json()
+            if data.get("stat") != "OK":
+                raise AuthError(f"Duo status error: {data}")
+
+            result = data.get("response", {}).get("result", "").lower()
+            status_code = data.get("response", {}).get("status_code", "").lower()
+
+            if result == "success" or status_code == "allow":
+                logger.debug("Duo MFA approved")
+                return
+
+            if result == "failure" or status_code == "deny":
+                reason = data.get("response", {}).get("reason", "denied")
+                raise AuthError(f"Duo MFA denied: {reason}")
+
+            # Still pending — wait and retry
+            time.sleep(interval)
+
+        raise AuthError("Duo MFA timed out waiting for approval")
+
+    def _duo_oidc_exit(
+        self, duo_host: str, sid: str, txid: str, xsrf: str
+    ) -> tuple[str, str]:
+        """POST to /frame/v4/oidc/exit to complete Duo OIDC flow.
+
+        Returns (duo_code, state) from the redirect back to login.usc.edu.
+        """
+        base = f"https://{duo_host}"
+
+        resp = self._http.post(
+            f"{base}/frame/v4/oidc/exit",
+            data={
+                "sid": sid,
+                "txid": txid,
+                "factor": "Bypass Code",
+                "device_key": "",
+                "_xsrf": xsrf,
+                "dampen_choice": "true",
+            },
+            headers={
+                **BASE_HEADERS,
+                "Origin": base,
+                "Referer": f"{base}/frame/v4/auth/prompt?sid={sid}",
+            },
+            follow_redirects=False,
         )
 
-    # -----------------------------------------------------------------------
-    # Step 14: POST SAMLResponse to Brightspace → session established
-    # -----------------------------------------------------------------------
-    if not saml_post_url.startswith("http"):
-        saml_post_url = f"https://{BRIGHTSPACE_HOST}{saml_post_url}"
+        if resp.status_code not in (301, 302, 303):
+            raise AuthError(f"Expected redirect from oidc/exit, got {resp.status_code}")
 
-    post_data: dict[str, str] = {"SAMLResponse": saml_response}
-    if relay_state:
-        post_data["RelayState"] = relay_state
+        location = resp.headers.get("location", "")
+        if not location:
+            raise AuthError("No Location header from oidc/exit")
 
-    resp = client.post(
-        saml_post_url,
-        data=post_data,
-        headers={
-            "Content-Type": "application/x-www-form-urlencoded",
-            "Origin": f"https://{LOGIN_HOST}",
-            "Referer": str(resp.url),
-        },
-    )
-    # Expect redirect to /d2l/home
-    if resp.status_code not in (200, 302, 303):
-        raise AuthError(
-            f"[saml-post] Expected success/redirect, got {resp.status_code}"
+        # Make absolute
+        if location.startswith("/"):
+            location = f"{base}{location}"
+
+        parsed = urlparse(location)
+        params = parse_qs(parsed.query)
+
+        duo_code = params.get("duo_code", [None])[0]
+        state = params.get("state", [None])[0]
+
+        if not duo_code or not state:
+            raise AuthError(f"Missing duo_code/state in oidc/exit redirect: {location}")
+
+        return duo_code, state
+
+    # ------------------------------------------------------------------
+    # Step 4: exchange duo_code back to USC login
+    # ------------------------------------------------------------------
+
+    def _exchange_duo_code(
+        self, duo_code: str, state: str
+    ) -> tuple[str, str]:
+        """GET /login/authduo and follow SAML chain to get SAMLResponse + post URL."""
+        # GET authduo — follows redirect chain to saml2/continue
+        resp = self._http.get(
+            f"{LOGIN_BASE}/login/authduo",
+            params={"state": state, "duo_code": duo_code},
+            headers={**BASE_HEADERS},
+            follow_redirects=True,
         )
+        resp.raise_for_status()
 
-    # -----------------------------------------------------------------------
-    # Extract session cookies from jar
-    # -----------------------------------------------------------------------
-    cookies = {}
-    for cookie in client.cookies.jar:
-        if BRIGHTSPACE_HOST in (cookie.domain or ""):
-            cookies[cookie.name] = cookie.value
+        # We should be at saml2/continue or the SSORedirect that returns a form
+        # The final response should be a page with a SAMLResponse form
+        # (either auto-submitted JS or a plain form)
+        saml_response, post_url = self._extract_saml_response(resp)
+        return saml_response, post_url
 
-    if not cookies.get("d2lSessionVal"):
-        raise AuthError(
-            "[session] d2lSessionVal cookie not found after SAML POST. "
-            f"Cookies present: {list(cookies.keys())}"
+    def _extract_saml_response(self, resp: httpx.Response) -> tuple[str, str]:
+        """Parse SAMLResponse and form action from an HTML response.
+
+        The page may be a standard SAML POST binding form or auto-submit JS.
+        """
+        html = resp.text
+
+        # Try form-based SAMLResponse
+        match = re.search(
+            r'<form[^>]+action=["\']([^"\']+)["\']',
+            html,
+            re.IGNORECASE,
         )
+        post_url = match.group(1) if match else None
 
-    return {
-        "d2lSessionVal": cookies.get("d2lSessionVal", ""),
-        "d2lSecureSessionVal": cookies.get("d2lSecureSessionVal", ""),
-        # XSRF and JWT tokens are set via JavaScript/localStorage;
-        # need to be fetched via an authenticated GET to /d2l/home
-        # and extracted from page script data. Stub for now.
-        "xsrf_token": "",
-        "access_token": "",
-        "user_id": "",
-        "_all_cookies": cookies,
-    }
+        match = re.search(
+            r'name=["\']SAMLResponse["\'][^>]*value=["\']([^"\']+)["\']'
+            r'|value=["\']([^"\']+)["\'][^>]*name=["\']SAMLResponse["\']',
+            html,
+            re.IGNORECASE,
+        )
+        if match:
+            saml_response = (match.group(1) or match.group(2)).strip()
+        else:
+            # Try JSON/JS embedded SAMLResponse
+            match = re.search(r'"SAMLResponse"\s*:\s*"([^"]+)"', html)
+            if match:
+                saml_response = match.group(1)
+            else:
+                raise AuthError(
+                    f"Could not find SAMLResponse in page at {resp.url}"
+                )
 
+        if not post_url:
+            # Default Brightspace SAML endpoint
+            post_url = f"{BRIGHTSPACE_BASE}/d2l/lp/auth/login/samlLogin.d2l"
 
-# ---------------------------------------------------------------------------
-# HTML parsing helpers (no BeautifulSoup dependency)
-# ---------------------------------------------------------------------------
+        # Make absolute
+        if post_url.startswith("/"):
+            # Could be on login.usc.edu or brightspace.usc.edu
+            base = f"{urlparse(str(resp.url)).scheme}://{urlparse(str(resp.url)).netloc}"
+            post_url = f"{base}{post_url}"
 
-def _extract_input(html: str, name: str) -> str:
-    """Extract value of a named hidden input field."""
-    m = re.search(
-        rf'<input[^>]+name=["\']?{re.escape(name)}["\']?[^>]+value=["\']([^"\']*)["\']',
-        html,
-        re.IGNORECASE,
-    ) or re.search(
-        rf'<input[^>]+value=["\']([^"\']*)["\'][^>]+name=["\']?{re.escape(name)}["\']?',
-        html,
-        re.IGNORECASE,
-    )
-    return m.group(1) if m else ""
+        return saml_response, post_url
 
+    # ------------------------------------------------------------------
+    # Step 5: POST SAMLResponse to Brightspace
+    # ------------------------------------------------------------------
 
-def _extract_form_action(html: str) -> str:
-    m = re.search(r'<form[^>]+action=["\']([^"\']+)["\']', html, re.IGNORECASE)
-    return m.group(1) if m else ""
+    def _post_saml(self, post_url: str, saml_response: str) -> None:
+        """POST SAMLResponse to Brightspace to establish the session."""
+        resp = self._http.post(
+            post_url,
+            data={"SAMLResponse": saml_response},
+            headers={
+                **BASE_HEADERS,
+                "Origin": LOGIN_BASE,
+                "Referer": f"{LOGIN_BASE}/",
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            follow_redirects=True,
+        )
+        resp.raise_for_status()
 
+        # Verify we landed somewhere sensible on Brightspace
+        if "brightspace.usc.edu" not in str(resp.url):
+            raise AuthError(
+                f"SAML POST landed on unexpected URL: {resp.url}"
+            )
 
-def _extract_saml_form(html: str) -> tuple[str, str, str]:
-    """Return (SAMLResponse, RelayState, form_action) from an auto-submit SAML form."""
-    saml_response = _extract_input(html, "SAMLResponse")
-    relay_state = _extract_input(html, "RelayState")
-    form_action = _extract_form_action(html)
-    return saml_response, relay_state, form_action
+        # Check we're not on a login/error page
+        if "/d2l/login" in str(resp.url) or "/d2l/lp/auth" in str(resp.url):
+            raise AuthError("SAML login failed — still on auth page after SAMLResponse POST")
+
+        logger.debug("Session established at %s", resp.url)

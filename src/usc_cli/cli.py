@@ -1,130 +1,112 @@
 """CLI entrypoint."""
 
+from __future__ import annotations
+
+import logging
 import sys
 
 import click
-import keyring
-from rich.console import Console
-from rich.table import Table
 
 from usc_cli import __version__
-from usc_cli.auth import AuthError
+from usc_cli.client import AuthError, USCClient
 
-console = Console()
 
-KEYRING_SERVICE = "usc-cli"
-KEYRING_USERNAME_KEY = "username"
-KEYRING_PASSWORD_KEY = "password"
+def _setup_logging(verbose: bool) -> None:
+    level = logging.DEBUG if verbose else logging.WARNING
+    logging.basicConfig(
+        format="%(levelname)s %(name)s: %(message)s",
+        level=level,
+        stream=sys.stderr,
+    )
 
 
 @click.group()
-@click.version_option(version=__version__, prog_name="usc-cli")
-def cli() -> None:
+@click.version_option(version=__version__, prog_name="usc")
+@click.option("-v", "--verbose", is_flag=True, default=False, help="Enable debug logging.")
+@click.pass_context
+def cli(ctx: click.Context, verbose: bool) -> None:
     """USC university portal CLI — Brightspace D2L interaction."""
+    ctx.ensure_object(dict)
+    ctx.obj["verbose"] = verbose
+    _setup_logging(verbose)
 
 
 @cli.command()
-@click.option("--username", "-u", envvar="USC_USERNAME", help="USC NetID username")
-@click.option("--password", "-p", envvar="USC_PASSWORD", help="USC password")
+@click.option("--username", "-u", envvar="USC_USERNAME", required=True, help="USC NetID")
+@click.option(
+    "--password",
+    "-p",
+    envvar="USC_PASSWORD",
+    required=True,
+    prompt=True,
+    hide_input=True,
+    help="USC password (or set USC_PASSWORD env var)",
+)
 @click.option(
     "--bypass-code",
     "-b",
     envvar="USC_DUO_BYPASS",
-    prompt="Duo bypass code",
-    help="Duo MFA bypass code",
+    required=True,
+    prompt=True,
+    hide_input=True,
+    help="Duo bypass code (or set USC_DUO_BYPASS env var)",
 )
-@click.option("--save", is_flag=True, default=False, help="Save credentials to keychain")
-def login(
-    username: str | None,
-    password: str | None,
-    bypass_code: str,
-    save: bool,
-) -> None:
-    """Authenticate with USC Brightspace via SAML SSO + Duo bypass code."""
-    from usc_cli.client import USCClient
-
-    # Resolve username
-    if not username:
-        username = keyring.get_password(KEYRING_SERVICE, KEYRING_USERNAME_KEY)
-    if not username:
-        username = click.prompt("USC NetID")
-
-    # Resolve password
-    if not password:
-        password = keyring.get_password(KEYRING_SERVICE, KEYRING_PASSWORD_KEY)
-    if not password:
-        password = click.prompt("USC password", hide_input=True)
-
-    if save:
-        keyring.set_password(KEYRING_SERVICE, KEYRING_USERNAME_KEY, username)
-        keyring.set_password(KEYRING_SERVICE, KEYRING_PASSWORD_KEY, password)
-        console.print("[green]Credentials saved to keychain.[/green]")
-
-    with console.status("[bold]Authenticating with USC Brightspace..."):
-        try:
-            client = USCClient()
+@click.pass_context
+def login(ctx: click.Context, username: str, password: str, bypass_code: str) -> None:
+    """Authenticate with USC Brightspace via SSO + Duo bypass code."""
+    try:
+        with USCClient() as client:
+            click.echo(f"Logging in as {username}...")
             client.login(username, password, bypass_code)
-        except AuthError as e:
-            console.print(f"[red]Authentication failed:[/red] {e}")
-            sys.exit(1)
-
-    session = client.session
-    console.print("[green bold]Login successful![/green bold]")
-    console.print(f"  d2lSessionVal:       {session.get('d2lSessionVal', '')[:20]}...")
-    console.print(f"  d2lSecureSessionVal: {session.get('d2lSecureSessionVal', '')[:20]}...")
-
-    client.close()
+            click.echo("Login successful.")
+            # Verify with whoami
+            user = client.whoami()
+            click.echo(
+                f"Authenticated: {user.get('FirstName', '')} {user.get('LastName', '')} "
+                f"(id={user.get('Identifier', '?')})"
+            )
+    except AuthError as e:
+        click.echo(f"Auth failed: {e}", err=True)
+        sys.exit(1)
 
 
 @cli.command()
-@click.option("--username", "-u", envvar="USC_USERNAME", help="USC NetID username")
-@click.option("--password", "-p", envvar="USC_PASSWORD", help="USC password")
-@click.option("--bypass-code", "-b", envvar="USC_DUO_BYPASS", prompt="Duo bypass code")
-def courses(
-    username: str | None,
-    password: str | None,
-    bypass_code: str,
-) -> None:
+@click.option("--username", "-u", envvar="USC_USERNAME", required=True, help="USC NetID")
+@click.option(
+    "--password",
+    "-p",
+    envvar="USC_PASSWORD",
+    required=True,
+    prompt=True,
+    hide_input=True,
+)
+@click.option(
+    "--bypass-code",
+    "-b",
+    envvar="USC_DUO_BYPASS",
+    required=True,
+    prompt=True,
+    hide_input=True,
+)
+@click.pass_context
+def courses(ctx: click.Context, username: str, password: str, bypass_code: str) -> None:
     """List enrolled courses."""
-    from usc_cli.client import USCClient
-
-    username = username or keyring.get_password(KEYRING_SERVICE, KEYRING_USERNAME_KEY)
-    password = password or keyring.get_password(KEYRING_SERVICE, KEYRING_PASSWORD_KEY)
-    if not username:
-        username = click.prompt("USC NetID")
-    if not password:
-        password = click.prompt("USC password", hide_input=True)
-
-    with console.status("[bold]Authenticating..."):
-        try:
-            client = USCClient()
+    try:
+        with USCClient() as client:
             client.login(username, password, bypass_code)
-        except AuthError as e:
-            console.print(f"[red]Auth failed:[/red] {e}")
-            sys.exit(1)
-
-    with console.status("[bold]Fetching enrollments..."):
-        try:
             items = client.enrollments()
-        except Exception as e:
-            console.print(f"[red]Failed to fetch courses:[/red] {e}")
-            sys.exit(1)
-
-    table = Table(title="Enrolled Courses")
-    table.add_column("Org Unit ID", style="dim")
-    table.add_column("Course Name")
-    table.add_column("Code")
-
-    for item in items:
-        ou = item.get("OrgUnit", {})
-        table.add_row(
-            str(ou.get("Id", "")),
-            ou.get("Name", ""),
-            ou.get("Code", ""),
-        )
-
-    console.print(table)
-    client.close()
+            if not items:
+                click.echo("No enrollments found.")
+                return
+            for item in items:
+                org = item.get("OrgUnit", {})
+                click.echo(
+                    f"{org.get('Code', '?'):12s}  {org.get('Name', '?')}  "
+                    f"(id={org.get('Id', '?')})"
+                )
+    except AuthError as e:
+        click.echo(f"Auth failed: {e}", err=True)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

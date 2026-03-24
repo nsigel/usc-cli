@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
+
 import httpx
 
-from usc_cli.auth import AuthError
-from usc_cli.auth import login as _do_login
+from usc_cli.auth import AuthError, USCAuth  # noqa: F401 — re-export
+
+logger = logging.getLogger(__name__)
 
 
 class USCClient:
@@ -19,28 +22,24 @@ class USCClient:
             base_url=self.BASE_URL,
             follow_redirects=True,
             timeout=30.0,
+            headers={"User-Agent": (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            )},
         )
         self._authenticated = False
-        self._session: dict[str, str] = {}
 
     def login(self, username: str, password: str, bypass_code: str) -> None:
-        """Authenticate via USC SAML SSO + Duo bypass code flow."""
-        session = _do_login(username, password, bypass_code)
-        self._session = session
-
-        # Inject cookies into the persistent httpx client
-        for name, value in session.get("_all_cookies", {}).items():
-            self._http.cookies.set(name, value, domain="brightspace.usc.edu")
-
-        # Set XSRF header if available
-        if session.get("xsrf_token"):
-            self._http.headers["X-Csrf-Token"] = session["xsrf_token"]
-
+        """Authenticate via USC Shibboleth SSO + Duo bypass code."""
+        auth = USCAuth(self._http)
+        auth.login(username, password, bypass_code)
         self._authenticated = True
+        logger.info("Authenticated as %s", username)
 
-    @property
-    def session(self) -> dict[str, str]:
-        return self._session
+    def _require_auth(self) -> None:
+        if not self._authenticated:
+            raise AuthError("Not authenticated — call login() first")
 
     def whoami(self) -> dict:
         """Return the current authenticated user profile."""
@@ -55,10 +54,6 @@ class USCClient:
         resp = self._http.get(f"{self.D2L_API}/lp/1.0/enrollments/myenrollments/")
         resp.raise_for_status()
         return resp.json().get("Items", [])
-
-    def _require_auth(self) -> None:
-        if not self._authenticated:
-            raise AuthError("Not authenticated. Call login() first.")
 
     def close(self) -> None:
         self._http.close()
