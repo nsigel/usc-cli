@@ -927,10 +927,14 @@ class USCAuth:
             raise AuthError(f"Session verification failed: /d2l/home returned {home_resp.status_code}")
 
         xsrf_match = re.search(
-            r"localStorage\.setItem\('XSRF\.Token'\s*,\s*'([^']+)'\)",
+            r"""localStorage\.setItem\(["']XSRF\.Token["']\s*,\s*["']([^"']+)["']\)""",
             home_resp.text,
         )
         if not xsrf_match:
+            # Fallback: look for XSRF.Token anywhere in the page
+            xsrf_match = re.search(r"""["']XSRF\.Token["'][^"']*["']([A-Za-z0-9+/=_-]{20,})["']""", home_resp.text)
+        if not xsrf_match:
+            logger.debug("/d2l/home snippet: %s", home_resp.text[8800:9200])
             raise AuthError("Could not extract XSRF.Token from /d2l/home")
         xsrf_token = xsrf_match.group(1)
         logger.debug("Extracted XSRF.Token: %s", xsrf_token[:12])
