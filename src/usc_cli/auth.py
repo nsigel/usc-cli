@@ -882,22 +882,31 @@ class USCAuth:
             follow_redirects=False,
         )
 
-        # Success = 3xx with d2lSessionVal cookie set
+        # Success = 3xx with d2lSessionVal cookie set on the redirect itself
         if resp.status_code not in (301, 302, 303):
             raise AuthError(
                 f"Expected redirect from SAMLResponse POST, got {resp.status_code}"
             )
 
-        # Verify the session cookies landed
-        session_cookie = self._http.cookies.get("d2lSessionVal")
-        if not session_cookie:
-            # Also check the response Set-Cookie headers directly
-            set_cookies = resp.headers.get_list("set-cookie") if hasattr(resp.headers, "get_list") else [
-                v for k, v in resp.headers.items() if k.lower() == "set-cookie"
-            ]
-            has_session = any("d2lSessionVal" in c for c in set_cookies)
-            if not has_session:
-                raise AuthError("SAMLResponse POST did not set d2lSessionVal — login may have failed")
+        set_cookies = [v for k, v in resp.headers.items() if k.lower() == "set-cookie"]
+        has_session = any("d2lSessionVal" in c for c in set_cookies)
+        if not has_session:
+            raise AuthError("SAMLResponse POST did not set d2lSessionVal — login may have failed")
+
+        # Follow the redirect so the server can finalize the session state.
+        # Brightspace redirects to /d2l/error/500 — that's expected, ignore it.
+        location = resp.headers.get("location", "")
+        if location:
+            if location.startswith("/"):
+                location = f"{BRIGHTSPACE_BASE}{location}"
+            try:
+                self._http.get(
+                    location,
+                    headers={**BASE_HEADERS, "Referer": f"{BRIGHTSPACE_BASE}/"},
+                    follow_redirects=True,
+                )
+            except Exception:
+                pass  # /d2l/error/500 raises — ignore it
 
         logger.debug("Session established (d2lSessionVal present)")
 
