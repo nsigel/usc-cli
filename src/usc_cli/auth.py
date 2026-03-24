@@ -1,7 +1,8 @@
-"""USC SSO + Duo MFA authentication flow.
+"""USC SSO + Duo MFA authentication flow targeting Brightspace.
 
 Flow:
-  1. GET the USC target service → follow SAML chain to login.usc.edu
+  1. GET brightspace.usc.edu/d2l/home → follows SAML redirect chain to login.usc.edu
+     Captures: saml2Request JWT, secondVisitUrl, acsURL, spEntityID (from SAMLRequest XML)
   2. POST /login/authuserpassword (j_username, j_password) → redirect to Duo OAuth
   3. Duo frameless v4:
        a. Extract sid + tx from OAuth redirect
@@ -12,9 +13,9 @@ Flow:
        f. POST /frame/v4/prompt with bypass passcode → get txid
        g. POST /frame/v4/status → confirm allow
        h. POST /frame/v4/oidc/exit → get duo_code + state
-  4. GET login.usc.edu/login/authduo?state=...&duo_code=... → SAML chain
-  5. GET saml2/continue → parse SAMLResponse from HTML form
-  6. POST SAMLResponse to target service → session established; cookies saved on-device
+  4. GET login.usc.edu/login/authduo?state=...&duo_code=... → saml2/continue
+  5. POST saml2Request to SSORedirect (with acsURL + spEntityID) → SAMLResponse form
+  6. POST SAMLResponse to Brightspace → session established; cookies saved on-device
 """
 
 from __future__ import annotations
@@ -29,7 +30,8 @@ import httpx
 logger = logging.getLogger(__name__)
 
 # Static USC/Duo constants
-USC_BASE = "https://my.usc.edu"  # Fixed SSO entry point — not configurable
+BRIGHTSPACE_BASE = "https://brightspace.usc.edu"
+BRIGHTSPACE_HOME = f"{BRIGHTSPACE_BASE}/d2l/home"
 LOGIN_BASE = "https://login.usc.edu"
 
 # Duo frameless client sends this akey (USC's Duo application key)
@@ -55,10 +57,6 @@ CLIENT_HINTS = (
     "YWxzZSwicGxhdGZvcm0iOiJtYWNPUyIsInBsYXRmb3JtVmVyc2lvbiI6IjE0LjguNCIsInVhRnVsbFZlcn"
     "Npb24iOiIxNDYuMC43NjgwLjE1MyJ9"
 )
-
-# Static Brightspace SP values — used to complete the SSORedirect POST URL
-BRIGHTSPACE_ACS_URL = "https://brightspace.usc.edu/d2l/lp/auth/login/samlLogin.d2l"
-BRIGHTSPACE_SP_ENTITY_ID = "https://2c451d9d-9cf4-4e8b-958d-6ee62f71be93.tenants.brightspace.com/samlLogin"
 
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -115,63 +113,87 @@ class USCAuth:
     # ------------------------------------------------------------------
 
     def _get_saml_login_url(self) -> str:
-        """Navigate to the USC SSO entry point and follow SAML redirects to the USC login page.
+        """Navigate to Brightspace and follow SAML redirects to the USC login form.
 
-        Flow: my.usc.edu → shibboleth.usc.edu (LS detection) → POST LS data
-              → login.usc.edu SSORedirect (has loginUrl/saml2Request/secondVisitUrl)
-              → login.usc.edu/login/login (final login form)
+        Flow (matching HAR):
+          GET brightspace.usc.edu/d2l/home
+          → 302 /d2l/login?sessionExpired=0&target=/d2l/home
+          → 302 /d2l/lp/auth/saml/initiate-login?entityId=...&target=...
+          → 302 login.usc.edu/sso/SSORedirect/...?SAMLRequest=...&RelayState=...
+          → 200 login.usc.edu/sso/SSORedirect (SSORedirect page with hidden fields)
+          JS on that page navigates to loginUrl which is login.usc.edu/login/login
 
-        Also captures `saml2Request` and `secondVisitUrl` from the SSORedirect
-        page — stored as instance attributes for use after Duo completes.
+        Captures (stored as instance attrs for post-Duo use):
+          self._saml2_request   — JWT stored in localStorage by saml2-write.js
+          self._second_visit_url — URL to POST saml2Request to after Duo
+          self._acs_url          — AssertionConsumerServiceURL from SAMLRequest XML
+          self._sp_entity_id     — Issuer from SAMLRequest XML
+          self._relay_state      — RelayState from the SAML redirect (e.g. /d2l/home)
         """
+        import base64
         import html as html_module
+        import zlib
+        from urllib.parse import parse_qs, urlparse
 
+        # Walk the redirect chain manually so we can capture the SAMLRequest
+        # before it disappears into the SSORedirect page's JavaScript.
         resp = self._http.get(
-            USC_BASE,
-            headers=BASE_HEADERS,
-            follow_redirects=True,
+            BRIGHTSPACE_HOME,
+            headers={**BASE_HEADERS, "Referer": ""},
+            follow_redirects=False,
         )
+
+        saml_request_b64: str | None = None
+        relay_state: str | None = None
+
+        # Follow redirects manually, looking for the SAMLRequest
+        for _ in range(10):
+            loc = resp.headers.get("location", "")
+            if not loc:
+                break
+            if loc.startswith("/"):
+                parsed_cur = urlparse(str(resp.url))
+                loc = f"{parsed_cur.scheme}://{parsed_cur.netloc}{loc}"
+
+            # Capture SAMLRequest + RelayState when we see them
+            parsed_loc = urlparse(loc)
+            qs = parse_qs(parsed_loc.query, keep_blank_values=True)
+            if "SAMLRequest" in qs and saml_request_b64 is None:
+                saml_request_b64 = qs["SAMLRequest"][0]
+                relay_state = qs.get("RelayState", [None])[0]
+                logger.debug("Captured SAMLRequest (len=%d)", len(saml_request_b64))
+
+            resp = self._http.get(loc, headers=BASE_HEADERS, follow_redirects=False)
+            if resp.status_code == 200:
+                break
+
         resp.raise_for_status()
-
         final_url = str(resp.url)
+        logger.debug("Landed at: %s", final_url[:100])
 
-        # Shibboleth local-storage detection page (shibboleth.usc.edu/idp/...)
-        # Must POST the LS data to proceed — browser JS does this automatically.
-        if "shibboleth.usc.edu" in final_url and "execution=" in final_url:
-            shib_post_url = final_url
-            logger.debug("Shibboleth LS detection page, POSTing to %s", shib_post_url[:80])
-            resp = self._http.post(
-                shib_post_url,
-                data={
-                    "shib_idp_ls_exception.shib_idp_session_ss": "",
-                    "shib_idp_ls_success.shib_idp_session_ss": "false",
-                    "shib_idp_ls_value.shib_idp_session_ss": "",
-                    "shib_idp_ls_exception.shib_idp_persistent_ss": "",
-                    "shib_idp_ls_success.shib_idp_persistent_ss": "false",
-                    "shib_idp_ls_value.shib_idp_persistent_ss": "",
-                    "shib_idp_ls_supported": "false",
-                    "_eventId_proceed": "",
-                },
-                headers={
-                    **BASE_HEADERS,
-                    "Origin": "https://shibboleth.usc.edu",
-                    "Referer": shib_post_url,
-                    "Content-Type": "application/x-www-form-urlencoded",
-                },
-                follow_redirects=True,
-            )
-            resp.raise_for_status()
-            final_url = str(resp.url)
-            logger.debug("After Shibboleth LS POST: %s", final_url[:100])
+        # Parse acsURL and spEntityID from the SAMLRequest XML
+        if saml_request_b64:
+            try:
+                xml = zlib.decompress(
+                    base64.b64decode(saml_request_b64 + "=="), -zlib.MAX_WBITS
+                ).decode()
+                m_acs = re.search(r'AssertionConsumerServiceURL="([^"]+)"', xml)
+                m_issuer = re.search(r'<[^:>]+:?Issuer[^>]*>([^<]+)</[^:>]+:?Issuer>', xml)
+                self._acs_url = m_acs.group(1) if m_acs else None
+                self._sp_entity_id = m_issuer.group(1).strip() if m_issuer else None
+                logger.debug("acsURL=%s", self._acs_url)
+                logger.debug("spEntityID=%s", self._sp_entity_id)
+            except Exception as exc:
+                logger.warning("Could not parse SAMLRequest XML: %s", exc)
+                self._acs_url = None
+                self._sp_entity_id = None
+        else:
+            self._acs_url = None
+            self._sp_entity_id = None
 
-        # If we landed directly on the login form, we're done
-        if "/login/login" in final_url:
-            self._saml2_request = None
-            self._second_visit_url = None
-            return final_url
+        self._relay_state = relay_state
 
-        # SSORedirect page: JS reads loginUrl from a hidden field and navigates there.
-        # Also embeds saml2Request + secondVisitUrl that we need later.
+        # SSORedirect page: extract loginUrl, saml2Request, secondVisitUrl from hidden fields
         if "SSORedirect" in final_url or "sso/" in final_url:
             html_text = resp.text
 
@@ -189,16 +211,19 @@ class USCAuth:
             if not login_url:
                 raise AuthError("Could not extract loginUrl from SSORedirect page")
 
-            # Store for post-Duo SAML completion
             self._saml2_request = _extract("saml2Request")
             self._second_visit_url = _extract("secondVisitUrl")
-            logger.debug("Extracted loginUrl: %s", login_url[:100])
             logger.debug("saml2Request present: %s", bool(self._saml2_request))
             logger.debug("secondVisitUrl: %s", (self._second_visit_url or "")[:80])
 
             resp2 = self._http.get(login_url, headers=BASE_HEADERS, follow_redirects=True)
             resp2.raise_for_status()
             return str(resp2.url)
+
+        if "/login/login" in final_url:
+            self._saml2_request = None
+            self._second_visit_url = None
+            return final_url
 
         raise AuthError(f"Unexpected landing URL after SAML redirect: {final_url}")
 
@@ -737,13 +762,14 @@ class USCAuth:
         # The browser JS (saml2-read.js) decodes the saml2Request JWT and appends
         # index, acsURL, spEntityID, and binding to the secondVisitUrl before POSTing.
         # Without these the Shibboleth IdP returns 500.
+        # We captured acsURL and spEntityID dynamically from the SAMLRequest XML in step 1.
         import urllib.parse as _up
         ssored_url = f"{LOGIN_BASE}{self._second_visit_url}"
         parsed_ssored = _up.urlparse(ssored_url)
         qs = dict(_up.parse_qsl(parsed_ssored.query))
         qs["index"] = "null"
-        qs["acsURL"] = BRIGHTSPACE_ACS_URL
-        qs["spEntityID"] = BRIGHTSPACE_SP_ENTITY_ID
+        qs["acsURL"] = self._acs_url or ""
+        qs["spEntityID"] = self._sp_entity_id or ""
         qs["binding"] = ""
         ssored_url = _up.urlunparse(parsed_ssored._replace(query=_up.urlencode(qs)))
         saml2_continue_url = str(resp.url)
