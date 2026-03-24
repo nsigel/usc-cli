@@ -911,7 +911,7 @@ class USCAuth:
         Returns the parsed whoami JSON dict. Raises AuthError if the session
         is not valid (redirect to login or non-200 response).
         """
-        whoami_url = f"{BRIGHTSPACE_BASE}/d2l/api/lp/1.x/users/whoami"
+        whoami_url = f"{BRIGHTSPACE_BASE}/d2l/api/lp/1.9/users/whoami"
         resp = self._http.get(
             whoami_url,
             headers={**BASE_HEADERS, "Accept": "application/json"},
