@@ -906,31 +906,30 @@ class USCAuth:
     # ------------------------------------------------------------------
 
     def _verify_session(self) -> dict:
-        """GET /d2l/api/lp/1.x/users/whoami to confirm the session is authenticated.
+        """GET /d2l/api/hm to confirm the session is authenticated.
 
-        Returns the parsed whoami JSON dict. Raises AuthError if the session
-        is not valid (redirect to login or non-200 response).
+        This hypermedia root endpoint works with just session cookies (no XSRF).
+        Returns the parsed JSON. Raises AuthError if the session is not valid.
         """
-        whoami_url = f"{BRIGHTSPACE_BASE}/d2l/api/lp/1.9/users/whoami"
+        hm_url = f"{BRIGHTSPACE_BASE}/d2l/api/hm"
         resp = self._http.get(
-            whoami_url,
-            headers={**BASE_HEADERS, "Accept": "application/json"},
+            hm_url,
+            headers={
+                **BASE_HEADERS,
+                "Accept": "*/*",
+                "Referer": f"{BRIGHTSPACE_BASE}/d2l/home",
+            },
             follow_redirects=False,
         )
 
         if resp.status_code in (301, 302, 303):
-            raise AuthError("Session not authenticated — /whoami redirected to login")
+            raise AuthError("Session not authenticated — /d2l/api/hm redirected to login")
 
         if resp.status_code != 200:
             raise AuthError(
-                f"Session verification failed: /whoami returned {resp.status_code}"
+                f"Session verification failed: /d2l/api/hm returned {resp.status_code}"
             )
 
         data = resp.json()
-        logger.debug(
-            "Session verified: %s %s (%s)",
-            data.get("FirstName"),
-            data.get("LastName"),
-            data.get("UniqueName"),
-        )
+        logger.debug("Session verified via /d2l/api/hm")
         return data
