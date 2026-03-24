@@ -906,30 +906,57 @@ class USCAuth:
     # ------------------------------------------------------------------
 
     def _verify_session(self) -> dict:
-        """GET /d2l/api/hm to confirm the session is authenticated.
+        """Verify the session by calling /d2l/api/lp/1.9/users/whoami.
 
-        This hypermedia root endpoint works with just session cookies (no XSRF).
-        Returns the parsed JSON. Raises AuthError if the session is not valid.
+        Flow:
+          1. GET /d2l/home → scrape XSRF.Token from inline localStorage.setItem() call
+          2. GET /d2l/api/lp/1.9/users/whoami with X-Csrf-Token header
+
+        Returns the whoami JSON dict (Identifier, UniqueName, FirstName, LastName).
+        Raises AuthError if the session is not valid.
         """
-        hm_url = f"{BRIGHTSPACE_BASE}/d2l/api/hm"
-        resp = self._http.get(
-            hm_url,
+        # Step 1: load /d2l/home to get the XSRF token
+        home_resp = self._http.get(
+            f"{BRIGHTSPACE_BASE}/d2l/home",
+            headers={**BASE_HEADERS, "Referer": f"{BRIGHTSPACE_BASE}/"},
+            follow_redirects=False,
+        )
+        if home_resp.status_code in (301, 302, 303):
+            raise AuthError("Session not authenticated — /d2l/home redirected to login")
+        if home_resp.status_code != 200:
+            raise AuthError(f"Session verification failed: /d2l/home returned {home_resp.status_code}")
+
+        xsrf_match = re.search(
+            r"localStorage\.setItem\('XSRF\.Token'\s*,\s*'([^']+)'\)",
+            home_resp.text,
+        )
+        if not xsrf_match:
+            raise AuthError("Could not extract XSRF.Token from /d2l/home")
+        xsrf_token = xsrf_match.group(1)
+        logger.debug("Extracted XSRF.Token: %s", xsrf_token[:12])
+
+        # Step 2: call /whoami
+        whoami_resp = self._http.get(
+            f"{BRIGHTSPACE_BASE}/d2l/api/lp/1.9/users/whoami",
             headers={
                 **BASE_HEADERS,
-                "Accept": "*/*",
+                "Accept": "application/json",
+                "X-Csrf-Token": xsrf_token,
                 "Referer": f"{BRIGHTSPACE_BASE}/d2l/home",
             },
             follow_redirects=False,
         )
+        if whoami_resp.status_code in (301, 302, 303):
+            raise AuthError("Session not authenticated — /whoami redirected to login")
+        if whoami_resp.status_code != 200:
+            raise AuthError(f"Session verification failed: /whoami returned {whoami_resp.status_code}")
 
-        if resp.status_code in (301, 302, 303):
-            raise AuthError("Session not authenticated — /d2l/api/hm redirected to login")
-
-        if resp.status_code != 200:
-            raise AuthError(
-                f"Session verification failed: /d2l/api/hm returned {resp.status_code}"
-            )
-
-        data = resp.json()
-        logger.debug("Session verified via /d2l/api/hm")
+        data = whoami_resp.json()
+        logger.debug(
+            "Session verified: %s %s (NetID=%s, id=%s)",
+            data.get("FirstName"),
+            data.get("LastName"),
+            data.get("UniqueName"),
+            data.get("Identifier"),
+        )
         return data
