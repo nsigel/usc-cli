@@ -77,46 +77,23 @@ class USCAuth:
         logger.debug("Starting USC SSO login for %s", username)
 
         # Step 1: navigate to USC SSO entry → follow SAML redirect chain
-        try:
-            login_url = self._get_saml_login_url()
-        except Exception as e:
-            raise AuthError(f"[step 1/5] SSO redirect failed: {e}") from e
+        login_url = self._get_saml_login_url()
         logger.debug("SAML login URL: %s", login_url)
 
         # Step 2: POST credentials
-        try:
-            duo_oauth_url = self._post_credentials(login_url, username, password)
-        except AuthError:
-            raise
-        except Exception as e:
-            raise AuthError(f"[step 2/5] Credentials POST failed: {e}") from e
+        duo_oauth_url = self._post_credentials(login_url, username, password)
         logger.debug("Duo OAuth URL: %s", duo_oauth_url[:80])
 
         # Step 3: Duo MFA
-        try:
-            duo_code, state = self._do_duo_bypass(duo_oauth_url, bypass_code)
-        except AuthError:
-            raise
-        except Exception as e:
-            raise AuthError(f"[step 3/5] Duo MFA failed: {e}") from e
+        duo_code, state = self._do_duo_bypass(duo_oauth_url, bypass_code)
         logger.debug("duo_code=%s state=%s", duo_code[:8], state[:12])
 
         # Step 4: Exchange duo_code → SAML assertion
-        try:
-            saml_response, saml_post_url, relay_state = self._exchange_duo_code(duo_code, state)
-        except AuthError:
-            raise
-        except Exception as e:
-            raise AuthError(f"[step 4/5] Duo code exchange failed: {e}") from e
+        saml_response, saml_post_url, relay_state = self._exchange_duo_code(duo_code, state)
         logger.debug("SAMLResponse obtained, posting to %s", saml_post_url)
 
         # Step 5: POST SAMLResponse → session established
-        try:
-            self._post_saml(saml_post_url, saml_response, relay_state)
-        except AuthError:
-            raise
-        except Exception as e:
-            raise AuthError(f"[step 5/5] SAML POST failed: {e}") from e
+        self._post_saml(saml_post_url, saml_response, relay_state)
         logger.debug("Login complete")
 
     # ------------------------------------------------------------------
@@ -830,13 +807,7 @@ class USCAuth:
             },
             follow_redirects=True,
         )
-        try:
-            resp.raise_for_status()
-        except Exception as e:
-            body = resp.text.lower()
-            if "stale" in body or "sign on again" in body:
-                raise AuthError("Login failed: session expired during auth flow — try again immediately") from e
-            raise AuthError(f"SAML POST failed ({resp.status_code})") from e
+        resp.raise_for_status()
 
         # Verify we landed somewhere sensible on a USC service
         if "usc.edu" not in str(resp.url):
