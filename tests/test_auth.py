@@ -509,13 +509,13 @@ class TestExtractSamlResponse:
         with pytest.raises(AuthError, match="Could not find SAMLResponse"):
             auth._extract_saml_response(resp)
 
-    def test_defaults_post_url_when_no_form_action(self) -> None:
+    def test_missing_post_url_raises(self) -> None:
         html = f'<input name="SAMLResponse" value="{SAML_RESPONSE}" />'
         client = _make_client()
         auth = USCAuth(client)
         resp = httpx.Response(200, text=html, request=httpx.Request("GET", f"{LOGIN}/page"))
-        saml, url = auth._extract_saml_response(resp)
-        assert "samlLogin.d2l" in url
+        with pytest.raises(AuthError, match="Could not find SAML POST URL"):
+            auth._extract_saml_response(resp)
 
 
 class TestPostSaml:

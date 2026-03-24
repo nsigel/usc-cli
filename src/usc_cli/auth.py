@@ -758,8 +758,11 @@ class USCAuth:
                 f"SAML POST landed on unexpected URL: {resp.url}"
             )
 
-        # Check we're not still on a login/error page
-        if "/login" in str(resp.url) and "login.usc.edu" in str(resp.url):
+        # Check we're not still on a login/error page (any USC login endpoint)
+        final = str(resp.url)
+        if "login.usc.edu" in final or (
+            "usc.edu" in final and re.search(r"/login[/?]|/lp/auth", final)
+        ):
             raise AuthError("SAML login failed — still on auth page after SAMLResponse POST")
 
         logger.debug("Session established at %s", resp.url)
