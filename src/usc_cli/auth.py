@@ -1,7 +1,7 @@
-"""USC Brightspace SSO + Duo MFA authentication flow.
+"""USC SSO + Duo MFA authentication flow.
 
 Flow:
-  1. GET brightspace.usc.edu/d2l/home → follow SAML chain to login.usc.edu
+  1. GET the USC target service → follow SAML chain to login.usc.edu
   2. POST /login/authuserpassword (j_username, j_password) → redirect to Duo OAuth
   3. Duo frameless v4:
        a. Extract sid + tx from OAuth redirect
@@ -14,7 +14,7 @@ Flow:
        h. POST /frame/v4/oidc/exit → get duo_code + state
   4. GET login.usc.edu/login/authduo?state=...&duo_code=... → SAML chain
   5. GET saml2/continue → parse SAMLResponse from HTML form
-  6. POST brightspace samlLogin.d2l with SAMLResponse → session established
+  6. POST SAMLResponse to target service → session established; cookies saved on-device
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ import httpx
 logger = logging.getLogger(__name__)
 
 # Static USC/Duo constants
-BRIGHTSPACE_BASE = "https://brightspace.usc.edu"
+USC_SSO_BASE = "https://brightspace.usc.edu"  # SSO entry point (follows SAML chain to login.usc.edu)
 LOGIN_BASE = "https://login.usc.edu"
 
 # Duo frameless client sends this akey (USC's Duo application key)
@@ -63,7 +63,7 @@ class AuthError(Exception):
 
 
 class USCAuth:
-    """Handles the full SSO + Duo bypass-code login flow for Brightspace."""
+    """Handles the full USC SSO + Duo bypass-code login flow."""
 
     def __init__(self, http: httpx.Client) -> None:
         self._http = http
@@ -76,7 +76,7 @@ class USCAuth:
         """Run the full auth flow. Mutates the http client's cookie jar."""
         logger.debug("Starting USC SSO login for %s", username)
 
-        # Step 1: navigate to Brightspace → follow SAML redirect chain → arrive
+        # Step 1: navigate to USC SSO entry → follow SAML redirect chain → arrive
         # at login.usc.edu/login/login with service + goto params
         login_url = self._get_saml_login_url()
         logger.debug("SAML login URL: %s", login_url)
@@ -93,7 +93,7 @@ class USCAuth:
         saml_response, saml_post_url = self._exchange_duo_code(duo_code, state)
         logger.debug("SAMLResponse obtained, posting to %s", saml_post_url)
 
-        # Step 5: POST SAMLResponse → Brightspace session cookies
+        # Step 5: POST SAMLResponse → USC session cookies established
         self._post_saml(saml_post_url, saml_response)
         logger.debug("Login complete")
 
@@ -102,7 +102,7 @@ class USCAuth:
     # ------------------------------------------------------------------
 
     def _get_saml_login_url(self) -> str:
-        """Navigate to Brightspace and follow SAML redirects to the USC login page.
+        """Navigate to the USC SSO entry point and follow SAML redirects to the USC login page.
 
         Also captures `saml2Request` and `secondVisitUrl` from the SSORedirect
         page — stored as instance attributes for use after Duo completes.
@@ -110,7 +110,7 @@ class USCAuth:
         import html as html_module
 
         resp = self._http.get(
-            f"{BRIGHTSPACE_BASE}/d2l/login",
+            f"{USC_SSO_BASE}/d2l/login",
             params={"sessionExpired": "0", "target": "/d2l/home"},
             headers=BASE_HEADERS,
             follow_redirects=True,
@@ -724,23 +724,23 @@ class USCAuth:
                 )
 
         if not post_url:
-            # Default Brightspace SAML endpoint
-            post_url = f"{BRIGHTSPACE_BASE}/d2l/lp/auth/login/samlLogin.d2l"
+            # Default USC SAML endpoint
+            post_url = f"{USC_SSO_BASE}/d2l/lp/auth/login/samlLogin.d2l"
 
         # Make absolute
         if post_url.startswith("/"):
-            # Could be on login.usc.edu or brightspace.usc.edu
+            # Could be on login.usc.edu or another USC service domain
             base = f"{urlparse(str(resp.url)).scheme}://{urlparse(str(resp.url)).netloc}"
             post_url = f"{base}{post_url}"
 
         return saml_response, post_url
 
     # ------------------------------------------------------------------
-    # Step 5: POST SAMLResponse to Brightspace
+    # Step 5: POST SAMLResponse to complete the login
     # ------------------------------------------------------------------
 
     def _post_saml(self, post_url: str, saml_response: str) -> None:
-        """POST SAMLResponse to Brightspace to establish the session."""
+        """POST SAMLResponse to the target USC service to establish the session."""
         resp = self._http.post(
             post_url,
             data={"SAMLResponse": saml_response},
@@ -754,14 +754,14 @@ class USCAuth:
         )
         resp.raise_for_status()
 
-        # Verify we landed somewhere sensible on Brightspace
-        if "brightspace.usc.edu" not in str(resp.url):
+        # Verify we landed somewhere sensible on a USC service
+        if "usc.edu" not in str(resp.url):
             raise AuthError(
                 f"SAML POST landed on unexpected URL: {resp.url}"
             )
 
-        # Check we're not on a login/error page
-        if "/d2l/login" in str(resp.url) or "/d2l/lp/auth" in str(resp.url):
+        # Check we're not still on a login/error page
+        if "/login" in str(resp.url) and "login.usc.edu" in str(resp.url):
             raise AuthError("SAML login failed — still on auth page after SAMLResponse POST")
 
         logger.debug("Session established at %s", resp.url)

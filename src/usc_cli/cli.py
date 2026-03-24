@@ -8,7 +8,7 @@ import sys
 import click
 
 from usc_cli import __version__
-from usc_cli.client import AuthError, USCClient
+from usc_cli.client import SESSION_PATH, AuthError, USCClient, clear_session
 
 
 def _setup_logging(verbose: bool) -> None:
@@ -25,7 +25,7 @@ def _setup_logging(verbose: bool) -> None:
 @click.option("-v", "--verbose", is_flag=True, default=False, help="Enable debug logging.")
 @click.pass_context
 def cli(ctx: click.Context, verbose: bool) -> None:
-    """USC university portal CLI — Brightspace D2L interaction."""
+    """USC university services CLI."""
     ctx.ensure_object(dict)
     ctx.obj["verbose"] = verbose
     _setup_logging(verbose)
@@ -53,54 +53,37 @@ def cli(ctx: click.Context, verbose: bool) -> None:
 )
 @click.pass_context
 def login(ctx: click.Context, username: str, password: str, bypass_code: str) -> None:
-    """Authenticate with USC Brightspace via SSO + Duo bypass code."""
+    """Authenticate with USC via SSO + Duo. Saves session cookies on-device."""
     try:
         with USCClient() as client:
             click.echo(f"Logging in as {username}...")
             client.login(username, password, bypass_code)
-            click.echo(f"Login successful. Authenticated as {username}.")
+            click.echo(f"Logged in as {username}. Session saved to {SESSION_PATH}")
     except AuthError as e:
         click.echo(f"Auth failed: {e}", err=True)
         sys.exit(1)
 
 
 @cli.command()
-@click.option("--username", "-u", envvar="USC_USERNAME", required=True, help="USC NetID")
-@click.option(
-    "--password",
-    "-p",
-    envvar="USC_PASSWORD",
-    required=True,
-    prompt=True,
-    hide_input=True,
-)
-@click.option(
-    "--bypass-code",
-    "-b",
-    envvar="USC_DUO_BYPASS",
-    required=True,
-    prompt=True,
-    hide_input=True,
-)
-@click.pass_context
-def courses(ctx: click.Context, username: str, password: str, bypass_code: str) -> None:
-    """List enrolled courses."""
-    try:
-        with USCClient() as client:
-            client.login(username, password, bypass_code)
-            items = client.enrollments()
-            if not items:
-                click.echo("No enrollments found.")
-                return
-            for item in items:
-                org = item.get("OrgUnit", {})
-                click.echo(
-                    f"{org.get('Code', '?'):12s}  {org.get('Name', '?')}  "
-                    f"(id={org.get('Id', '?')})"
-                )
-    except AuthError as e:
-        click.echo(f"Auth failed: {e}", err=True)
+def status() -> None:
+    """Show current session status."""
+    if not SESSION_PATH.exists():
+        click.echo("No session found. Run `usc login` to authenticate.")
         sys.exit(1)
+
+    with USCClient() as client:
+        loaded = client.load_session()
+        if not loaded:
+            click.echo("Session file exists but could not be loaded. Try `usc login` again.")
+            sys.exit(1)
+        click.echo(f"Session active. Cookies loaded from {SESSION_PATH}")
+
+
+@cli.command()
+def logout() -> None:
+    """Clear the saved session from disk."""
+    clear_session()
+    click.echo("Session cleared.")
 
 
 if __name__ == "__main__":
