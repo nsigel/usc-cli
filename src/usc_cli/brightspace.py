@@ -169,6 +169,78 @@ def get_content_toc(http: httpx.Client, course_id: int) -> dict[str, Any]:
     }
 
 
+def get_grades(http: httpx.Client, course_id: int) -> dict[str, Any]:
+    """Return grade items merged with the current user's grade values.
+
+    Structure:
+      {
+        "course_id": int,
+        "grades": [
+          {
+            "id": str,
+            "name": str,
+            "grade_type": str,
+            "max_points": float | null,
+            "weight": float | null,
+            "is_bonus": bool,
+            "exclude_from_final": bool,
+            "score": float | null,         # PointsNumerator
+            "score_max": float | null,     # PointsDenominator
+            "displayed_grade": str | null,
+            "feedback": str | null,        # instructor comment (plain text)
+            "last_modified": str | null,   # ISO timestamp
+          },
+          ...
+        ]
+      }
+    """
+    # Fetch grade item definitions
+    r_items = http.get(f"{BRIGHTSPACE_BASE}/d2l/api/le/{LE_VER}/{course_id}/grades/")
+    items = _require_ok(r_items, f"grades/items({course_id})")
+    assert isinstance(items, list)
+
+    # Fetch user's grade values
+    r_vals = http.get(
+        f"{BRIGHTSPACE_BASE}/d2l/api/le/{LE_VER}/{course_id}/grades/values/myGradeValues/"
+    )
+    values_raw = _require_ok(r_vals, f"grades/values({course_id})")
+    assert isinstance(values_raw, list)
+
+    # Index values by GradeObjectIdentifier (string id)
+    values_by_id: dict[str, dict[str, Any]] = {
+        str(v["GradeObjectIdentifier"]): v for v in values_raw
+    }
+
+    grades = []
+    for item in items:
+        item_id = str(item.get("Id", ""))
+        val = values_by_id.get(item_id, {})
+
+        # Extract plain-text feedback from HTML comments
+        feedback: str | None = None
+        raw_comment = val.get("Comments", {})
+        if raw_comment:
+            text = raw_comment.get("Text", "").strip()
+            feedback = text if text else None
+
+        grades.append({
+            "id": item_id,
+            "name": item.get("Name", ""),
+            "grade_type": item.get("GradeType"),
+            "max_points": item.get("MaxPoints"),
+            "weight": item.get("Weight"),
+            "is_bonus": item.get("IsBonus", False),
+            "exclude_from_final": item.get("ExcludeFromFinalGradeCalculation", False),
+            "score": val.get("PointsNumerator"),
+            "score_max": val.get("PointsDenominator"),
+            "displayed_grade": val.get("DisplayedGrade"),
+            "feedback": feedback,
+            "last_modified": val.get("LastModified"),
+        })
+
+    return {"course_id": course_id, "grades": grades}
+
+
 def get_dropbox_folders(http: httpx.Client, course_id: int) -> list[dict[str, Any]]:
     """Return dropbox/assignment folders for a course."""
     resp = http.get(f"{BRIGHTSPACE_BASE}/d2l/api/le/{LE_VER}/{course_id}/dropbox/folders/")

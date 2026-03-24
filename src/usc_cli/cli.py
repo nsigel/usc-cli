@@ -9,7 +9,7 @@ import sys
 import click
 
 from usc_cli import __version__
-from usc_cli.brightspace import BrightspaceError, get_content_toc, get_courses
+from usc_cli.brightspace import BrightspaceError, get_content_toc, get_courses, get_grades
 from usc_cli.client import SESSION_PATH, AuthError, USCClient, clear_session
 
 
@@ -215,6 +215,80 @@ def content(ctx: click.Context, course_id: int, fmt: str, flat: bool) -> None:
 
         for mod in toc["modules"]:
             _print_module(mod)
+
+
+@cli.command()
+@click.argument("course_id", type=int)
+@FORMAT_OPTION
+@click.option(
+    "--graded-only",
+    is_flag=True,
+    default=False,
+    help="Only show items that have a score.",
+)
+@click.pass_context
+def grades(ctx: click.Context, course_id: int, fmt: str, graded_only: bool) -> None:
+    """Show grade items and scores for a course.
+
+    COURSE_ID is the numeric org-unit ID from `usc courses`.
+
+    Output (JSON, one object):
+      {
+        "course_id": int,
+        "grades": [
+          {
+            "id": str,
+            "name": str,
+            "grade_type": str,
+            "max_points": float | null,
+            "weight": float | null,
+            "is_bonus": bool,
+            "exclude_from_final": bool,
+            "score": float | null,
+            "score_max": float | null,
+            "displayed_grade": str | null,
+            "feedback": str | null,
+            "last_modified": str | null
+          },
+          ...
+        ]
+      }
+    """
+    try:
+        with USCClient() as client:
+            loaded = client.load_session()
+            if not loaded:
+                click.echo(
+                    json.dumps({"error": "No session found. Run `usc login` to authenticate."}),
+                    err=True,
+                )
+                sys.exit(1)
+            result = get_grades(client._http, course_id)
+    except (AuthError, BrightspaceError) as e:
+        click.echo(json.dumps({"error": str(e)}), err=True)
+        sys.exit(1)
+
+    grade_list = result["grades"]
+    if graded_only:
+        grade_list = [g for g in grade_list if g.get("score") is not None]
+        result = {**result, "grades": grade_list}
+
+    if fmt == "json":
+        click.echo(json.dumps(result, indent=2))
+    else:
+        if not grade_list:
+            click.echo("No grade items found.")
+            return
+
+        click.echo(f"{'Name':<35} {'Score':<15} {'Weight':<8} {'Modified':<14} Feedback")
+        click.echo("-" * 100)
+        for g in grade_list:
+            score_str = g["displayed_grade"] or ("—" if g["score"] is None else str(g["score"]))
+            weight_str = f"{g['weight']}%" if g["weight"] is not None else ""
+            modified = (g["last_modified"] or "")[:10]
+            feedback = (g["feedback"] or "")[:40]
+            name = g["name"][:34]
+            click.echo(f"{name:<35} {score_str:<15} {weight_str:<8} {modified:<14} {feedback}")
 
 
 if __name__ == "__main__":
