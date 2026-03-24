@@ -44,14 +44,14 @@ class USCClient:
     def whoami(self) -> dict:
         """Return the current authenticated user profile."""
         self._require_auth()
-        resp = self._http.get(f"{self.D2L_API}/lp/1.0/users/whoami")
+        resp = self._http.get(f"{self.D2L_API}/lp/1.9/users/whoami")
         resp.raise_for_status()
         return resp.json()
 
     def enrollments(self) -> list[dict]:
         """List current course enrollments."""
         self._require_auth()
-        resp = self._http.get(f"{self.D2L_API}/lp/1.0/enrollments/myenrollments/")
+        resp = self._http.get(f"{self.D2L_API}/lp/1.9/enrollments/myenrollments/")
         resp.raise_for_status()
         return resp.json().get("Items", [])
 

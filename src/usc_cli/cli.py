@@ -58,13 +58,7 @@ def login(ctx: click.Context, username: str, password: str, bypass_code: str) ->
         with USCClient() as client:
             click.echo(f"Logging in as {username}...")
             client.login(username, password, bypass_code)
-            click.echo("Login successful.")
-            # Verify with whoami
-            user = client.whoami()
-            click.echo(
-                f"Authenticated: {user.get('FirstName', '')} {user.get('LastName', '')} "
-                f"(id={user.get('Identifier', '?')})"
-            )
+            click.echo(f"Login successful. Authenticated as {username}.")
     except AuthError as e:
         click.echo(f"Auth failed: {e}", err=True)
         sys.exit(1)

@@ -102,20 +102,60 @@ class USCAuth:
     # ------------------------------------------------------------------
 
     def _get_saml_login_url(self) -> str:
-        """Navigate to Brightspace and follow SAML redirects to the USC login page."""
+        """Navigate to Brightspace and follow SAML redirects to the USC login page.
+
+        Also captures `saml2Request` and `secondVisitUrl` from the SSORedirect
+        page — stored as instance attributes for use after Duo completes.
+        """
+        import html as html_module
+
         resp = self._http.get(
-            f"{BRIGHTSPACE_BASE}/d2l/home",
+            f"{BRIGHTSPACE_BASE}/d2l/login",
+            params={"sessionExpired": "0", "target": "/d2l/home"},
             headers=BASE_HEADERS,
             follow_redirects=True,
         )
         resp.raise_for_status()
 
-        # After the redirect chain we should be at login.usc.edu
         final_url = str(resp.url)
-        if "login.usc.edu" not in final_url:
-            raise AuthError(f"Unexpected landing URL after SAML redirect: {final_url}")
 
-        return final_url
+        # If we landed directly on the login form, we're done
+        if "/login/login" in final_url:
+            self._saml2_request = None
+            self._second_visit_url = None
+            return final_url
+
+        # SSORedirect page: JS reads loginUrl from a hidden field and navigates there.
+        # Also embeds saml2Request + secondVisitUrl that we need later.
+        if "SSORedirect" in final_url or "sso/" in final_url:
+            html_text = resp.text
+
+            def _extract(field_id: str) -> str | None:
+                m = re.search(
+                    rf'id="{field_id}"[^>]*value="([^"]+)"'
+                    rf'|value="([^"]+)"[^>]*id="{field_id}"',
+                    html_text,
+                )
+                if not m:
+                    return None
+                return html_module.unescape(m.group(1) or m.group(2))
+
+            login_url = _extract("loginUrl")
+            if not login_url:
+                raise AuthError("Could not extract loginUrl from SSORedirect page")
+
+            # Store for post-Duo SAML completion
+            self._saml2_request = _extract("saml2Request")
+            self._second_visit_url = _extract("secondVisitUrl")
+            logger.debug("Extracted loginUrl: %s", login_url[:100])
+            logger.debug("saml2Request present: %s", bool(self._saml2_request))
+            logger.debug("secondVisitUrl: %s", (self._second_visit_url or "")[:80])
+
+            resp2 = self._http.get(login_url, headers=BASE_HEADERS, follow_redirects=True)
+            resp2.raise_for_status()
+            return str(resp2.url)
+
+        raise AuthError(f"Unexpected landing URL after SAML redirect: {final_url}")
 
     # ------------------------------------------------------------------
     # Step 2: POST username/password
@@ -175,8 +215,11 @@ class USCAuth:
         """
         duo_host, sid, tx = self._init_duo_session(duo_oauth_url)
         xsrf = self._get_duo_xsrf(duo_host, sid, tx)
-        sid = self._post_duo_frameless_init(duo_host, sid, tx, xsrf)
-        self._duo_preauth_healthcheck(duo_host, sid)
+        sid, at_prompt = self._post_duo_frameless_init(duo_host, sid, tx, xsrf)
+        if not at_prompt:
+            # Server sent us to preauth healthcheck first — walk that chain
+            xsrf = self._duo_preauth_healthcheck(duo_host, sid, tx, xsrf)
+        self._duo_get_prompt_data(duo_host, sid)
         txid = self._post_duo_prompt(duo_host, sid, xsrf, bypass_code)
         self._poll_duo_status(duo_host, sid, txid)
         duo_code, state = self._duo_oidc_exit(duo_host, sid, txid, xsrf)
@@ -218,7 +261,14 @@ class USCAuth:
         return duo_host, sid, tx
 
     def _get_duo_xsrf(self, duo_host: str, sid: str, tx: str) -> str:
-        """GET the Duo frameless page and extract _xsrf token."""
+        """GET the Duo frameless page and extract _xsrf token.
+
+        Duo sets a cookie named ``_xsrf|{sid}`` whose value is formatted as
+        ``"base64token|timestamp|hmac"`` (quotes included).  The actual token
+        to use is the base64-decoded first segment.
+        """
+        import base64
+
         url = f"https://{duo_host}/frame/frameless/v4/auth"
         resp = self._http.get(
             url,
@@ -228,17 +278,31 @@ class USCAuth:
         )
         resp.raise_for_status()
 
-        # _xsrf is set as a cookie by Duo
-        xsrf = self._http.cookies.get("_xsrf", domain=duo_host)
-        if xsrf:
-            return xsrf
+        # Duo's cookie name is "_xsrf|{sid}".  httpx may normalise the name, so
+        # we search all Set-Cookie headers from this response AND iterate the
+        # client cookie jar, both looking for anything starting with "_xsrf".
+        def _decode_duo_xsrf(raw_value: str) -> str:
+            """raw_value may be quoted and pipe-separated; decode the first segment."""
+            raw_value = raw_value.strip('"').split("|")[0]
+            try:
+                return base64.b64decode(raw_value).decode()
+            except Exception:
+                return raw_value  # Already plain-text token
 
-        # Fallback: parse from page HTML (some versions embed it)
-        match = re.search(r'["\']_xsrf["\']\s*[,:\s]+["\']([\w]+)["\']', resp.text)
-        if match:
-            return match.group(1)
+        # 1. Search Set-Cookie headers on the frameless GET response
+        for h_name, h_val in resp.headers.multi_items():
+            if h_name.lower() == "set-cookie" and "_xsrf" in h_val.lower():
+                # Format: _xsrf|<sid>="base64|ts|hmac"; ...
+                m = re.match(r'_xsrf[^=]*=("?[^;]+)', h_val)
+                if m:
+                    return _decode_duo_xsrf(m.group(1))
 
-        # Last resort: try meta tag or hidden input
+        # 2. Walk the client cookie jar (httpx may store it under a mangled name)
+        for cookie in self._http.cookies.jar:
+            if "_xsrf" in cookie.name.lower():
+                return _decode_duo_xsrf(cookie.value)
+
+        # 3. Fallback: embedded in page HTML (older Duo versions)
         match = re.search(
             r'name=["\']_xsrf["\'][^>]*value=["\']([\w]+)["\']'
             r'|value=["\']([\w]+)["\'][^>]*name=["\']_xsrf["\']',
@@ -251,12 +315,15 @@ class USCAuth:
 
     def _post_duo_frameless_init(
         self, duo_host: str, sid: str, tx: str, xsrf: str
-    ) -> str:
+    ) -> tuple[str, bool]:
         """POST to frameless/v4/auth to initialize the session.
 
-        Returns the sid (may be updated in redirect location).
+        Returns (sid, went_to_auth_prompt) where went_to_auth_prompt=True means
+        the server skipped the preauth healthcheck and jumped straight to
+        auth/prompt (bypass accounts or trusted sessions).
         """
-        url = f"https://{duo_host}/frame/frameless/v4/auth"
+        base = f"https://{duo_host}"
+        url = f"{base}/frame/frameless/v4/auth"
         resp = self._http.post(
             url,
             params={"sid": sid, "tx": tx},
@@ -284,8 +351,8 @@ class USCAuth:
             },
             headers={
                 **BASE_HEADERS,
-                "Origin": f"https://{duo_host}",
-                "Referer": f"https://{duo_host}/frame/frameless/v4/auth?sid={sid}&tx={tx}",
+                "Origin": base,
+                "Referer": f"{base}/frame/frameless/v4/auth?sid={sid}&tx={tx}",
             },
             follow_redirects=False,
         )
@@ -300,31 +367,156 @@ class USCAuth:
         if "sid=" in location:
             params = parse_qs(urlparse(location).query)
             new_sid = params.get("sid", [sid])[0]
-            return new_sid
+        else:
+            new_sid = sid
 
-        return sid
+        # Check if we went straight to auth/prompt (bypass/trusted) or healthcheck
+        went_to_prompt = "auth/prompt" in location
+        logger.debug(
+            "frameless init redirect: %s (went_to_prompt=%s)", location[:80], went_to_prompt
+        )
+        return new_sid, went_to_prompt
 
-    def _duo_preauth_healthcheck(self, duo_host: str, sid: str) -> None:
-        """Walk the preauth healthcheck + return redirect chain."""
+    def _duo_preauth_healthcheck(self, duo_host: str, sid: str, tx: str, xsrf: str) -> str:
+        """Walk the preauth healthcheck + return redirect chain.
+
+        Returns the (possibly refreshed) xsrf token.
+
+        Sequence (mirrors the HAR exactly):
+          GET preauth/healthcheck → 200
+          GET preauth/healthcheck/data → 200 (JSON)
+          GET return → 303 → frameless URL
+          GET frameless → 200 (React page reload)
+          POST frameless → 302 → auth/prompt  (second auto-submit by React)
+        """
+        import base64
+
+        def _decode_duo_xsrf(raw: str) -> str:
+            raw = raw.strip('"').split("|")[0]
+            try:
+                return base64.b64decode(raw).decode()
+            except Exception:
+                return raw
+
+        def _get_current_xsrf() -> str:
+            for cookie in self._http.cookies.jar:
+                if "_xsrf" in cookie.name.lower():
+                    return _decode_duo_xsrf(cookie.value)
+            return xsrf
+
         base = f"https://{duo_host}"
+        frameless_url = f"{base}/frame/frameless/v4/auth"
 
-        # GET preauth/healthcheck → might redirect
-        resp = self._http.get(
+        # 1. GET preauth/healthcheck
+        self._http.get(
             f"{base}/frame/v4/preauth/healthcheck",
             params={"sid": sid},
-            headers={**BASE_HEADERS, "Referer": f"{base}/frame/frameless/v4/auth?sid={sid}"},
+            headers={**BASE_HEADERS, "Referer": f"{frameless_url}?sid={sid}"},
             follow_redirects=True,
-        )
-        resp.raise_for_status()
+        ).raise_for_status()
 
-        # GET return (navigates back to frameless which then lands at auth/prompt)
+        # 2. GET healthcheck/data
+        self._http.get(
+            f"{base}/frame/v4/preauth/healthcheck/data",
+            params={"sid": sid},
+            headers={
+                **BASE_HEADERS,
+                "Accept": "application/json, text/plain, */*",
+                "Referer": f"{base}/frame/v4/preauth/healthcheck?sid={sid}",
+            },
+            follow_redirects=True,
+        ).raise_for_status()
+
+        # 3. GET return → 303 → frameless URL (extract the redirect)
         resp = self._http.get(
             f"{base}/frame/v4/return",
             params={"sid": sid},
             headers={**BASE_HEADERS, "Referer": f"{base}/frame/v4/preauth/healthcheck?sid={sid}"},
-            follow_redirects=True,
+            follow_redirects=False,
         )
-        resp.raise_for_status()
+        ret_loc = resp.headers.get("location", "")
+        if ret_loc.startswith("/"):
+            ret_loc = f"{base}{ret_loc}"
+        frameless_loc = ret_loc or f"{frameless_url}?sid={sid}&tx={tx}"
+
+        # 4. GET frameless (second page load — React rehydrates with healthcheck state)
+        self._http.get(
+            frameless_loc,
+            headers={**BASE_HEADERS, "Referer": f"{base}/frame/v4/return?sid={sid}"},
+            follow_redirects=False,
+        )
+
+        # 5. POST frameless (second auto-submit by React → redirects to auth/prompt)
+        fresh_xsrf = _get_current_xsrf()
+        resp2 = self._http.post(
+            frameless_url,
+            params={"sid": sid, "tx": tx},
+            data={
+                "tx": tx,
+                "parent": "None",
+                "_xsrf": fresh_xsrf,
+                "version": "v4",
+                "akey": DUO_AKEY,
+                "has_session_trust_analysis_feature": "False",
+                "session_trust_extension_id": "",
+                "java_version": "",
+                "flash_version": "",
+                "screen_resolution_width": "2560",
+                "screen_resolution_height": "1440",
+                "extension_instance_key": "",
+                "color_depth": "24",
+                "has_touch_capability": "false",
+                "ch_ua_error": "",
+                "is_cef_browser": "false",
+                "is_ipad_os": "false",
+                "is_user_verifying_platform_authenticator_available": "false",
+                "react_support": "true",
+                "react_support_error_message": "",
+            },
+            headers={
+                **BASE_HEADERS,
+                "Origin": base,
+                "Referer": frameless_loc,
+            },
+            follow_redirects=False,
+        )
+
+        if resp2.status_code not in (301, 302, 303) or "auth/prompt" not in resp2.headers.get(
+            "location", ""
+        ):
+            raise AuthError(
+                f"Expected auth/prompt redirect from 2nd frameless POST, got "
+                f"{resp2.status_code} -> {resp2.headers.get('location','')[:80]}"
+            )
+
+        # 6. Re-read xsrf in case it was rotated
+        fresh_xsrf = _get_current_xsrf()
+        logger.debug("xsrf after healthcheck cycle: %s", fresh_xsrf)
+        return fresh_xsrf
+
+    def _duo_get_prompt_data(self, duo_host: str, sid: str) -> None:
+        """GET /frame/v4/auth/prompt/data — required before posting the passcode.
+
+        This signals to Duo's backend that the React auth/prompt page has loaded
+        and is ready to receive a factor submission.
+        """
+        base = f"https://{duo_host}"
+        import urllib.parse
+        bf = urllib.parse.quote(BROWSER_FEATURES)
+        self._http.get(
+            f"{base}/frame/v4/auth/prompt/data",
+            params={
+                "post_auth_action": "OIDC_EXIT",
+                "browser_features": BROWSER_FEATURES,
+                "sid": sid,
+            },
+            headers={
+                **BASE_HEADERS,
+                "Accept": "application/json, text/plain, */*",
+                "Referer": f"{base}/frame/v4/auth/prompt?sid={sid}",
+            },
+            follow_redirects=True,
+        ).raise_for_status()
 
     def _post_duo_prompt(
         self, duo_host: str, sid: str, xsrf: str, bypass_code: str
@@ -465,8 +657,13 @@ class USCAuth:
     def _exchange_duo_code(
         self, duo_code: str, state: str
     ) -> tuple[str, str]:
-        """GET /login/authduo and follow SAML chain to get SAMLResponse + post URL."""
-        # GET authduo — follows redirect chain to saml2/continue
+        """Exchange duo_code → SAML assertion.
+
+        Flow:
+          GET /login/authduo → 302 → saml2/continue (follow the redirect chain)
+          GET secondVisitUrl (the SSORedirect) → auto-submit form with SAMLResponse
+        """
+        # Step 1: GET authduo — follow through to saml2/continue
         resp = self._http.get(
             f"{LOGIN_BASE}/login/authduo",
             params={"state": state, "duo_code": duo_code},
@@ -474,10 +671,22 @@ class USCAuth:
             follow_redirects=True,
         )
         resp.raise_for_status()
+        logger.debug("authduo landed at: %s", str(resp.url)[:100])
 
-        # We should be at saml2/continue or the SSORedirect that returns a form
-        # The final response should be a page with a SAMLResponse form
-        # (either auto-submitted JS or a plain form)
+        # Step 2: GET the secondVisitUrl (SSORedirect with ReqID) — USC's server
+        # has the AuthnRequest stored under the ReqID. After Duo auth, the session
+        # cookie allows this to succeed and return an auto-submit SAMLResponse form.
+        if self._second_visit_url:
+            ssored_url = f"{LOGIN_BASE}{self._second_visit_url}"
+            logger.debug("GETting secondVisitUrl: %s", ssored_url[:100])
+            resp = self._http.get(
+                ssored_url,
+                headers={**BASE_HEADERS},
+                follow_redirects=True,
+            )
+            resp.raise_for_status()
+            logger.debug("secondVisitUrl landed at: %s", str(resp.url)[:100])
+
         saml_response, post_url = self._extract_saml_response(resp)
         return saml_response, post_url
 
