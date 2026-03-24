@@ -858,7 +858,12 @@ class USCAuth:
     # ------------------------------------------------------------------
 
     def _post_saml(self, post_url: str, saml_response: str, relay_state: str | None = None) -> None:
-        """POST SAMLResponse (and RelayState if present) to establish the session."""
+        """POST SAMLResponse (and RelayState if present) to establish the session.
+
+        Brightspace returns a 303 to /d2l/error/500 on success (yes, really) but the
+        session cookies (d2lSessionVal, d2lSecureSessionVal) are set on the 303 itself.
+        We must NOT follow the redirect — just verify the cookies are present.
+        """
         data: dict[str, str] = {"SAMLResponse": saml_response}
         if relay_state:
             data["RelayState"] = relay_state
@@ -871,21 +876,24 @@ class USCAuth:
                 "Referer": f"{LOGIN_BASE}/",
                 "Content-Type": "application/x-www-form-urlencoded",
             },
-            follow_redirects=True,
+            follow_redirects=False,
         )
-        resp.raise_for_status()
 
-        # Verify we landed somewhere sensible on a USC service
-        if "usc.edu" not in str(resp.url):
+        # Success = 3xx with d2lSessionVal cookie set
+        if resp.status_code not in (301, 302, 303):
             raise AuthError(
-                f"SAML POST landed on unexpected URL: {resp.url}"
+                f"Expected redirect from SAMLResponse POST, got {resp.status_code}"
             )
 
-        # Check we're not still on a login/error page (any USC login endpoint)
-        final = str(resp.url)
-        if "login.usc.edu" in final or (
-            "usc.edu" in final and re.search(r"/login[/?]|/lp/auth", final)
-        ):
-            raise AuthError("SAML login failed — still on auth page after SAMLResponse POST")
+        # Verify the session cookies landed
+        session_cookie = self._http.cookies.get("d2lSessionVal")
+        if not session_cookie:
+            # Also check the response Set-Cookie headers directly
+            set_cookies = resp.headers.get_list("set-cookie") if hasattr(resp.headers, "get_list") else [
+                v for k, v in resp.headers.items() if k.lower() == "set-cookie"
+            ]
+            has_session = any("d2lSessionVal" in c for c in set_cookies)
+            if not has_session:
+                raise AuthError("SAMLResponse POST did not set d2lSessionVal — login may have failed")
 
-        logger.debug("Session established at %s", resp.url)
+        logger.debug("Session established (d2lSessionVal present)")

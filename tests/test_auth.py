@@ -520,41 +520,50 @@ class TestExtractSamlResponse:
 
 class TestPostSaml:
     def test_success(self, httpx_mock: HTTPXMock) -> None:
+        # Brightspace returns 303 to /d2l/error/500 on success but sets session cookies
         httpx_mock.add_response(
             method="POST",
             url=f"{BRIGHTSPACE}/d2l/lp/auth/login/samlLogin.d2l",
-            status_code=302,
-            headers={"location": f"{BRIGHTSPACE}/d2l/home"},
-        )
-        httpx_mock.add_response(
-            method="GET",
-            url=f"{BRIGHTSPACE}/d2l/home",
-            status_code=200,
-            text="<html>home</html>",
+            status_code=303,
+            headers={
+                "location": f"{BRIGHTSPACE}/d2l/error/500",
+                "set-cookie": "d2lSessionVal=abc123; path=/; secure; HttpOnly",
+            },
         )
         client = _make_client()
         auth = USCAuth(client)
+        # Should not raise — 303 + d2lSessionVal cookie = success
         auth._post_saml(
             f"{BRIGHTSPACE}/d2l/lp/auth/login/samlLogin.d2l",
             SAML_RESPONSE,
         )
 
-    def test_still_on_auth_page_raises(self, httpx_mock: HTTPXMock) -> None:
+    def test_missing_session_cookie_raises(self, httpx_mock: HTTPXMock) -> None:
+        # 303 but no session cookie = login failed
         httpx_mock.add_response(
             method="POST",
             url=f"{BRIGHTSPACE}/d2l/lp/auth/login/samlLogin.d2l",
-            status_code=302,
+            status_code=303,
             headers={"location": f"{BRIGHTSPACE}/d2l/login?sessionExpired=1"},
-        )
-        httpx_mock.add_response(
-            method="GET",
-            url=f"{BRIGHTSPACE}/d2l/login?sessionExpired=1",
-            status_code=200,
-            text="<html>login</html>",
         )
         client = _make_client()
         auth = USCAuth(client)
-        with pytest.raises(AuthError, match="still on auth page"):
+        with pytest.raises(AuthError, match="d2lSessionVal"):
+            auth._post_saml(
+                f"{BRIGHTSPACE}/d2l/lp/auth/login/samlLogin.d2l",
+                SAML_RESPONSE,
+            )
+
+    def test_non_redirect_raises(self, httpx_mock: HTTPXMock) -> None:
+        httpx_mock.add_response(
+            method="POST",
+            url=f"{BRIGHTSPACE}/d2l/lp/auth/login/samlLogin.d2l",
+            status_code=200,
+            text="<html>unexpected</html>",
+        )
+        client = _make_client()
+        auth = USCAuth(client)
+        with pytest.raises(AuthError, match="Expected redirect"):
             auth._post_saml(
                 f"{BRIGHTSPACE}/d2l/lp/auth/login/samlLogin.d2l",
                 SAML_RESPONSE,
