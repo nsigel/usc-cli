@@ -62,6 +62,9 @@ def login(ctx: click.Context, username: str, password: str, bypass_code: str) ->
     except AuthError as e:
         click.echo(f"Auth failed: {e}", err=True)
         sys.exit(1)
+    except Exception as e:
+        click.echo(f"Unexpected error: {e}", err=True)
+        sys.exit(1)
 
 
 @cli.command()

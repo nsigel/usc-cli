@@ -90,11 +90,11 @@ class USCAuth:
         logger.debug("duo_code=%s state=%s", duo_code[:8], state[:12])
 
         # Step 4: Exchange duo_code → SAML assertion
-        saml_response, saml_post_url = self._exchange_duo_code(duo_code, state)
+        saml_response, saml_post_url, relay_state = self._exchange_duo_code(duo_code, state)
         logger.debug("SAMLResponse obtained, posting to %s", saml_post_url)
 
         # Step 5: POST SAMLResponse → USC session cookies established
-        self._post_saml(saml_post_url, saml_response)
+        self._post_saml(saml_post_url, saml_response, relay_state)
         logger.debug("Login complete")
 
     # ------------------------------------------------------------------
@@ -103,6 +103,10 @@ class USCAuth:
 
     def _get_saml_login_url(self) -> str:
         """Navigate to the USC SSO entry point and follow SAML redirects to the USC login page.
+
+        Flow: my.usc.edu → shibboleth.usc.edu (LS detection) → POST LS data
+              → login.usc.edu SSORedirect (has loginUrl/saml2Request/secondVisitUrl)
+              → login.usc.edu/login/login (final login form)
 
         Also captures `saml2Request` and `secondVisitUrl` from the SSORedirect
         page — stored as instance attributes for use after Duo completes.
@@ -117,6 +121,35 @@ class USCAuth:
         resp.raise_for_status()
 
         final_url = str(resp.url)
+
+        # Shibboleth local-storage detection page (shibboleth.usc.edu/idp/...)
+        # Must POST the LS data to proceed — browser JS does this automatically.
+        if "shibboleth.usc.edu" in final_url and "execution=" in final_url:
+            shib_post_url = final_url
+            logger.debug("Shibboleth LS detection page, POSTing to %s", shib_post_url[:80])
+            resp = self._http.post(
+                shib_post_url,
+                data={
+                    "shib_idp_ls_exception.shib_idp_session_ss": "",
+                    "shib_idp_ls_success.shib_idp_session_ss": "false",
+                    "shib_idp_ls_value.shib_idp_session_ss": "",
+                    "shib_idp_ls_exception.shib_idp_persistent_ss": "",
+                    "shib_idp_ls_success.shib_idp_persistent_ss": "false",
+                    "shib_idp_ls_value.shib_idp_persistent_ss": "",
+                    "shib_idp_ls_supported": "false",
+                    "_eventId_proceed": "",
+                },
+                headers={
+                    **BASE_HEADERS,
+                    "Origin": "https://shibboleth.usc.edu",
+                    "Referer": shib_post_url,
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
+                follow_redirects=True,
+            )
+            resp.raise_for_status()
+            final_url = str(resp.url)
+            logger.debug("After Shibboleth LS POST: %s", final_url[:100])
 
         # If we landed directly on the login form, we're done
         if "/login/login" in final_url:
@@ -655,7 +688,7 @@ class USCAuth:
 
     def _exchange_duo_code(
         self, duo_code: str, state: str
-    ) -> tuple[str, str]:
+    ) -> tuple[str, str, str | None]:
         """Exchange duo_code → SAML assertion.
 
         Flow:
@@ -686,14 +719,17 @@ class USCAuth:
             resp.raise_for_status()
             logger.debug("secondVisitUrl landed at: %s", str(resp.url)[:100])
 
-        saml_response, post_url = self._extract_saml_response(resp)
-        return saml_response, post_url
+        saml_response, post_url, relay_state = self._extract_saml_response(resp)
+        return saml_response, post_url, relay_state
 
-    def _extract_saml_response(self, resp: httpx.Response) -> tuple[str, str]:
-        """Parse SAMLResponse and form action from an HTML response.
+    def _extract_saml_response(self, resp: httpx.Response) -> tuple[str, str, str | None]:
+        """Parse SAMLResponse, form action, and optional RelayState from an HTML response.
 
         The page may be a standard SAML POST binding form or auto-submit JS.
+        Returns (saml_response, post_url, relay_state).
         """
+        import html as html_module
+
         html = resp.text
 
         # Try form-based SAMLResponse
@@ -702,7 +738,7 @@ class USCAuth:
             html,
             re.IGNORECASE,
         )
-        post_url = match.group(1) if match else None
+        post_url = html_module.unescape(match.group(1)) if match else None
 
         match = re.search(
             r'name=["\']SAMLResponse["\'][^>]*value=["\']([^"\']+)["\']'
@@ -722,6 +758,15 @@ class USCAuth:
                     f"Could not find SAMLResponse in page at {resp.url}"
                 )
 
+        # Extract RelayState if present
+        relay_match = re.search(
+            r'name=["\']RelayState["\'][^>]*value=["\']([^"\']*)["\']'
+            r'|value=["\']([^"\']*)["\'][^>]*name=["\']RelayState["\']',
+            html,
+            re.IGNORECASE,
+        )
+        relay_state = html_module.unescape(relay_match.group(1) or relay_match.group(2)) if relay_match else None
+
         if not post_url:
             raise AuthError("Could not find SAML POST URL in login response")
 
@@ -731,17 +776,20 @@ class USCAuth:
             base = f"{urlparse(str(resp.url)).scheme}://{urlparse(str(resp.url)).netloc}"
             post_url = f"{base}{post_url}"
 
-        return saml_response, post_url
+        return saml_response, post_url, relay_state
 
     # ------------------------------------------------------------------
     # Step 5: POST SAMLResponse to complete the login
     # ------------------------------------------------------------------
 
-    def _post_saml(self, post_url: str, saml_response: str) -> None:
-        """POST SAMLResponse to the target USC service to establish the session."""
+    def _post_saml(self, post_url: str, saml_response: str, relay_state: str | None = None) -> None:
+        """POST SAMLResponse (and RelayState if present) to establish the session."""
+        data: dict[str, str] = {"SAMLResponse": saml_response}
+        if relay_state:
+            data["RelayState"] = relay_state
         resp = self._http.post(
             post_url,
-            data={"SAMLResponse": saml_response},
+            data=data,
             headers={
                 **BASE_HEADERS,
                 "Origin": LOGIN_BASE,
@@ -750,7 +798,13 @@ class USCAuth:
             },
             follow_redirects=True,
         )
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except Exception as e:
+            body = resp.text.lower()
+            if "stale" in body or "sign on again" in body:
+                raise AuthError("Login failed: session expired during auth flow — try again immediately") from e
+            raise AuthError(f"SAML POST failed ({resp.status_code})") from e
 
         # Verify we landed somewhere sensible on a USC service
         if "usc.edu" not in str(resp.url):

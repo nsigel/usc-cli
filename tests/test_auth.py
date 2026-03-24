@@ -487,7 +487,7 @@ class TestExtractSamlResponse:
         client = _make_client()
         auth = USCAuth(client)
         resp = httpx.Response(200, text=html, request=httpx.Request("GET", f"{LOGIN}/page"))
-        saml, url = auth._extract_saml_response(resp)
+        saml, url, relay = auth._extract_saml_response(resp)
         assert saml == SAML_RESPONSE
         assert "samlLogin.d2l" in url
 
@@ -498,7 +498,7 @@ class TestExtractSamlResponse:
         client = _make_client()
         auth = USCAuth(client)
         resp = httpx.Response(200, text=html, request=httpx.Request("GET", f"{LOGIN}/page"))
-        saml, url = auth._extract_saml_response(resp)
+        saml, url, relay = auth._extract_saml_response(resp)
         assert saml == SAML_RESPONSE
 
     def test_missing_saml_response_raises(self) -> None:
