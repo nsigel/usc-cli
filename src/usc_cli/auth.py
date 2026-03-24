@@ -40,11 +40,25 @@ BROWSER_FEATURES = (
     '"platform_authenticator_status":"unavailable",'
     '"webauthn_supported":true,'
     '"screen_resolution_height":1440,'
-    '"screen_resolution_width":2560,'
+    '"screen_resolution_width":3440,'
     '"screen_color_depth":24,'
     '"is_uvpa_available":false,'
     '"client_capabilities_uvpa":false}'
 )
+
+CLIENT_HINTS = (
+    "eyJicmFuZHMiOlt7ImJyYW5kIjoiQ2hyb21pdW0iLCJ2ZXJzaW9uIjoiMTQ2In0seyJicmFuZCI6Ik5vd"
+    "C1BLkJyYW5kIiwidmVyc2lvbiI6IjI0In0seyJicmFuZCI6Ikdvb2dsZSBDaHJvbWUiLCJ2ZXJzaW9uIj"
+    "oiMTQ2In1dLCJmdWxsVmVyc2lvbkxpc3QiOlt7ImJyYW5kIjoiQ2hyb21pdW0iLCJ2ZXJzaW9uIjoiMTQ2"
+    "LjAuNzY4MC4xNTMifSx7ImJyYW5kIjoiTm90LUEuQnJhbmQiLCJ2ZXJzaW9uIjoiMjQuMC4wLjAifSx7Im"
+    "JyYW5kIjoiR29vZ2xlIENocm9tZSIsInZlcnNpb24iOiIxNDYuMC43NjgwLjE1MyJ9XSwibW9iaWxlIjpm"
+    "YWxzZSwicGxhdGZvcm0iOiJtYWNPUyIsInBsYXRmb3JtVmVyc2lvbiI6IjE0LjguNCIsInVhRnVsbFZlcn"
+    "Npb24iOiIxNDYuMC43NjgwLjE1MyJ9"
+)
+
+# Static Brightspace SP values — used to complete the SSORedirect POST URL
+BRIGHTSPACE_ACS_URL = "https://brightspace.usc.edu/d2l/lp/auth/login/samlLogin.d2l"
+BRIGHTSPACE_SP_ENTITY_ID = "https://2c451d9d-9cf4-4e8b-958d-6ee62f71be93.tenants.brightspace.com/samlLogin"
 
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -368,15 +382,19 @@ class USCAuth:
                 "session_trust_extension_id": "",
                 "java_version": "",
                 "flash_version": "",
-                "screen_resolution_width": "2560",
+                "screen_resolution_width": "3440",
                 "screen_resolution_height": "1440",
                 "extension_instance_key": "",
                 "color_depth": "24",
                 "has_touch_capability": "false",
                 "ch_ua_error": "",
+                "client_hints": CLIENT_HINTS,
                 "is_cef_browser": "false",
                 "is_ipad_os": "false",
+                "is_ie_compatibility_mode": "",
                 "is_user_verifying_platform_authenticator_available": "false",
+                "user_verifying_platform_authenticator_available_error": "",
+                "acting_ie_version": "",
                 "react_support": "true",
                 "react_support_error_message": "",
             },
@@ -492,15 +510,19 @@ class USCAuth:
                 "session_trust_extension_id": "",
                 "java_version": "",
                 "flash_version": "",
-                "screen_resolution_width": "2560",
+                "screen_resolution_width": "3440",
                 "screen_resolution_height": "1440",
                 "extension_instance_key": "",
                 "color_depth": "24",
                 "has_touch_capability": "false",
                 "ch_ua_error": "",
+                "client_hints": CLIENT_HINTS,
                 "is_cef_browser": "false",
                 "is_ipad_os": "false",
+                "is_ie_compatibility_mode": "",
                 "is_user_verifying_platform_authenticator_available": "false",
+                "user_verifying_platform_authenticator_available_error": "",
+                "acting_ie_version": "",
                 "react_support": "true",
                 "react_support_error_message": "",
             },
@@ -712,15 +734,27 @@ class USCAuth:
         if not self._second_visit_url or not self._saml2_request:
             raise AuthError("Missing secondVisitUrl or saml2Request from initial SSO flow")
 
+        # The browser JS (saml2-read.js) decodes the saml2Request JWT and appends
+        # index, acsURL, spEntityID, and binding to the secondVisitUrl before POSTing.
+        # Without these the Shibboleth IdP returns 500.
+        import urllib.parse as _up
         ssored_url = f"{LOGIN_BASE}{self._second_visit_url}"
-        logger.debug("POSTing saml2Request to: %s", ssored_url[:100])
+        parsed_ssored = _up.urlparse(ssored_url)
+        qs = dict(_up.parse_qsl(parsed_ssored.query))
+        qs["index"] = "null"
+        qs["acsURL"] = BRIGHTSPACE_ACS_URL
+        qs["spEntityID"] = BRIGHTSPACE_SP_ENTITY_ID
+        qs["binding"] = ""
+        ssored_url = _up.urlunparse(parsed_ssored._replace(query=_up.urlencode(qs)))
+        saml2_continue_url = str(resp.url)
+        logger.debug("POSTing saml2Request to: %s", ssored_url[:120])
         resp = self._http.post(
             ssored_url,
             data={"saml2Request": self._saml2_request},
             headers={
                 **BASE_HEADERS,
                 "Origin": LOGIN_BASE,
-                "Referer": str(resp.url),
+                "Referer": saml2_continue_url,
                 "Content-Type": "application/x-www-form-urlencoded",
             },
             follow_redirects=True,
