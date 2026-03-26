@@ -68,7 +68,7 @@ def cli(ctx: click.Context, verbose: bool) -> None:
     required=True,
     prompt=True,
     hide_input=True,
-    help="Duo bypass code (or set USC_DUO_BYPASS env var)",
+    help="Duo bypass code (or set USC_DUO_BYPASS env var). Valid for unlimited uses within 1 week.",
 )
 @click.pass_context
 def login(ctx: click.Context, username: str, password: str, bypass_code: str) -> None:
