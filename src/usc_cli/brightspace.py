@@ -241,6 +241,74 @@ def get_grades(http: httpx.Client, course_id: int) -> dict[str, Any]:
     return {"course_id": course_id, "grades": grades}
 
 
+def get_announcements(
+    http: httpx.Client,
+    course_id: int,
+    *,
+    since: str | None = None,
+) -> list[dict[str, Any]]:
+    """Return news/announcement items for a course.
+
+    :param course_id: Brightspace org-unit ID.
+    :param since: ISO 8601 datetime string — only return items on or after this date.
+
+    Each item:
+      {
+        "id": int,
+        "title": str,
+        "body": str,           # plain text (HTML stripped)
+        "start_date": str | null,
+        "end_date": str | null,
+        "created_date": str | null,
+        "last_modified_date": str | null,
+        "is_pinned": bool,
+        "is_hidden": bool,
+        "attachments": [{"id": int, "name": str, "size": int}, ...]
+      }
+    """
+    params: dict[str, str] = {}
+    if since:
+        params["since"] = since
+
+    resp = http.get(
+        f"{BRIGHTSPACE_BASE}/d2l/api/le/{LE_VER}/{course_id}/news/",
+        params=params,
+    )
+    items = _require_ok(resp, f"news({course_id})")
+    assert isinstance(items, list)
+
+    def _plain(rich: dict[str, Any] | None) -> str:
+        if not rich:
+            return ""
+        # Prefer plain Text; fall back to stripping HTML
+        text = (rich.get("Text") or "").strip()
+        if text:
+            return text
+        html = rich.get("Html") or ""
+        # Strip tags naively — good enough for announcement summaries
+        import re as _re
+        return _re.sub(r"<[^>]+>", "", html).strip()
+
+    return [
+        {
+            "id": item.get("Id"),
+            "title": item.get("Title", ""),
+            "body": _plain(item.get("Body")),
+            "start_date": item.get("StartDate"),
+            "end_date": item.get("EndDate"),
+            "created_date": item.get("CreatedDate"),
+            "last_modified_date": item.get("LastModifiedDate"),
+            "is_pinned": item.get("IsPinned", False),
+            "is_hidden": item.get("IsHidden", False),
+            "attachments": [
+                {"id": a.get("FileId"), "name": a.get("FileName", ""), "size": a.get("FileSize")}
+                for a in item.get("Attachments", [])
+            ],
+        }
+        for item in items
+    ]
+
+
 def get_dropbox_folders(http: httpx.Client, course_id: int) -> list[dict[str, Any]]:
     """Return dropbox/assignment folders for a course."""
     resp = http.get(f"{BRIGHTSPACE_BASE}/d2l/api/le/{LE_VER}/{course_id}/dropbox/folders/")

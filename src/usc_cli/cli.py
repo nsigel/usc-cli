@@ -9,7 +9,13 @@ import sys
 import click
 
 from usc_cli import __version__
-from usc_cli.brightspace import BrightspaceError, get_content_toc, get_courses, get_grades
+from usc_cli.brightspace import (
+    BrightspaceError,
+    get_announcements,
+    get_content_toc,
+    get_courses,
+    get_grades,
+)
 from usc_cli.client import SESSION_PATH, AuthError, USCClient, clear_session
 
 
@@ -289,6 +295,114 @@ def grades(ctx: click.Context, course_id: int, fmt: str, graded_only: bool) -> N
             feedback = (g["feedback"] or "")[:40]
             name = g["name"][:34]
             click.echo(f"{name:<35} {score_str:<15} {weight_str:<8} {modified:<14} {feedback}")
+
+
+@cli.command()
+@click.argument("course_id", type=int, required=False, default=None)
+@FORMAT_OPTION
+@click.option(
+    "--since",
+    default=None,
+    metavar="DATETIME",
+    help="ISO 8601 datetime — only return announcements on or after this date.",
+)
+@click.pass_context
+def announcements(ctx: click.Context, course_id: int | None, fmt: str, since: str | None) -> None:
+    """Show course announcements.
+
+    With COURSE_ID: fetch announcements for that course.
+    Without COURSE_ID: fetch announcements for all enrolled courses.
+
+    Output (JSON):
+      {
+        "announcements": [
+          {
+            "course_id": int,
+            "course_code": str | null,
+            "id": int,
+            "title": str,
+            "body": str,
+            "start_date": str | null,
+            "end_date": str | null,
+            "created_date": str | null,
+            "last_modified_date": str | null,
+            "is_pinned": bool,
+            "is_hidden": bool,
+            "attachments": [{"id": int, "name": str, "size": int}]
+          },
+          ...
+        ]
+      }
+    """
+    try:
+        with USCClient() as client:
+            loaded = client.load_session()
+            if not loaded:
+                click.echo(
+                    json.dumps({"error": "No session found. Run `usc login` to authenticate."}),
+                    err=True,
+                )
+                sys.exit(1)
+
+            # Resolve course list
+            if course_id is not None:
+                course_list = [{"id": course_id, "code": None}]
+            else:
+                course_list = get_courses(client._http)
+
+            all_items: list[dict] = []
+            errors: list[dict] = []
+
+            for course in course_list:
+                cid = course["id"]
+                code = course.get("code")
+                try:
+                    items = get_announcements(client._http, cid, since=since)
+                    for item in items:
+                        all_items.append({"course_id": cid, "course_code": code, **item})
+                except BrightspaceError as e:
+                    errors.append({"course_id": cid, "error": str(e)})
+
+    except (AuthError, BrightspaceError) as e:
+        click.echo(json.dumps({"error": str(e)}), err=True)
+        sys.exit(1)
+
+    result: dict = {"announcements": all_items}
+    if errors:
+        result["errors"] = errors
+
+    if fmt == "json":
+        click.echo(json.dumps(result, indent=2))
+    else:
+        if not all_items:
+            click.echo("No announcements found.")
+            if errors:
+                for err in errors:
+                    click.echo(f"  [course {err['course_id']}] {err['error']}", err=True)
+            return
+
+        # Group by course
+        from itertools import groupby
+
+        def _course_key(x: dict) -> str:
+            return x.get("course_code") or str(x["course_id"])
+
+        sorted_items = sorted(all_items, key=_course_key)
+        for key, group in groupby(sorted_items, key=_course_key):
+            click.echo(f"\n── {key} ──")
+            for a in group:
+                pinned = " [PINNED]" if a["is_pinned"] else ""
+                date = (a.get("start_date") or a.get("created_date") or "")[:10]
+                click.echo(f"  [{date}]{pinned} {a['title']}")
+                if a["body"]:
+                    # First 200 chars of body
+                    body_preview = a["body"][:200].replace("\n", " ")
+                    click.echo(f"    {body_preview}")
+
+        if errors:
+            click.echo("\nErrors:", err=True)
+            for err in errors:
+                click.echo(f"  [course {err['course_id']}] {err['error']}", err=True)
 
 
 if __name__ == "__main__":
