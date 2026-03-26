@@ -15,6 +15,7 @@ from usc_cli.brightspace import (
     get_content_toc,
     get_courses,
     get_grades,
+    get_whoami,
 )
 from usc_cli.client import SESSION_PATH, AuthError, USCClient, clear_session
 
@@ -26,6 +27,16 @@ def _setup_logging(verbose: bool) -> None:
         level=level,
         stream=sys.stderr,
     )
+
+
+FORMAT_OPTION = click.option(
+    "--format",
+    "fmt",
+    type=click.Choice(["json", "human"]),
+    default="json",
+    show_default=True,
+    help="Output format. 'json' for agent/script use; 'human' for readable output.",
+)
 
 
 @click.group()
@@ -73,18 +84,45 @@ def login(ctx: click.Context, username: str, password: str, bypass_code: str) ->
 
 
 @cli.command()
-def status() -> None:
-    """Show current session status."""
+@FORMAT_OPTION
+def status(fmt: str) -> None:
+    """Show current session status and authenticated user info.
+
+    Calls /whoami to verify the session is live.
+
+    Output (JSON):
+      {"session_path": str, "user": {"Identifier": str, "FirstName": str, "LastName": str, ...}}
+
+    Or on failure:
+      {"error": str}
+    """
     if not SESSION_PATH.exists():
-        click.echo("No session found. Run `usc login` to authenticate.")
+        msg = {"error": "No session found. Run `usc login` to authenticate."}
+        click.echo(json.dumps(msg) if fmt == "json" else msg["error"], err=fmt != "json")
         sys.exit(1)
 
     with USCClient() as client:
         loaded = client.load_session()
         if not loaded:
-            click.echo("Session file exists but could not be loaded. Try `usc login` again.")
+            msg = {"error": "Session file exists but could not be loaded. Try `usc login` again."}
+            click.echo(json.dumps(msg) if fmt == "json" else msg["error"], err=fmt != "json")
             sys.exit(1)
-        click.echo(f"Session active. Cookies loaded from {SESSION_PATH}")
+        try:
+            user = get_whoami(client._http)
+        except BrightspaceError as e:
+            msg = {"error": str(e)}
+            click.echo(json.dumps(msg) if fmt == "json" else msg["error"], err=fmt != "json")
+            sys.exit(1)
+
+    result = {"session_path": str(SESSION_PATH), "user": user}
+    if fmt == "json":
+        click.echo(json.dumps(result, indent=2))
+    else:
+        u = result["user"]
+        click.echo(
+            f"Logged in as {u.get('FirstName')} {u.get('LastName')} "
+            f"({u.get('UniqueName')}) — session: {SESSION_PATH}"
+        )
 
 
 @cli.command()
@@ -92,16 +130,6 @@ def logout() -> None:
     """Clear the saved session from disk."""
     clear_session()
     click.echo("Session cleared.")
-
-
-FORMAT_OPTION = click.option(
-    "--format",
-    "fmt",
-    type=click.Choice(["json", "human"]),
-    default="json",
-    show_default=True,
-    help="Output format. 'json' for agent/script use; 'human' for readable output.",
-)
 
 
 @cli.command()
