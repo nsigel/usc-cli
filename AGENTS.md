@@ -16,7 +16,10 @@ Python CLI for interacting with USC university services. Scope: USC SSO login, o
 - Tooling: ruff (lint), pytest (test)
 
 ## Auth
-- USC uses Shibboleth SSO → login.usc.edu → Duo MFA (bypass code or TOTP)
+- USC uses Shibboleth SSO → login.usc.edu → Duo MFA (bypass code)
+- Bypass codes are valid for **unlimited uses within 1 week** (not single-use)
+- Generate at https://account.usc.edu/2fa/duo-bypass-code (requires identity verification; refreshing the page does not generate a new code)
+- Store in `USC_DUO_BYPASS` env var; regenerate weekly
 - Session cookies are saved to `~/.config/usc-cli/session.json` after successful login
 - All subsequent commands load cookies from disk — no re-authentication needed until session expires
 
