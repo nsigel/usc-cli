@@ -649,3 +649,101 @@ def test_cli_grades_no_session(tmp_path) -> None:
         client_mod.SESSION_PATH = orig
 
     assert result.exit_code == 1
+
+
+# ---------------------------------------------------------------------------
+# CLI — status command
+# ---------------------------------------------------------------------------
+
+WHOAMI_RESPONSE = {
+    "Identifier": "345258",
+    "FirstName": "Noah",
+    "LastName": "Sigel",
+    "Pronouns": "",
+    "UniqueName": "4163587521",
+    "ProfileIdentifier": "6b3ONDjivG",
+}
+
+
+def test_cli_status_json_output(httpx_mock: HTTPXMock, tmp_path) -> None:
+    httpx_mock.add_response(
+        method="GET",
+        url=f"{BASE}/d2l/api/lp/{LP}/users/whoami",
+        json=WHOAMI_RESPONSE,
+    )
+    session_file = tmp_path / "session.json"
+    session_file.write_text(json.dumps(FAKE_SESSION))
+
+    runner = CliRunner()
+    import usc_cli.client as client_mod
+    orig = client_mod.SESSION_PATH
+    client_mod.SESSION_PATH = session_file
+    try:
+        result = runner.invoke(cli, ["status"])
+    finally:
+        client_mod.SESSION_PATH = orig
+
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["user"]["FirstName"] == "Noah"
+    assert data["user"]["UniqueName"] == "4163587521"
+    assert "session_path" in data
+
+
+def test_cli_status_human_output(httpx_mock: HTTPXMock, tmp_path) -> None:
+    httpx_mock.add_response(
+        method="GET",
+        url=f"{BASE}/d2l/api/lp/{LP}/users/whoami",
+        json=WHOAMI_RESPONSE,
+    )
+    session_file = tmp_path / "session.json"
+    session_file.write_text(json.dumps(FAKE_SESSION))
+
+    runner = CliRunner()
+    import usc_cli.client as client_mod
+    orig = client_mod.SESSION_PATH
+    client_mod.SESSION_PATH = session_file
+    try:
+        result = runner.invoke(cli, ["status", "--format", "human"])
+    finally:
+        client_mod.SESSION_PATH = orig
+
+    assert result.exit_code == 0
+    assert "Noah Sigel" in result.output
+    assert "4163587521" in result.output
+
+
+def test_cli_status_expired_session(httpx_mock: HTTPXMock, tmp_path) -> None:
+    httpx_mock.add_response(
+        method="GET",
+        url=f"{BASE}/d2l/api/lp/{LP}/users/whoami",
+        status_code=401,
+    )
+    session_file = tmp_path / "session.json"
+    session_file.write_text(json.dumps(FAKE_SESSION))
+
+    runner = CliRunner()
+    import usc_cli.client as client_mod
+    orig = client_mod.SESSION_PATH
+    client_mod.SESSION_PATH = session_file
+    try:
+        result = runner.invoke(cli, ["status"])
+    finally:
+        client_mod.SESSION_PATH = orig
+
+    assert result.exit_code == 1
+
+
+def test_cli_status_no_session(tmp_path) -> None:
+    session_file = tmp_path / "session.json"
+
+    runner = CliRunner()
+    import usc_cli.client as client_mod
+    orig = client_mod.SESSION_PATH
+    client_mod.SESSION_PATH = session_file
+    try:
+        result = runner.invoke(cli, ["status"])
+    finally:
+        client_mod.SESSION_PATH = orig
+
+    assert result.exit_code == 1
