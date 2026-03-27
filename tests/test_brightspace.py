@@ -713,7 +713,12 @@ def test_cli_status_human_output(httpx_mock: HTTPXMock, tmp_path) -> None:
     assert "4163587521" in result.output
 
 
-def test_cli_status_expired_session(httpx_mock: HTTPXMock, tmp_path) -> None:
+def test_cli_status_expired_session(httpx_mock: HTTPXMock, tmp_path, monkeypatch) -> None:
+    # Clear env creds so auto-reauth does not trigger and hit unmocked login URLs
+    monkeypatch.delenv("USC_USERNAME", raising=False)
+    monkeypatch.delenv("USC_PASSWORD", raising=False)
+    monkeypatch.delenv("USC_DUO_BYPASS", raising=False)
+
     httpx_mock.add_response(
         method="GET",
         url=f"{BASE}/d2l/api/lp/{LP}/users/whoami",
