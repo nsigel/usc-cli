@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import sys
+from pathlib import Path
 
 import click
 
@@ -431,6 +432,60 @@ def announcements(ctx: click.Context, course_id: int | None, fmt: str, since: st
             click.echo("\nErrors:", err=True)
             for err in errors:
                 click.echo(f"  [course {err['course_id']}] {err['error']}", err=True)
+
+
+@cli.command()
+@click.argument("url")
+@click.option(
+    "-o",
+    "--output",
+    "output_path",
+    required=True,
+    type=click.Path(writable=True, dir_okay=False),
+    help="Local path to write the downloaded file.",
+)
+@click.pass_context
+def download(ctx: click.Context, url: str, output_path: str) -> None:
+    """Download a file from Brightspace using your session cookies.
+
+    URL can be a full URL or a path relative to brightspace.usc.edu, e.g.:
+
+      usc download /content/enforced/261076-.../hw7.pdf -o hw7.pdf
+
+      usc download https://brightspace.usc.edu/content/enforced/.../hw7.pdf -o hw7.pdf
+    """
+    BRIGHTSPACE_BASE = "https://brightspace.usc.edu"
+
+    if not url.startswith("http://") and not url.startswith("https://"):
+        url = BRIGHTSPACE_BASE + url
+
+    try:
+        with USCClient() as client:
+            loaded = client.load_session()
+            if not loaded:
+                click.echo(
+                    json.dumps({"error": "No session found. Run `usc login` to authenticate."}),
+                    err=True,
+                )
+                sys.exit(1)
+
+            response = client._http.get(url)
+            if response.status_code != 200:
+                click.echo(
+                    json.dumps({"error": f"Request failed with status {response.status_code}"}),
+                    err=True,
+                )
+                sys.exit(1)
+
+            output = Path(output_path)
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_bytes(response.content)
+
+    except (AuthError, BrightspaceError) as e:
+        click.echo(json.dumps({"error": str(e)}), err=True)
+        sys.exit(1)
+
+    click.echo(json.dumps({"path": str(output), "size": output.stat().st_size}))
 
 
 if __name__ == "__main__":
