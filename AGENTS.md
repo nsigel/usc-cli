@@ -1,53 +1,58 @@
 # AGENTS.md — usc-cli
 
-## Overview
-Python CLI for interacting with USC university services. Scope: USC SSO login, on-device session/cookie persistence, and Brightspace course content access.
+Guidance for AI coding agents working in this repo.
 
-## Design Philosophy — Agents First
-- All commands output **JSON by default** (machine-readable, predictable schema)
-- `--format human` opt-in for human-readable tables/trees
-- No interactive prompts in non-auth commands
-- Errors always go to stderr as `{"error": "..."}` JSON; stdout is always valid JSON on success
-- Exit code 1 on any error
+## What This Is
+
+Python CLI for USC Brightspace. Handles USC Shibboleth SSO login, persists session cookies, and exposes course data via clean JSON-first commands.
+
+## Layout
+
+```
+src/usc_cli/
+  cli.py          Click command definitions (entrypoint)
+  client.py       httpx client, session persistence, auto-reauth logic
+  auth.py         USC Shibboleth SSO + Duo bypass login flow
+  brightspace.py  Brightspace Valence API calls (courses, content, grades, announcements)
+tests/
+  test_auth.py
+  test_brightspace.py
+  test_announcements.py
+  test_auto_reauth.py
+```
 
 ## Stack
-- Python 3.10+, Click (CLI), httpx (HTTP), Rich (output), keyring (credential storage)
-- src layout: `src/usc_cli/`
-- Tooling: ruff (lint), pytest (test)
 
-## Auth
-- USC uses Shibboleth SSO → login.usc.edu → Duo MFA (bypass code)
-- Bypass codes are valid for **unlimited uses within 1 week** (not single-use)
-- Generate at https://account.usc.edu/2fa/duo-bypass-code (requires identity verification; refreshing the page does not generate a new code)
-- Store in `USC_DUO_BYPASS` env var; regenerate weekly
-- Session cookies are saved to `~/.config/usc-cli/session.json` after successful login
-- All subsequent commands load cookies from disk — no re-authentication needed until session expires
-
-## Session Storage
-- Path: `~/.config/usc-cli/session.json`
-- Format: httpx-compatible cookie jar (list of cookie dicts with domain, name, value, path, etc.)
-- Credentials stored via keyring (system keychain)
-
-## Commands
-- `usc login` — authenticate via USC SSO + Duo, save session cookies
-- `usc status` — check if session is loaded
-- `usc logout` — clear session
-- `usc courses [--format json|human]` — list enrolled courses with id, code, title, section
-- `usc content <course_id> [--flat] [--format json|human]` — show module/topic tree; --flat for all topics in one list
-
-## Modules
-- `src/usc_cli/auth.py` — USC Shibboleth SSO + Duo MFA login flow
-- `src/usc_cli/client.py` — httpx client + session cookie persistence
-- `src/usc_cli/brightspace.py` — Brightspace Valence API (courses, content toc, dropbox)
-- `src/usc_cli/cli.py` — Click entrypoint
-
-## API Notes
-- Brightspace cookie auth works without OAuth registration (session cookies from login flow)
-- `brightspace.usc.edu` LP version: 1.31, LE version: 1.67
-- Cookies saved to `~/.config/usc-cli/session.json`
+- Python 3.10+, Click, httpx, Rich
+- `pyproject.toml` only (no setup.py)
+- Linting: ruff
+- Tests: pytest + pytest-httpx
 
 ## Conventions
-- All code in `src/usc_cli/`
-- Use `pyproject.toml` only (no setup.py/cfg)
+
+- All commands output **JSON to stdout** by default; `--format human` is opt-in
+- Errors go to **stderr** as `{"error": "..."}` JSON; exit code 1 on failure
+- No interactive prompts in non-auth commands
 - Type hints everywhere
-- ruff for formatting/linting
+- New commands follow the pattern in `cli.py`: load session → call brightspace function → format output
+
+## Adding a Command
+
+1. Add any new API calls to `brightspace.py`
+2. Register the Click command in `cli.py`
+3. Document the JSON output schema in the docstring
+4. Add tests in `tests/`
+
+## Auth Flow (for context)
+
+USC uses Shibboleth SSO → Duo MFA. The `auth.py` module drives this flow headlessly using a bypass code (a Duo feature that generates a short-lived OTP-style code). Session cookies are persisted to `~/.config/usc-cli/session.json`. All commands load cookies from disk.
+
+Auto-reauth: if `USC_USERNAME`, `USC_PASSWORD`, and `USC_DUO_BYPASS` are in the environment, any 401 from Brightspace triggers a silent re-login and request retry. This is implemented in `_AuthRetryClient.send()` in `client.py`.
+
+## Running Tests
+
+```bash
+pip install -e ".[dev]"
+pytest
+ruff check src/
+```
