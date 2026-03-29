@@ -1,6 +1,6 @@
 # usc-cli
 
-CLI for USC university services. Handles USC SSO login and persists your session on-device so other commands don't require re-authentication.
+USC Brightspace from your terminal. Authenticate once, then query courses, grades, content, announcements, and download files — all scriptable and agent-friendly.
 
 ## Install
 
@@ -8,37 +8,68 @@ CLI for USC university services. Handles USC SSO login and persists your session
 pip install -e ".[dev]"
 ```
 
-## Usage
+## Auth
 
 ```bash
-usc --help
-usc login
-usc status
-usc courses
-usc content <course_id>
-usc grades <course_id>
-usc announcements [course_id]
+usc login                  # prompts for NetID, password, bypass code
+usc status                 # verify session is live
+usc logout                 # clear saved session
 ```
 
-## Authentication
+Session cookies are persisted to `~/.config/usc-cli/session.json`. All commands load this automatically — you don't re-login between calls.
 
-`usc login` requires your USC NetID, password, and a **Duo bypass code**.
+**Bypass codes** replace Duo push during login. Get one at https://account.usc.edu/2fa/duo-bypass-code (requires identity verification). A code is valid for unlimited uses within 1 week.
 
-Bypass codes are available at https://account.usc.edu/2fa/duo-bypass-code — generating one requires identity verification (you won't get a new code just by refreshing the page).
+Store credentials in your environment for fully unattended operation:
 
-**Bypass code lifetime:** valid for unlimited uses within 1 week, then it expires. Store it in `USC_DUO_BYPASS` in your environment; you only need to regenerate it weekly (or if USC prompts you to during login).
+```bash
+export USC_USERNAME=yournetid
+export USC_PASSWORD=yourpassword
+export USC_DUO_BYPASS=1234567
+```
 
-## Development
+When all three are set, the CLI will **auto-reauth** on 401s — if your session expires mid-use, it re-logs in and retries the request transparently. No intervention needed until the bypass code expires (~weekly).
+
+## Commands
+
+```bash
+usc courses                         # list enrolled courses + IDs
+usc content <course_id>             # course modules and topic tree
+usc content <course_id> --flat      # flat topic list with module path
+usc grades <course_id>              # grade items and scores
+usc grades <course_id> --graded-only
+usc announcements                   # all courses
+usc announcements <course_id>
+usc announcements --since 2026-03-01
+usc download <url> -o <path>        # download any Brightspace file by URL
+```
+
+All commands output JSON by default. Pass `--format human` for readable output.
+
+### download
+
+Accepts a full URL or a relative Brightspace path:
+
+```bash
+usc download /content/enforced/261076-.../hw7.pdf -o hw7.pdf
+usc download https://brightspace.usc.edu/content/enforced/.../syllabus.pdf -o syllabus.pdf
+```
+
+URLs come from `usc content <id>` — each topic has a `url` field.
+
+## Dev
 
 ```bash
 ruff check src/
 pytest
 ```
 
-## Architecture
+## Layout
 
-- `src/usc_cli/cli.py` — Click CLI entrypoint
-- `src/usc_cli/client.py` — HTTP client (httpx); handles session persistence
-- `src/usc_cli/auth.py` — USC Shibboleth SSO + Duo MFA login flow
-- Session cookies stored at `~/.config/usc-cli/session.json`
-- Auth flow: USC Shibboleth SSO → Duo MFA → session cookies saved on-device
+```
+src/usc_cli/
+  cli.py          Click commands
+  client.py       httpx client, session persistence, auto-reauth
+  auth.py         USC Shibboleth SSO + Duo bypass login flow
+~/.config/usc-cli/session.json   persisted cookies
+```
