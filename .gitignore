@@ -1,0 +1,15 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+/usc
+/dist/
+/coverage.out
+
+# Artifacts left by the previous Python implementation are intentionally not
+# part of this history-free Go branch.
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
