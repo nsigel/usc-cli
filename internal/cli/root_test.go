@@ -11,7 +11,7 @@ import (
 	"github.com/nsigel/usc-cli/internal/config"
 )
 
-func TestLoginCreatesDefaultProfileWithoutRememberingSecrets(t *testing.T) {
+func TestLoginCreatesDefaultProfileAndRemembersCredentials(t *testing.T) {
 	t.Setenv("USC_USERNAME", "tommy")
 	t.Setenv("USC_PASSWORD", "secret")
 	t.Setenv("USC_DUO_BYPASS", "123456789")
@@ -44,8 +44,12 @@ func TestLoginCreatesDefaultProfileWithoutRememberingSecrets(t *testing.T) {
 	if profile.Username != "tommy" {
 		t.Fatalf("profile username = %q", profile.Username)
 	}
-	if _, err := os.Stat(store.CredentialsPath(config.DefaultProfile)); !os.IsNotExist(err) {
-		t.Fatalf("credentials file unexpectedly exists: %v", err)
+	saved, err := store.LoadCredentials(config.DefaultProfile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.Username != "tommy" || saved.Password != "secret" || saved.BypassCode != "123456789" {
+		t.Fatalf("saved credentials = %#v", saved)
 	}
 	var result map[string]any
 	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
@@ -68,7 +72,7 @@ func TestNamedLoginCanRememberCredentials(t *testing.T) {
 		},
 	}
 	command := app.Command()
-	command.SetArgs([]string{"--profile", "grad-school", "login", "--remember", "--non-interactive"})
+	command.SetArgs([]string{"--profile", "grad-school", "login", "--non-interactive"})
 	if err := command.Execute(); err != nil {
 		t.Fatal(err)
 	}
@@ -78,6 +82,94 @@ func TestNamedLoginCanRememberCredentials(t *testing.T) {
 	}
 	if credentials.Username != "student" || credentials.Password != "secret" || credentials.BypassCode != "987654321" {
 		t.Fatalf("saved credentials = %#v", credentials)
+	}
+}
+
+func TestLoginNoRememberLeavesNoCredentialFile(t *testing.T) {
+	t.Setenv("USC_USERNAME", "student")
+	t.Setenv("USC_PASSWORD", "secret")
+	t.Setenv("USC_DUO_BYPASS", "987654321")
+	store := config.New(t.TempDir())
+	app := &App{
+		Store: store, Out: &bytes.Buffer{}, Err: &bytes.Buffer{},
+		Login: func(context.Context, string, string, auth.Credentials) (auth.Result, error) {
+			return auth.Result{URL: auth.DefaultTarget, Status: 200}, nil
+		},
+	}
+	command := app.Command()
+	command.SetArgs([]string{"login", "--no-remember", "--non-interactive"})
+	if err := command.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(store.CredentialsPath(config.DefaultProfile)); !os.IsNotExist(err) {
+		t.Fatalf("credentials file unexpectedly exists: %v", err)
+	}
+}
+
+func TestStatusSelfHealsAndRemembersEnvironmentBypass(t *testing.T) {
+	store := config.New(t.TempDir())
+	if _, err := store.EnsureProfile("default", "student"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveCredentials("default", config.Credentials{
+		Username: "student", Password: "secret", BypassCode: "old-code",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("USC_DUO_BYPASS", "new-code")
+	output := &bytes.Buffer{}
+	app := &App{
+		Store: store, Out: output, Err: &bytes.Buffer{},
+		Login: func(_ context.Context, _ string, _ string, credentials auth.Credentials) (auth.Result, error) {
+			if credentials.BypassCode != "new-code" {
+				t.Fatalf("bypass code = %q", credentials.BypassCode)
+			}
+			return auth.Result{URL: auth.DefaultTarget, Status: 200, Reauthenticated: true}, nil
+		},
+	}
+	command := app.Command()
+	command.SetArgs([]string{"status"})
+	if err := command.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := store.LoadCredentials("default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.BypassCode != "new-code" {
+		t.Fatalf("saved bypass code = %q", saved.BypassCode)
+	}
+	var result map[string]any
+	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result["reauthenticated"] != true {
+		t.Fatalf("output = %#v", result)
+	}
+}
+
+func TestBypassCommandUpdatesSelectedProfile(t *testing.T) {
+	store := config.New(t.TempDir())
+	if _, err := store.EnsureProfile("default", "student"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveCredentials("default", config.Credentials{
+		Username: "student", Password: "secret", BypassCode: "old-code",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	app := &App{Store: store, Out: &bytes.Buffer{}, Err: &bytes.Buffer{}}
+	command := app.Command()
+	command.SetArgs([]string{"bypass", "new-code"})
+	if err := command.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := store.LoadCredentials("default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.BypassCode != "new-code" {
+		t.Fatalf("saved bypass code = %q", saved.BypassCode)
 	}
 }
 

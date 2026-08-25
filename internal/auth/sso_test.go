@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"errors"
 	"net/url"
 	"testing"
 
@@ -55,5 +56,16 @@ func TestSessionJarRecordsAndReplaysScopedCookies(t *testing.T) {
 	}
 	if cookies := restored.Cookies(nonMatchingURL); len(cookies) != 0 {
 		t.Fatalf("restored non-matching cookies = %#v, want none", cookies)
+	}
+}
+
+func TestValidateDuoFactor(t *testing.T) {
+	allowed := []byte(`{"stat":"OK","response":{"authn_evaluation":{"is_allowed":true}}}`)
+	if err := validateDuoFactor(200, allowed); err != nil {
+		t.Fatalf("allowed factor: %v", err)
+	}
+	rejected := []byte(`{"stat":"OK","response":{"authn_evaluation":{"is_allowed":false}}}`)
+	if err := validateDuoFactor(200, rejected); !errors.Is(err, ErrBypassRejected) {
+		t.Fatalf("rejected factor error = %v", err)
 	}
 }

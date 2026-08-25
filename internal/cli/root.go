@@ -16,7 +16,6 @@ import (
 )
 
 type LoginFunc func(context.Context, string, string, auth.Credentials) (auth.Result, error)
-type CheckFunc func(context.Context, string, string) (auth.Result, error)
 
 type App struct {
 	Store  *config.Store
@@ -24,7 +23,6 @@ type App struct {
 	Out    io.Writer
 	Err    io.Writer
 	Login  LoginFunc
-	Check  CheckFunc
 	prompt func(string, bool) (string, error)
 	reader *bufio.Reader
 
@@ -39,7 +37,7 @@ func New() (*cobra.Command, error) {
 	}
 	app := &App{
 		Store: config.New(root), In: os.Stdin, Out: os.Stdout, Err: os.Stderr,
-		Login: auth.Login, Check: auth.Check,
+		Login: auth.Login,
 	}
 	return app.Command(), nil
 }
@@ -56,9 +54,6 @@ func (a *App) Command() *cobra.Command {
 	}
 	if a.Login == nil {
 		a.Login = auth.Login
-	}
-	if a.Check == nil {
-		a.Check = auth.Check
 	}
 	a.reader = bufio.NewReader(a.In)
 
@@ -79,7 +74,7 @@ func (a *App) Command() *cobra.Command {
 		}
 		return nil
 	}
-	cmd.AddCommand(a.loginCommand(), a.statusCommand(), a.logoutCommand(), a.profileCommand())
+	cmd.AddCommand(a.loginCommand(), a.statusCommand(), a.logoutCommand(), a.bypassCommand(), a.profileCommand())
 	return cmd
 }
 

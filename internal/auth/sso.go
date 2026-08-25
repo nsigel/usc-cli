@@ -133,25 +133,32 @@ func copyCookie(cookie *http.Cookie) http.Cookie {
 	return copy
 }
 
-type browser struct {
-	client       *http.Client
-	jar          *sessionJar
-	saml2Request string            // browser sessionStorage equivalent used by saml2-read.js
-	microsoft    map[string]string // values JavaScript keeps across Microsoft pages
+type sso struct {
+	client          *http.Client
+	jar             *sessionJar
+	saml2Request    string            // SAML state carried across the USC redirect flow
+	microsoft       map[string]string // values JavaScript keeps across Microsoft pages
+	usedCredentials bool
 }
 
 const DefaultTarget = "https://webreg.usc.edu/Terms"
 
-// Result describes the authenticated page reached by Login or Check.
+var (
+	ErrCredentialsRequired = errors.New("USC credentials are required")
+	ErrBypassRejected      = errors.New("Duo bypass code was rejected")
+)
+
+// Result describes the authenticated page reached by Login.
 type Result struct {
-	URL    string
-	Status int
+	URL             string
+	Status          int
+	Reauthenticated bool
 }
 
 // Login restores a saved session, authenticates when necessary, and persists
 // the resulting cookies.
 func Login(ctx context.Context, target, sessionFile string, creds Credentials) (Result, error) {
-	b, err := newBrowser()
+	b, err := newSSO()
 	if err != nil {
 		return Result{}, err
 	}
@@ -165,27 +172,10 @@ func Login(ctx context.Context, target, sessionFile string, creds Credentials) (
 	if err := saveSession(sessionFile, b.jar); err != nil {
 		return Result{}, err
 	}
-	return Result{URL: p.URL.String(), Status: p.Status}, nil
+	return Result{URL: p.URL.String(), Status: p.Status, Reauthenticated: b.usedCredentials}, nil
 }
 
-// Check verifies that a saved session can reach target. It never attempts a
-// credential login.
-func Check(ctx context.Context, target, sessionFile string) (Result, error) {
-	b, err := newBrowser()
-	if err != nil {
-		return Result{}, err
-	}
-	if err := loadSession(sessionFile, b.jar); err != nil {
-		return Result{}, err
-	}
-	p, err := b.open(ctx, target, Credentials{})
-	if err != nil {
-		return Result{}, err
-	}
-	return Result{URL: p.URL.String(), Status: p.Status}, nil
-}
-
-func newBrowser() (*browser, error) {
+func newSSO() (*sso, error) {
 	jar, err := newSessionJar()
 	if err != nil {
 		return nil, err
@@ -197,12 +187,12 @@ func newBrowser() (*browser, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &browser{jar: jar, microsoft: map[string]string{}, client: &http.Client{Transport: transport, Jar: jar, Timeout: 45 * time.Second,
+	return &sso{jar: jar, microsoft: map[string]string{}, client: &http.Client{Transport: transport, Jar: jar, Timeout: 45 * time.Second,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}}, nil
 }
 
-func (b *browser) open(ctx context.Context, target string, c Credentials) (*page, error) {
+func (b *sso) open(ctx context.Context, target string, c Credentials) (*page, error) {
 	targetURL, err := url.ParseRequestURI(target)
 	if err != nil || targetURL.Scheme != "https" || targetURL.Host == "" {
 		return nil, fmt.Errorf("target must be an absolute HTTPS URL")
@@ -223,6 +213,7 @@ func (b *browser) open(ctx context.Context, target string, c Credentials) (*page
 			if err := c.require(); err != nil {
 				return nil, err
 			}
+			b.usedCredentials = true
 			f, err := firstForm(p)
 			if err != nil {
 				return nil, fmt.Errorf("USC login form: %w", err)
@@ -309,7 +300,7 @@ func (b *browser) open(ctx context.Context, target string, c Credentials) (*page
 				// generic HTML navigation handler process those below.
 			} else {
 				if missing := missingMicrosoftFormValues(p, b.microsoft); len(missing) != 0 {
-					return nil, fmt.Errorf("Microsoft %s did not expose required browser state: %s", p.URL.Path, strings.Join(missing, ","))
+					return nil, fmt.Errorf("Microsoft %s did not expose required SSO state: %s", p.URL.Path, strings.Join(missing, ","))
 				}
 				p, err = b.submit(ctx, p, f)
 				if err != nil {
@@ -340,7 +331,7 @@ func (b *browser) open(ctx context.Context, target string, c Credentials) (*page
 	return nil, errors.New("authentication exceeded 40 protocol steps")
 }
 
-func (b *browser) follow(ctx context.Context, p *page) (*page, error) {
+func (b *sso) follow(ctx context.Context, p *page) (*page, error) {
 	loc := p.Header.Get("Location")
 	if loc == "" {
 		return nil, fmt.Errorf("redirect from %s%s has no Location", p.URL.Host, p.URL.Path)
@@ -352,14 +343,14 @@ func (b *browser) follow(ctx context.Context, p *page) (*page, error) {
 	return b.do(ctx, http.MethodGet, u.String(), nil, "", p.URL)
 }
 
-func (b *browser) duo(ctx context.Context, prompt *page, bypassCode string) (*page, error) {
+func (b *sso) duo(ctx context.Context, prompt *page, bypassCode string) (*page, error) {
 	authkey := prompt.URL.Query().Get("authkey")
 	traceGroup := prompt.URL.Query().Get("req_trace_group")
 	if authkey == "" || traceGroup == "" {
 		return nil, errors.New("Duo prompt is missing authkey or req_trace_group")
 	}
 	base := "https://" + prompt.URL.Host + prompt.URL.Path
-	features, hints := duoBrowserDetails()
+	features, hints := duoClientDetails()
 	payloadURL := base + "/auth/payload?" + orderedQuery([]field{{"authkey", authkey}, {"browser_features", features}, {"is_ipad", "false"}, {"client_hints", hints}})
 	payload, err := b.do(ctx, http.MethodGet, payloadURL, nil, "", prompt.URL)
 	if err != nil {
@@ -388,8 +379,8 @@ func (b *browser) duo(ctx context.Context, prompt *page, bypassCode string) (*pa
 	if err != nil {
 		return nil, err
 	}
-	if factor.Status != 200 {
-		return nil, fmt.Errorf("Duo bypass factor returned %d", factor.Status)
+	if err := validateDuoFactor(factor.Status, factor.Body); err != nil {
+		return nil, err
 	}
 	if err := b.duoEvent(ctx, base, authkey, traceGroup, prompt.URL, "auth_success", ids); err != nil {
 		return nil, err
@@ -413,7 +404,7 @@ func (b *browser) duo(ctx context.Context, prompt *page, bypassCode string) (*pa
 	return b.do(ctx, http.MethodGet, exitURL, nil, "", prompt.URL)
 }
 
-func (b *browser) duoEvent(ctx context.Context, base, authkey, traceGroup string, referer *url.URL, view string, ids map[string]string) error {
+func (b *sso) duoEvent(ctx context.Context, base, authkey, traceGroup string, referer *url.URL, view string, ids map[string]string) error {
 	context := map[string]any{"current_view": view, "view_history": "", "message": "page loaded", "platform_authenticator_status": "available", "platform_id": "macos", "req-trace-group": traceGroup}
 	if view != "index" {
 		context["card_name"] = map[string]string{"device_health": "DeviceHealthCard", "pre_authn_eval": "PreAuthnEvaluationCard", "auth_success": "SuccessCard"}[view]
@@ -435,14 +426,14 @@ func (b *browser) duoEvent(ctx context.Context, base, authkey, traceGroup string
 		return err
 	}
 	if p.Status != 200 {
-		return fmt.Errorf("Duo browser_events returned %d", p.Status)
+		return fmt.Errorf("Duo event endpoint returned %d", p.Status)
 	}
 	return nil
 }
 
 func duoTrace(v string) http.Header { h := http.Header{}; h.Set("X-Duo-Req-Trace-Group", v); return h }
 
-func (b *browser) submit(ctx context.Context, p *page, f form) (*page, error) {
+func (b *sso) submit(ctx context.Context, p *page, f form) (*page, error) {
 	u, err := p.URL.Parse(f.Action)
 	if err != nil {
 		return nil, err
@@ -463,7 +454,7 @@ func (b *browser) submit(ctx context.Context, p *page, f form) (*page, error) {
 	return b.do(ctx, method, u.String(), []byte(orderedQuery(f.Fields)), "application/x-www-form-urlencoded", p.URL)
 }
 
-func (b *browser) do(ctx context.Context, method, rawURL string, body []byte, contentType string, referer *url.URL, extra ...http.Header) (*page, error) {
+func (b *sso) do(ctx context.Context, method, rawURL string, body []byte, contentType string, referer *url.URL, extra ...http.Header) (*page, error) {
 	req, err := http.NewRequestWithContext(ctx, method, rawURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -482,7 +473,7 @@ func (b *browser) do(ctx context.Context, method, rawURL string, body []byte, co
 	req.Header.Set("Sec-Fetch-Mode", fetchMode(contentType))
 	req.Header.Set("Sec-Fetch-Site", fetchSite(referer, req.URL))
 	if referer != nil {
-		req.Header.Set("Referer", browserReferer(referer, req.URL))
+		req.Header.Set("Referer", navigationReferer(referer, req.URL))
 	}
 	if method == http.MethodPost {
 		origin := req.URL.Scheme + "://" + req.URL.Host
@@ -539,7 +530,7 @@ func fetchSite(from, to *url.URL) string {
 	}
 	return "cross-site"
 }
-func browserReferer(from, to *url.URL) string {
+func navigationReferer(from, to *url.URL) string {
 	if from.Hostname() == to.Hostname() {
 		return from.String()
 	}
@@ -653,7 +644,7 @@ func elementValue(body []byte, id string) string {
 		}
 	}
 }
-func (b *browser) rememberMicrosoft(body []byte) {
+func (b *sso) rememberMicrosoft(body []byte) {
 	for k, v := range microsoftValues(body) {
 		if v != "" {
 			b.microsoft[k] = v
@@ -912,7 +903,7 @@ func orderedQuery(fields []field) string {
 	}
 	return strings.Join(out, "&")
 }
-func duoBrowserDetails() (string, string) {
+func duoClientDetails() (string, string) {
 	features := `{"touch_supported":false,"platform_authenticator_status":"available","webauthn_supported":true,"screen_resolution_height":956,"screen_resolution_width":1470,"screen_color_depth":30,"is_uvpa_available":true,"client_capabilities_uvpa":true}`
 	hints := `{"brands":[{"brand":"Chromium","version":"151"},{"brand":"Not=A?Brand","version":"99"}],"fullVersionList":[{"brand":"Chromium","version":"151.0.7922.76"},{"brand":"Not=A?Brand","version":"99.0.0.0"}],"mobile":false,"platform":"macOS","platformVersion":"14.8.4","uaFullVersion":"151.0.7922.76"}`
 	return features, base64.StdEncoding.EncodeToString([]byte(hints))
@@ -946,9 +937,33 @@ func jsonStrings(data []byte) map[string]string {
 	return out
 }
 
+func validateDuoFactor(status int, body []byte) error {
+	if status == 400 || status == 401 || status == 403 {
+		return ErrBypassRejected
+	}
+	if status != 200 {
+		return fmt.Errorf("Duo bypass factor returned %d", status)
+	}
+	var payload struct {
+		Stat     string `json:"stat"`
+		Response struct {
+			AuthnEvaluation struct {
+				IsAllowed bool `json:"is_allowed"`
+			} `json:"authn_evaluation"`
+		} `json:"response"`
+	}
+	if err := json.Unmarshal(body, &payload); err == nil {
+		if payload.Stat != "OK" || !payload.Response.AuthnEvaluation.IsAllowed {
+			return ErrBypassRejected
+		}
+		return nil
+	}
+	return errors.New("Duo bypass factor returned an invalid response")
+}
+
 func (c Credentials) require() error {
 	if c.Username == "" || c.Password == "" || c.BypassCode == "" {
-		return errors.New("USC_USERNAME, USC_PASSWORD, and USC_DUO_BYPASS are required when the USC SSO session has expired")
+		return ErrCredentialsRequired
 	}
 	return nil
 }

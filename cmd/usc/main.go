@@ -14,7 +14,7 @@ func main() {
 		err = command.Execute()
 	}
 	if err != nil {
-		if encodeErr := json.NewEncoder(os.Stderr).Encode(map[string]string{"error": err.Error()}); encodeErr != nil {
+		if encodeErr := json.NewEncoder(os.Stderr).Encode(cli.ErrorPayload(err)); encodeErr != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
 		os.Exit(1)
