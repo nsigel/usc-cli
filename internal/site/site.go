@@ -7,9 +7,7 @@ import "fmt"
 type Name string
 
 const (
-	Advise      Name = "advise"
 	Brightspace Name = "brightspace"
-	OASIS       Name = "oasis"
 	WebReg      Name = "webreg"
 )
 
@@ -34,9 +32,7 @@ type Site struct {
 }
 
 var catalog = []Site{
-	{Name: Advise, URL: "https://usc.edu/advise", LoginURL: "https://uscmeyestro.my.site.com/adviseusc/s/", Login: ShibbolethSAML},
 	{Name: Brightspace, URL: "https://brightspace.usc.edu/", LoginURL: "https://brightspace.usc.edu/", Login: EntraSAML},
-	{Name: OASIS, URL: "https://atweb.usc.edu/OASIS/", LoginURL: "https://atweb.usc.edu/OASIS/", Login: Legacy},
 	{Name: WebReg, URL: "https://webreg.usc.edu/", LoginURL: "https://webreg.usc.edu/auth/login?returnUrl=%2FTerms", Login: EntraOIDC},
 }
 
