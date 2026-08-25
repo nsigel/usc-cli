@@ -29,6 +29,20 @@ func TestResolveProfilePrecedence(t *testing.T) {
 	}
 }
 
+func TestDefaultRootUsesUSCDirectoryInHome(t *testing.T) {
+	t.Setenv("USC_CONFIG_DIR", "")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	root, err := DefaultRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(home, "usc"); root != want {
+		t.Errorf("DefaultRoot() = %q, want %q", root, want)
+	}
+}
+
 func TestProfileFilesArePrivate(t *testing.T) {
 	store := New(t.TempDir())
 	if _, err := store.EnsureProfile("default", "tommy"); err != nil {

@@ -46,19 +46,15 @@ func DefaultRoot() (string, error) {
 	if configured := os.Getenv("USC_CONFIG_DIR"); configured != "" {
 		return filepath.Abs(configured)
 	}
-	root, err := os.UserConfigDir()
+	home, err := os.UserHomeDir()
 	if err != nil {
-		return "", fmt.Errorf("find user config directory: %w", err)
+		return "", fmt.Errorf("find user home directory: %w", err)
 	}
-	return filepath.Join(root, "usc-cli"), nil
+	return filepath.Join(home, "usc"), nil
 }
 
 func New(root string) *Store {
 	return &Store{root: root}
-}
-
-func (s *Store) Root() string {
-	return s.root
 }
 
 func ValidateProfileName(name string) error {

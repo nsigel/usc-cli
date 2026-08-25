@@ -24,7 +24,9 @@ usc logout
 `usc login` prompts for a USC NetID, password, and current Duo bypass code. It
 automatically creates the `default` profile and remembers the credentials and
 resulting session. Use `--no-remember` only for an intentionally temporary login.
-All normal output is JSON; use `--format human` for terminal-oriented output.
+All command output is JSON. It is pretty-printed when stdout is an interactive
+terminal and compact when piped. Use `--json` to force compact output or
+`--pretty` to force pretty-printed output.
 
 For unattended login, use environment variables rather than command-line secrets:
 
@@ -45,16 +47,9 @@ If the Duo bypass code expires, replace it with one command:
 usc bypass NEW_CODE
 ```
 
-For agents that prefer environment injection, this is equivalent:
-
-```bash
-USC_DUO_BYPASS=NEW_CODE usc status
-```
-
-The environment value overrides the remembered code, the expired session is
-repaired, and the new code is remembered after success. A rejected code returns
-the structured error code `duo_bypass_invalid` with `usc bypass <new-code>` as
-the recovery action.
+The next authenticated command uses the updated code if it needs to repair an
+expired session. A rejected code returns the structured error code
+`duo_bypass_invalid` with `usc bypass <new-code>` as the recovery action.
 
 ## Profiles
 
@@ -73,9 +68,7 @@ The global `--profile` flag wins over `USC_PROFILE`, which wins over the active
 profile. Without any of them, `default` is used. A named profile is also created
 automatically by `usc --profile NAME login`.
 
-Files live below the platform user-config directory (normally
-`~/.config/usc-cli` on Linux and `~/Library/Application Support/usc-cli` on
-macOS):
+Files live below `~/usc` (or the directory set by `USC_CONFIG_DIR`):
 
 ```text
 config.json                         active profile name

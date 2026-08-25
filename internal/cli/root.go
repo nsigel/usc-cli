@@ -26,8 +26,9 @@ type App struct {
 	prompt func(string, bool) (string, error)
 	reader *bufio.Reader
 
-	profile string
-	format  string
+	profile     string
+	compactJSON bool
+	prettyJSON  bool
 }
 
 func New() (*cobra.Command, error) {
@@ -67,13 +68,8 @@ func (a *App) Command() *cobra.Command {
 	cmd.SetOut(a.Out)
 	cmd.SetErr(a.Err)
 	cmd.PersistentFlags().StringVar(&a.profile, "profile", "", "profile to use (default: USC_PROFILE, active profile, or default)")
-	cmd.PersistentFlags().StringVar(&a.format, "format", "json", "output format: json or human")
-	cmd.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
-		if a.format != "json" && a.format != "human" {
-			return fmt.Errorf("unsupported format %q (use json or human)", a.format)
-		}
-		return nil
-	}
+	cmd.PersistentFlags().BoolVar(&a.compactJSON, "json", false, "emit compact JSON")
+	cmd.PersistentFlags().BoolVar(&a.prettyJSON, "pretty", false, "emit pretty-printed JSON")
 	cmd.AddCommand(a.loginCommand(), a.statusCommand(), a.logoutCommand(), a.bypassCommand(), a.profileCommand())
 	return cmd
 }
@@ -84,8 +80,15 @@ func (a *App) selectedProfile() (string, error) {
 
 func (a *App) writeJSON(value any) error {
 	encoder := json.NewEncoder(a.Out)
-	encoder.SetIndent("", "  ")
+	if a.prettyJSON || (!a.compactJSON && outputIsTerminal(a.Out)) {
+		encoder.SetIndent("", "  ")
+	}
 	return encoder.Encode(value)
+}
+
+func outputIsTerminal(output io.Writer) bool {
+	file, ok := output.(*os.File)
+	return ok && term.IsTerminal(int(file.Fd()))
 }
 
 func (a *App) ask(label string, secret bool) (string, error) {

@@ -42,25 +42,18 @@ func (a *App) runLogin(cmd *cobra.Command, options loginOptions) error {
 	if err != nil {
 		return err
 	}
-	profile, profileErr := a.Store.LoadProfile(profileName)
-	if profileErr != nil && !errors.Is(profileErr, os.ErrNotExist) {
-		return profileErr
-	}
-	saved, savedErr := a.Store.LoadCredentials(profileName)
-	if savedErr != nil && !errors.Is(savedErr, os.ErrNotExist) {
-		return savedErr
-	}
-
-	credentials := auth.Credentials{
-		Username:   firstNonempty(options.username, os.Getenv("USC_USERNAME"), saved.Username, profile.Username),
-		Password:   firstNonempty(options.password, os.Getenv("USC_PASSWORD"), saved.Password),
-		BypassCode: firstNonempty(options.bypassCode, os.Getenv("USC_DUO_BYPASS"), saved.BypassCode),
+	credentials, err := a.resolveCredentials(profileName, auth.Credentials{
+		Username:   firstNonempty(options.username, os.Getenv("USC_USERNAME")),
+		Password:   firstNonempty(options.password, os.Getenv("USC_PASSWORD")),
+		BypassCode: firstNonempty(options.bypassCode, os.Getenv("USC_DUO_BYPASS")),
+	})
+	if err != nil {
+		return err
 	}
 	if err := a.completeCredentials(&credentials, options.nonInteractive); err != nil {
 		return err
 	}
-	profile, err = a.Store.EnsureProfile(profileName, credentials.Username)
-	if err != nil {
+	if _, err := a.Store.EnsureProfile(profileName, credentials.Username); err != nil {
 		return err
 	}
 	if _, err := a.Store.LoadConfig(); errors.Is(err, os.ErrNotExist) {
@@ -71,7 +64,7 @@ func (a *App) runLogin(cmd *cobra.Command, options loginOptions) error {
 
 	result, err := a.Login(cmd.Context(), auth.DefaultTarget, a.Store.SessionPath(profileName), credentials)
 	if err != nil {
-		return authenticationError(profileName, fmt.Errorf("authenticate profile %q: %w", profileName, err))
+		return fmt.Errorf("authenticate profile %q: %w", profileName, err)
 	}
 	if !options.noRemember {
 		if err := a.Store.SaveCredentials(profileName, config.Credentials{
@@ -79,10 +72,6 @@ func (a *App) runLogin(cmd *cobra.Command, options loginOptions) error {
 		}); err != nil {
 			return fmt.Errorf("save credentials: %w", err)
 		}
-	}
-	if a.format == "human" {
-		_, err = fmt.Fprintf(a.Out, "Logged in as %s (profile %s).\nSession: %s\n", profile.Username, profile.Name, a.Store.SessionPath(profileName))
-		return err
 	}
 	return a.writeJSON(map[string]any{
 		"authenticated":   true,
@@ -95,51 +84,36 @@ func (a *App) runLogin(cmd *cobra.Command, options loginOptions) error {
 }
 
 func (a *App) completeCredentials(credentials *auth.Credentials, nonInteractive bool) error {
-	missing := func() []string {
-		var names []string
-		if credentials.Username == "" {
-			names = append(names, "username")
-		}
-		if credentials.Password == "" {
-			names = append(names, "password")
-		}
-		if credentials.BypassCode == "" {
-			names = append(names, "bypass code")
-		}
-		return names
-	}
 	if nonInteractive {
-		if names := missing(); len(names) != 0 {
+		if names := missingCredentials(*credentials); len(names) != 0 {
 			return fmt.Errorf("missing %v; set USC_USERNAME, USC_PASSWORD, and USC_DUO_BYPASS or remove --non-interactive", names)
 		}
 		return nil
 	}
-	var err error
-	if credentials.Username == "" {
-		credentials.Username, err = a.ask("USC NetID: ", false)
-		if err != nil {
-			return err
+	for _, prompt := range []struct {
+		label  string
+		secret bool
+		value  *string
+	}{
+		{label: "USC NetID: ", value: &credentials.Username},
+		{label: "USC password: ", secret: true, value: &credentials.Password},
+		{label: "Duo bypass code: ", secret: true, value: &credentials.BypassCode},
+	} {
+		if *prompt.value == "" {
+			value, err := a.ask(prompt.label, prompt.secret)
+			if err != nil {
+				return err
+			}
+			*prompt.value = value
 		}
 	}
-	if credentials.Password == "" {
-		credentials.Password, err = a.ask("USC password: ", true)
-		if err != nil {
-			return err
-		}
-	}
-	if credentials.BypassCode == "" {
-		credentials.BypassCode, err = a.ask("Duo bypass code: ", true)
-		if err != nil {
-			return err
-		}
-	}
-	if names := missing(); len(names) != 0 {
+	if names := missingCredentials(*credentials); len(names) != 0 {
 		return fmt.Errorf("missing %v", names)
 	}
 	return nil
 }
 
-func (a *App) automaticCredentials(profileName string) (auth.Credentials, error) {
+func (a *App) resolveCredentials(profileName string, overrides auth.Credentials) (auth.Credentials, error) {
 	profile, err := a.Store.LoadProfile(profileName)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return auth.Credentials{}, err
@@ -149,33 +123,43 @@ func (a *App) automaticCredentials(profileName string) (auth.Credentials, error)
 		return auth.Credentials{}, err
 	}
 	return auth.Credentials{
-		Username:   firstNonempty(os.Getenv("USC_USERNAME"), saved.Username, profile.Username),
-		Password:   firstNonempty(os.Getenv("USC_PASSWORD"), saved.Password),
-		BypassCode: firstNonempty(os.Getenv("USC_DUO_BYPASS"), saved.BypassCode),
+		Username:   firstNonempty(overrides.Username, saved.Username, profile.Username),
+		Password:   firstNonempty(overrides.Password, saved.Password),
+		BypassCode: firstNonempty(overrides.BypassCode, saved.BypassCode),
 	}, nil
 }
 
-func credentialsComplete(credentials auth.Credentials) bool {
-	return credentials.Username != "" && credentials.Password != "" && credentials.BypassCode != ""
+func missingCredentials(credentials auth.Credentials) []string {
+	var missing []string
+	if credentials.Username == "" {
+		missing = append(missing, "username")
+	}
+	if credentials.Password == "" {
+		missing = append(missing, "password")
+	}
+	if credentials.BypassCode == "" {
+		missing = append(missing, "bypass code")
+	}
+	return missing
 }
 
 // ensureSession is the single entry point authenticated commands use. Login
 // first tries the saved cookies and only runs SSO when the target redirects to
-// USC login. Environment values override remembered credentials and are saved
-// after success, which makes Duo bypass rotation self-healing as well.
+// USC login. If reauthentication is needed, it uses the profile's remembered
+// credentials.
 func (a *App) ensureSession(ctx context.Context, profileName string) (auth.Result, error) {
-	credentials, err := a.automaticCredentials(profileName)
+	credentials, err := a.resolveCredentials(profileName, auth.Credentials{})
 	if err != nil {
 		return auth.Result{}, err
 	}
-	if !fileExists(a.Store.SessionPath(profileName)) && !credentialsComplete(credentials) {
-		return auth.Result{}, authenticationError(profileName, auth.ErrCredentialsRequired)
+	if !fileExists(a.Store.SessionPath(profileName)) && !credentials.Complete() {
+		return auth.Result{}, fmt.Errorf("profile %q: %w", profileName, auth.ErrCredentialsRequired)
 	}
 	result, err := a.Login(ctx, auth.DefaultTarget, a.Store.SessionPath(profileName), credentials)
 	if err != nil {
-		return auth.Result{}, authenticationError(profileName, fmt.Errorf("authenticate profile %q: %w", profileName, err))
+		return auth.Result{}, fmt.Errorf("authenticate profile %q: %w", profileName, err)
 	}
-	if credentialsComplete(credentials) {
+	if credentials.Complete() {
 		if _, err := a.Store.EnsureProfile(profileName, credentials.Username); err != nil {
 			return auth.Result{}, err
 		}
@@ -203,14 +187,6 @@ func (a *App) statusCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if a.format == "human" {
-				verb := "authenticated"
-				if result.Reauthenticated {
-					verb = "reauthenticated"
-				}
-				_, err = fmt.Fprintf(a.Out, "Profile %s is %s.\n", profile, verb)
-				return err
-			}
 			return a.writeJSON(map[string]any{
 				"authenticated": true, "profile": profile, "reauthenticated": result.Reauthenticated,
 				"status": result.Status, "url": result.URL, "session_path": sessionPath,
@@ -229,11 +205,11 @@ func (a *App) bypassCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			credentials, err := a.automaticCredentials(profileName)
+			credentials, err := a.resolveCredentials(profileName, auth.Credentials{})
 			if err != nil {
 				return err
 			}
-			code := os.Getenv("USC_DUO_BYPASS")
+			code := ""
 			if len(args) == 1 {
 				code = args[0]
 			}
@@ -244,10 +220,10 @@ func (a *App) bypassCommand() *cobra.Command {
 				}
 			}
 			if credentials.Username == "" || credentials.Password == "" {
-				return authenticationError(profileName, auth.ErrCredentialsRequired)
+				return fmt.Errorf("profile %q: %w", profileName, auth.ErrCredentialsRequired)
 			}
 			if code == "" {
-				return errors.New("Duo bypass code cannot be empty")
+				return errors.New("duo bypass code cannot be empty")
 			}
 			credentials.BypassCode = code
 			if _, err := a.Store.EnsureProfile(profileName, credentials.Username); err != nil {
@@ -256,10 +232,6 @@ func (a *App) bypassCommand() *cobra.Command {
 			if err := a.Store.SaveCredentials(profileName, config.Credentials{
 				Username: credentials.Username, Password: credentials.Password, BypassCode: credentials.BypassCode,
 			}); err != nil {
-				return err
-			}
-			if a.format == "human" {
-				_, err = fmt.Fprintf(a.Out, "Updated Duo bypass code for profile %s.\n", profileName)
 				return err
 			}
 			return a.writeJSON(map[string]any{"updated": true, "profile": profileName})
@@ -285,10 +257,6 @@ func (a *App) logoutCommand() *cobra.Command {
 				if err := a.Store.ForgetCredentials(profile); err != nil {
 					return err
 				}
-			}
-			if a.format == "human" {
-				_, err = fmt.Fprintf(a.Out, "Logged out profile %s.\n", profile)
-				return err
 			}
 			return a.writeJSON(map[string]any{"logged_out": true, "profile": profile, "credentials_forgotten": forget})
 		},

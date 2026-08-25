@@ -32,18 +32,6 @@ func (a *App) profileListCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if a.format == "human" {
-				for _, profile := range profiles {
-					marker := " "
-					if profile.Name == current {
-						marker = "*"
-					}
-					if _, err := fmt.Fprintf(a.Out, "%s %-20s %s\n", marker, profile.Name, profile.Username); err != nil {
-						return err
-					}
-				}
-				return nil
-			}
 			items := make([]map[string]any, 0, len(profiles))
 			for _, profile := range profiles {
 				items = append(items, map[string]any{
@@ -70,10 +58,6 @@ func (a *App) profileAddCommand() *cobra.Command {
 					return err
 				}
 			}
-			if a.format == "human" {
-				_, err = fmt.Fprintf(a.Out, "Created profile %s.\n", profile.Name)
-				return err
-			}
 			return a.writeJSON(map[string]any{"created": true, "name": profile.Name, "username": profile.Username, "current": use})
 		},
 	}
@@ -87,10 +71,6 @@ func (a *App) profileUseCommand() *cobra.Command {
 		Use: "use NAME", Short: "Select the default profile", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			if err := a.Store.SetCurrent(args[0]); err != nil {
-				return err
-			}
-			if a.format == "human" {
-				_, err := fmt.Fprintf(a.Out, "Using profile %s.\n", args[0])
 				return err
 			}
 			return a.writeJSON(map[string]any{"current_profile": args[0]})
@@ -126,10 +106,6 @@ func (a *App) profileShowCommand() *cobra.Command {
 				"has_remembered_credentials": fileExists(a.Store.CredentialsPath(name)),
 				"profile_path":               a.Store.ProfilePath(name), "session_path": a.Store.SessionPath(name),
 			}
-			if a.format == "human" {
-				_, err = fmt.Fprintf(a.Out, "Profile: %s\nUsername: %s\nSession: %t\nRemembered credentials: %t\n", profile.Name, profile.Username, result["has_session"], result["has_remembered_credentials"])
-				return err
-			}
 			return a.writeJSON(result)
 		},
 	}
@@ -150,10 +126,6 @@ func (a *App) profileRemoveCommand() *cobra.Command {
 				return err
 			}
 			if err := a.Store.RemoveProfile(args[0]); err != nil {
-				return err
-			}
-			if a.format == "human" {
-				_, err := fmt.Fprintf(a.Out, "Removed profile %s.\n", args[0])
 				return err
 			}
 			return a.writeJSON(map[string]any{"removed": true, "name": args[0]})
