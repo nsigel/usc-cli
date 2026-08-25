@@ -1,0 +1,56 @@
+// Package site describes the USC systems supported by the CLI.
+package site
+
+import "fmt"
+
+// Name is the stable command-line name of a USC site.
+type Name string
+
+const (
+	Advise      Name = "advise"
+	Brightspace Name = "brightspace"
+	OASIS       Name = "oasis"
+	WebReg      Name = "webreg"
+)
+
+// Login identifies how a site enters USC authentication. It does not imply
+// that two sites share cookies or an application protocol.
+type Login string
+
+const (
+	EntraOIDC      Login = "entra-oidc"
+	EntraSAML      Login = "entra-saml"
+	Legacy         Login = "legacy"
+	ShibbolethSAML Login = "shibboleth-saml"
+)
+
+// Site is the small amount of information shared by every integration.
+// Site-specific clients own everything else.
+type Site struct {
+	Name     Name   `json:"name"`
+	URL      string `json:"url"`
+	LoginURL string `json:"login_url"`
+	Login    Login  `json:"login"`
+}
+
+var catalog = []Site{
+	{Name: Advise, URL: "https://usc.edu/advise", LoginURL: "https://uscmeyestro.my.site.com/adviseusc/s/", Login: ShibbolethSAML},
+	{Name: Brightspace, URL: "https://brightspace.usc.edu/", LoginURL: "https://brightspace.usc.edu/", Login: EntraSAML},
+	{Name: OASIS, URL: "https://atweb.usc.edu/OASIS/", LoginURL: "https://atweb.usc.edu/OASIS/", Login: Legacy},
+	{Name: WebReg, URL: "https://webreg.usc.edu/", LoginURL: "https://webreg.usc.edu/auth/login?returnUrl=%2FTerms", Login: EntraOIDC},
+}
+
+// All returns the known sites in command-line order.
+func All() []Site {
+	return append([]Site(nil), catalog...)
+}
+
+// Find returns the site with name.
+func Find(name Name) (Site, error) {
+	for _, candidate := range catalog {
+		if candidate.Name == name {
+			return candidate, nil
+		}
+	}
+	return Site{}, fmt.Errorf("unknown site %q", name)
+}

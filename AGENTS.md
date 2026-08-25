@@ -1,58 +1,34 @@
-# AGENTS.md — usc-cli
+# AGENTS.md — usc-cli Go rewrite
 
-Guidance for AI coding agents working in this repo.
+## Purpose
 
-## What This Is
-
-Python CLI for USC Brightspace. Handles USC Shibboleth SSO login, persists session cookies, and exposes course data via clean JSON-first commands.
+This orphan branch is a Go/Cobra rewrite of the USC CLI. Authentication and
+profile isolation are the first milestone.
 
 ## Layout
 
+```text
+cmd/usc/           executable entrypoint
+internal/auth/     USC SSO, Microsoft, Duo, and session-cookie engine
+internal/cli/      Cobra commands and JSON formatting
+internal/config/   profile, credential, and session paths
 ```
-src/usc_cli/
-  cli.py          Click command definitions (entrypoint)
-  client.py       httpx client, session persistence, auto-reauth logic
-  auth.py         USC Shibboleth SSO + Duo bypass login flow
-  brightspace.py  Brightspace Valence API calls (courses, content, grades, announcements)
-tests/
-  test_auth.py
-  test_brightspace.py
-  test_announcements.py
-  test_auto_reauth.py
-```
-
-## Stack
-
-- Python 3.10+, Click, httpx, Rich
-- `pyproject.toml` only (no setup.py)
-- Linting: ruff
-- Tests: pytest + pytest-httpx
 
 ## Conventions
 
-- All commands output **JSON to stdout** by default; `--format human` is opt-in
-- Errors go to **stderr** as `{"error": "..."}` JSON; exit code 1 on failure
-- No interactive prompts in non-auth commands
-- Type hints everywhere
-- New commands follow the pattern in `cli.py`: load session → call brightspace function → format output
+- Commands emit JSON to stdout. Output is pretty in a terminal and compact when
+  piped; `--json` and `--pretty` override detection.
+- Errors are JSON on stderr and return exit code 1.
+- Only authentication commands may prompt.
+- Never log passwords, bypass codes, or cookie values.
+- Profile directories use mode `0700`; files containing user data use `0600`.
+- Prefer dependency injection around network auth so command tests stay offline.
 
-## Adding a Command
-
-1. Add any new API calls to `brightspace.py`
-2. Register the Click command in `cli.py`
-3. Document the JSON output schema in the docstring
-4. Add tests in `tests/`
-
-## Auth Flow (for context)
-
-USC uses Shibboleth SSO → Duo MFA. The `auth.py` module drives this flow headlessly using a bypass code (a Duo feature that generates a short-lived OTP-style code). Session cookies are persisted to `~/.config/usc-cli/session.json`. All commands load cookies from disk.
-
-Auto-reauth: if `USC_USERNAME`, `USC_PASSWORD`, and `USC_DUO_BYPASS` are in the environment, any 401 from Brightspace triggers a silent re-login and request retry. This is implemented in `_AuthRetryClient.send()` in `client.py`.
-
-## Running Tests
+## Verify
 
 ```bash
-pip install -e ".[dev]"
-pytest
-ruff check src/
+gofmt -w cmd internal
+go test ./...
+go vet ./...
+go build ./cmd/usc
 ```
