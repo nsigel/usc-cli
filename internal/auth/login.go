@@ -38,14 +38,12 @@ type authenticator struct {
 	duoClientHintUA string
 	saml2Request    string
 	microsoft       map[string]string
-	usedCredentials bool
 }
 
 // Result describes the authenticated page reached by Login.
 type Result struct {
-	URL             string // final authenticated URL
-	Status          int    // final HTTP status code
-	Reauthenticated bool   // whether credentials were submitted
+	URL    string // final authenticated URL
+	Status int    // final HTTP status code
 }
 
 // Login restores the cookies in sessionFile and opens target. If USC requests
@@ -57,12 +55,24 @@ type Result struct {
 // insufficient and credentials is incomplete, and ErrBypassRejected when Duo
 // rejects the bypass code.
 func Login(ctx context.Context, target, sessionFile string, credentials Credentials) (Result, error) {
+	return login(ctx, target, sessionFile, credentials, false)
+}
+
+// LoginFresh ignores the saved session before authenticating and replaces it
+// only after the requested application has been reached successfully.
+func LoginFresh(ctx context.Context, target, sessionFile string, credentials Credentials) (Result, error) {
+	return login(ctx, target, sessionFile, credentials, true)
+}
+
+func login(ctx context.Context, target, sessionFile string, credentials Credentials, fresh bool) (Result, error) {
 	authenticator, err := newAuthenticator()
 	if err != nil {
 		return Result{}, err
 	}
-	if err := loadSession(sessionFile, authenticator.jar); err != nil {
-		return Result{}, err
+	if !fresh {
+		if err := loadSession(sessionFile, authenticator.jar); err != nil {
+			return Result{}, err
+		}
 	}
 	page, err := authenticator.open(ctx, target, credentials)
 	if err != nil {
@@ -74,9 +84,8 @@ func Login(ctx context.Context, target, sessionFile string, credentials Credenti
 		return Result{}, err
 	}
 	return Result{
-		URL:             page.URL.String(),
-		Status:          page.Status,
-		Reauthenticated: authenticator.usedCredentials,
+		URL:    page.URL.String(),
+		Status: page.Status,
 	}, nil
 }
 
@@ -103,7 +112,6 @@ func (a *authenticator) open(ctx context.Context, target string, credentials Cre
 			}
 			// Credentials are only injected into USC's exact login endpoint, never
 			// into a generic form discovered elsewhere in the chain.
-			a.usedCredentials = true
 			form, formErr := firstForm(current)
 			if formErr != nil {
 				return nil, fmt.Errorf("USC login form: %w", formErr)

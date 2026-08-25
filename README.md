@@ -29,8 +29,11 @@ go build -ldflags '-X main.version=v0.1.0' -o usc ./cmd/usc
 ## Authentication
 
 `auth login` defaults to WebReg and accepts `webreg`, `brightspace`, or
-`advise` as an optional site. It prompts for the USC NetID, password, and Duo
-bypass code, then saves the resulting cross-domain cookie session.
+`advise` as an optional site. It first reuses the saved session; if USC needs
+a new login, it uses the supplied credentials or prompts for the USC NetID,
+password, and Duo bypass code. Pass `--fresh` to intentionally ignore the
+saved session. A successful login saves the resulting cross-domain cookie
+session.
 
 ```sh
 usc auth login

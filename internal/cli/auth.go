@@ -23,6 +23,7 @@ func authCommand() *cobra.Command {
 func loginCommand() *cobra.Command {
 	var username string
 	var nonInteractive bool
+	var fresh bool
 	cmd := &cobra.Command{
 		Use:   "login [site]",
 		Short: "Sign in through USC SSO",
@@ -39,28 +40,35 @@ func loginCommand() *cobra.Command {
 				Password:   os.Getenv("USC_PASSWORD"),
 				BypassCode: os.Getenv("USC_DUO_BYPASS"),
 			}
-			if err := completeCredentials(cmd, &credentials, nonInteractive); err != nil {
-				return err
-			}
 			path, err := sessionPath()
 			if err != nil {
 				return err
 			}
-			result, err := auth.Login(cmd.Context(), selected.LoginURL, path, credentials)
+			login := auth.Login
+			if fresh {
+				login = auth.LoginFresh
+			}
+			result, err := login(cmd.Context(), selected.LoginURL, path, credentials)
+			if errors.Is(err, auth.ErrCredentialsRequired) {
+				if err := completeCredentials(cmd, &credentials, nonInteractive); err != nil {
+					return err
+				}
+				result, err = login(cmd.Context(), selected.LoginURL, path, credentials)
+			}
 			if err != nil {
 				return err
 			}
 			return writeJSON(cmd, map[string]any{
-				"authenticated":   true,
-				"reauthenticated": result.Reauthenticated,
-				"site":            selected.Name,
-				"status":          result.Status,
-				"url":             result.URL,
+				"authenticated": true,
+				"site":          selected.Name,
+				"status":        result.Status,
+				"url":           result.URL,
 			})
 		},
 	}
 	cmd.Flags().StringVarP(&username, "username", "u", "", "USC NetID (or USC_USERNAME)")
 	cmd.Flags().BoolVar(&nonInteractive, "non-interactive", false, "fail instead of prompting")
+	cmd.Flags().BoolVar(&fresh, "fresh", false, "ignore the saved session and run a new login")
 	return cmd
 }
 
