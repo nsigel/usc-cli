@@ -1,75 +1,91 @@
 # usc-cli
 
-USC Brightspace from your terminal. Authenticate once, then query courses, grades, content, announcements, and download files — all scriptable and agent-friendly.
+A small, JSON-first command-line foundation for USC student services.
 
-## Install
+The project will grow into focused clients for Brightspace, Web Registration,
+OASIS, Advise USC, and other systems reached through USC authentication. These
+systems share an institution, not an application protocol: Brightspace is D2L,
+Advise USC is Salesforce, and USC's registrar applications have their own
+contracts. The code keeps those implementations separate.
 
-```bash
-pip install -e ".[dev]"
+## Build
+
+```sh
+go build -o usc ./cmd/usc
+go vet ./...
 ```
 
-## Auth
-
-```bash
-usc login                  # prompts for NetID, password, bypass code
-usc status                 # verify session is live
-usc logout                 # clear saved session
+```sh
+$ ./usc sites webreg
+{"name":"webreg","url":"https://webreg.usc.edu/","login_url":"https://webreg.usc.edu/auth/login?returnUrl=%2FTerms","login":"entra-oidc"}
 ```
 
-Session cookies are persisted to `~/.config/usc-cli/session.json`. All commands load this automatically — you don't re-login between calls.
+Release builds can set the version without a source edit:
 
-**Bypass codes** replace Duo push during login. Get one at https://account.usc.edu/2fa/duo-bypass-code (requires identity verification). A code is valid for unlimited uses within 1 week.
-
-Store credentials in your environment for fully unattended operation:
-
-```bash
-export USC_USERNAME=yournetid
-export USC_PASSWORD=yourpassword
-export USC_DUO_BYPASS=1234567
+```sh
+go build -ldflags '-X main.version=v0.1.0' -o usc ./cmd/usc
 ```
 
-When all three are set, the CLI will **auto-reauth** on 401s — if your session expires mid-use, it re-logs in and retries the request transparently. No intervention needed until the bypass code expires (~weekly).
+## Authentication
 
-## Commands
+`auth login` defaults to WebReg and accepts `webreg`, `brightspace`, or
+`advise` as an optional site. It prompts for the USC NetID, password, and Duo
+bypass code, then saves the resulting cross-domain cookie session.
 
-```bash
-usc courses                         # list enrolled courses + IDs
-usc content <course_id>             # course modules and topic tree
-usc content <course_id> --flat      # flat topic list with module path
-usc grades <course_id>              # grade items and scores
-usc grades <course_id> --graded-only
-usc announcements                   # all courses
-usc announcements <course_id>
-usc announcements --since 2026-03-01
-usc download <url> -o <path>        # download any Brightspace file by URL
+```sh
+usc auth login
+usc auth status brightspace
+usc auth logout
 ```
 
-All commands output JSON by default. Pass `--format human` for readable output.
+## Brightspace
 
-### download
+Brightspace commands reuse the saved session and return JSON. Authenticate once,
+then query the course data exposed by Brightspace's Valence API:
 
-Accepts a full URL or a relative Brightspace path:
-
-```bash
-usc download /content/enforced/261076-.../hw7.pdf -o hw7.pdf
-usc download https://brightspace.usc.edu/content/enforced/.../syllabus.pdf -o syllabus.pdf
+```sh
+usc auth login brightspace
+usc brightspace courses
+usc brightspace content COURSE_ID --flat
+usc brightspace grades COURSE_ID --graded-only
+usc brightspace announcements [COURSE_ID] --since 2026-08-01T00:00:00Z
+usc brightspace assignments COURSE_ID
 ```
 
-URLs come from `usc content <id>` — each topic has a `url` field.
+For non-interactive use, provide credentials through the environment rather
+than command-line arguments:
 
-## Dev
-
-```bash
-ruff check src/
-pytest
+```sh
+USC_USERNAME=netid \
+USC_PASSWORD=password \
+USC_DUO_BYPASS=123456789 \
+usc auth login --non-interactive
 ```
 
-## Layout
+Passwords and bypass codes are never written to disk. The cookie session lives
+at the platform config location under `usc/session.json`; set
+`USC_CONFIG_DIR` to override its directory. `auth logout` deletes it.
 
-```
-src/usc_cli/
-  cli.py          Click commands
-  client.py       httpx client, session persistence, auto-reauth
-  auth.py         USC Shibboleth SSO + Duo bypass login flow
-~/.config/usc-cli/session.json   persisted cookies
-```
+## Design
+
+- `internal/site` is a descriptive catalog. A site has a stable name, an entry
+  URL, and a login protocol.
+- Each future site package owns its endpoints, payloads, and response types.
+  There is intentionally no universal "USC API" interface.
+- Authentication owns the cross-domain browser session used to complete
+  Shibboleth, Microsoft, and Duo redirects. Cookies stay scoped to the domains
+  that issued them; a site name is not a cookie boundary.
+- Cobra and JSON formatting stay in `internal/cli`. Domain packages do not know
+  about flags, terminals, or output formatting.
+
+The login values are intentionally specific. Brightspace enters through
+Microsoft SAML, WebReg uses Microsoft OpenID Connect, and Advise USC's
+Salesforce tenant uses Shibboleth SAML. OASIS remains `legacy`; its former
+student landing page now points users to Experience USC. These distinctions are
+data, not branches spread across every command.
+
+## Adding a site
+
+Add its catalog entry, then create a package for its actual client only when the
+first command needs it. Add shared machinery after two implementations prove it
+is shared.
