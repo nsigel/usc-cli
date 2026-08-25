@@ -8,6 +8,13 @@ systems share an institution, not an application protocol: Brightspace is D2L,
 Advise USC is Salesforce, and USC's registrar applications have their own
 contracts. The code keeps those implementations separate.
 
+## Output
+
+Every command writes JSON to stdout. Output is pretty-printed when stdout is
+an interactive terminal and compact when it is piped or redirected. Use
+`--json` to force compact output or `--pretty` to force pretty-printed output.
+Errors are JSON on stderr and follow the same formatting choice.
+
 ## Build
 
 ```sh
