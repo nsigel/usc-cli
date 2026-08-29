@@ -19,6 +19,7 @@ func brightspaceCommand() *cobra.Command {
 		gradesCommand(),
 		announcementsCommand(),
 		assignmentsCommand(),
+		downloadCommand(),
 	)
 	return cmd
 }

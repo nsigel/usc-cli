@@ -180,6 +180,62 @@ func (c *Client) Content(ctx context.Context, courseID int) (TableOfContents, er
 	return TableOfContents{CourseID: courseID, Modules: modules}, nil
 }
 
+// Topic returns a content topic by ID from courseID's table of contents.
+func (c *Client) Topic(ctx context.Context, courseID, topicID int) (Topic, error) {
+	toc, err := c.Content(ctx, courseID)
+	if err != nil {
+		return Topic{}, err
+	}
+	for _, topic := range flattenTopics(toc.Modules) {
+		if topic.ID == topicID {
+			return topic, nil
+		}
+	}
+	return Topic{}, fmt.Errorf("topic %d was not found in course %d", topicID, courseID)
+}
+
+// Download returns the authenticated response body for a Brightspace content
+// URL. Only same-origin content URLs are accepted so saved USC cookies are
+// never sent to an external host.
+func (c *Client) Download(ctx context.Context, contentURL string) (io.ReadCloser, error) {
+	if c.http == nil {
+		return nil, errors.New("brightspace client has no HTTP session")
+	}
+	target, err := url.Parse(contentURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid content URL: %w", err)
+	}
+	base, _ := url.Parse(baseURL)
+	if target.IsAbs() && (target.Scheme != base.Scheme || target.Host != base.Host) {
+		return nil, errors.New("content URL is not hosted by Brightspace")
+	}
+	if !target.IsAbs() {
+		target = base.ResolveReference(target)
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("Accept", "application/pdf,application/octet-stream;q=0.9,*/*;q=0.1")
+	response, err := c.http.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		defer response.Body.Close()
+		body, readErr := io.ReadAll(response.Body)
+		if readErr != nil {
+			return nil, readErr
+		}
+		return nil, &Error{Label: "download", Status: response.StatusCode, Body: truncate(string(body), 200)}
+	}
+	if strings.HasPrefix(strings.ToLower(response.Header.Get("Content-Type")), "text/html") {
+		response.Body.Close()
+		return nil, fmt.Errorf("download did not return a document (received %s) — run `usc auth login brightspace`", response.Header.Get("Content-Type"))
+	}
+	return response.Body, nil
+}
+
 type contentModule struct {
 	ID          int             `json:"ModuleId"`
 	Title       string          `json:"Title"`
@@ -215,6 +271,15 @@ func normalizeModule(module contentModule) Module {
 		result.Modules[index] = normalizeModule(child)
 	}
 	return result
+}
+
+func flattenTopics(modules []Module) []Topic {
+	var topics []Topic
+	for _, module := range modules {
+		topics = append(topics, module.Topics...)
+		topics = append(topics, flattenTopics(module.Modules)...)
+	}
+	return topics
 }
 
 // Grades is the normalized gradebook for a course.
