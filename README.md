@@ -1,12 +1,6 @@
 # usc-cli
 
-A small, JSON-first command-line foundation for USC student services.
-
-The project will grow into focused clients for Brightspace, Web Registration,
-OASIS, Advise USC, and other systems reached through USC authentication. These
-systems share an institution, not an application protocol: Brightspace is D2L,
-Advise USC is Salesforce, and USC's registrar applications have their own
-contracts. The code keeps those implementations separate.
+A JSON-first command-line client for USC student services.
 
 ## Output
 
@@ -20,17 +14,6 @@ Errors are JSON on stderr and follow the same formatting choice.
 ```sh
 go build -o usc ./cmd/usc
 go vet ./...
-```
-
-```sh
-$ ./usc sites webreg
-{"name":"webreg","url":"https://webreg.usc.edu/","login_url":"https://webreg.usc.edu/auth/login?returnUrl=%2FTerms","login":"entra-oidc"}
-```
-
-Release builds can set the version without a source edit:
-
-```sh
-go build -ldflags '-X main.version=v0.1.0' -o usc ./cmd/usc
 ```
 
 ## Authentication
@@ -62,6 +45,25 @@ usc brightspace announcements [COURSE_ID] --since 2026-08-01T00:00:00Z
 usc brightspace assignments COURSE_ID
 ```
 
+To download course content, first use `content COURSE_ID --flat` to find a
+topic ID. Downloads use the saved Brightspace session; content URLs cannot be
+downloaded without it.
+
+```sh
+usc brightspace download COURSE_ID TOPIC_ID
+usc brightspace download COURSE_ID TOPIC_ID --markdown
+usc brightspace download COURSE_ID TOPIC_ID --markdown --ocr
+```
+
+`--markdown` requires [Docling](https://docling-project.github.io/docling/):
+
+```sh
+pip install docling
+```
+
+OCR is disabled by default for born-digital course PDFs. Use `--ocr` only for
+scanned documents.
+
 For non-interactive use, provide credentials through the environment rather
 than command-line arguments:
 
@@ -75,27 +77,3 @@ usc auth login --non-interactive
 Passwords and bypass codes are never written to disk. The cookie session lives
 at the platform config location under `usc/session.json`; set
 `USC_CONFIG_DIR` to override its directory. `auth logout` deletes it.
-
-## Design
-
-- `internal/site` is a descriptive catalog. A site has a stable name, an entry
-  URL, and a login protocol.
-- Each future site package owns its endpoints, payloads, and response types.
-  There is intentionally no universal "USC API" interface.
-- Authentication owns the cross-domain browser session used to complete
-  Shibboleth, Microsoft, and Duo redirects. Cookies stay scoped to the domains
-  that issued them; a site name is not a cookie boundary.
-- Cobra and JSON formatting stay in `internal/cli`. Domain packages do not know
-  about flags, terminals, or output formatting.
-
-The login values are intentionally specific. Brightspace enters through
-Microsoft SAML, WebReg uses Microsoft OpenID Connect, and Advise USC's
-Salesforce tenant uses Shibboleth SAML. OASIS remains `legacy`; its former
-student landing page now points users to Experience USC. These distinctions are
-data, not branches spread across every command.
-
-## Adding a site
-
-Add its catalog entry, then create a package for its actual client only when the
-first command needs it. Add shared machinery after two implementations prove it
-is shared.
