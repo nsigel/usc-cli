@@ -36,7 +36,7 @@ func downloadCommand() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("TOPIC_ID must be a positive integer")
 			}
-			client, err := openBrightspace()
+			client, err := openBrightspace(cmd.Context())
 			if err != nil {
 				return err
 			}
@@ -102,7 +102,7 @@ func saveDownload(directory, name string, body io.Reader) (string, error) {
 func convertToMarkdown(cmd *cobra.Command, directory, name string, body io.Reader, ocr bool) (string, error) {
 	docling, err := findDocling()
 	if err != nil {
-		return "", errors.New("Docling is required for --markdown; install it with `pip install docling`")
+		return "", withAction(errors.New("Docling is required for --markdown"), "pip install docling")
 	}
 	temporary, err := os.MkdirTemp("", "usc-docling-*")
 	if err != nil {

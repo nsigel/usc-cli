@@ -8,6 +8,7 @@ Every command writes JSON to stdout. Output is pretty-printed when stdout is
 an interactive terminal and compact when it is piped or redirected. Use
 `--json` to force compact output or `--pretty` to force pretty-printed output.
 Errors are JSON on stderr and follow the same formatting choice.
+When the CLI knows how to recover, the error includes an `action` command.
 
 ## Build
 
@@ -18,26 +19,26 @@ go vet ./...
 
 ## Authentication
 
-`auth login` defaults to WebReg and accepts `webreg`, `brightspace`, or
-`advise` as an optional site. It first reuses the saved session; if USC needs
-a new login, it uses the supplied credentials or prompts for the USC NetID,
-password, and Duo bypass code. Pass `--fresh` to intentionally ignore the
-saved session. A successful login saves the resulting cross-domain cookie
-session.
+`auth login` first reuses the saved session; if USC needs a new login, it uses
+the supplied credentials or prompts for the USC NetID, password, and Duo bypass
+code. Pass `--fresh` to intentionally ignore the saved session. A successful
+login saves the resulting cross-domain cookie session. Application commands
+silently establish their own site session from this shared USC session.
 
 ```sh
 usc auth login
-usc auth status brightspace
+usc auth status
 usc auth logout
 ```
 
 ## Brightspace
 
-Brightspace commands reuse the saved session and return JSON. Authenticate once,
-then query the course data exposed by Brightspace's Valence API:
+Brightspace commands silently establish a Brightspace session from the saved USC
+session and return JSON. Authenticate once, then query the course data exposed by
+Brightspace's Valence API:
 
 ```sh
-usc auth login brightspace
+usc auth login
 usc brightspace courses
 usc brightspace content COURSE_ID --flat
 usc brightspace grades COURSE_ID --graded-only

@@ -40,12 +40,6 @@ type authenticator struct {
 	microsoft       map[string]string
 }
 
-// Result describes the authenticated page reached by Login.
-type Result struct {
-	URL    string // final authenticated URL
-	Status int    // final HTTP status code
-}
-
 // Login restores the cookies in sessionFile and opens target. If USC requests
 // a fresh login, Login submits credentials through the USC, Microsoft, and Duo
 // flow. A successful call atomically persists the resulting cookie jar.
@@ -54,39 +48,36 @@ type Result struct {
 // an empty session. Login returns ErrCredentialsRequired when the session is
 // insufficient and credentials is incomplete, and ErrBypassRejected when Duo
 // rejects the bypass code.
-func Login(ctx context.Context, target, sessionFile string, credentials Credentials) (Result, error) {
+func Login(ctx context.Context, target, sessionFile string, credentials Credentials) error {
 	return login(ctx, target, sessionFile, credentials, false)
 }
 
 // LoginFresh ignores the saved session before authenticating and replaces it
 // only after the requested application has been reached successfully.
-func LoginFresh(ctx context.Context, target, sessionFile string, credentials Credentials) (Result, error) {
+func LoginFresh(ctx context.Context, target, sessionFile string, credentials Credentials) error {
 	return login(ctx, target, sessionFile, credentials, true)
 }
 
-func login(ctx context.Context, target, sessionFile string, credentials Credentials, fresh bool) (Result, error) {
+func login(ctx context.Context, target, sessionFile string, credentials Credentials, fresh bool) error {
 	authenticator, err := newAuthenticator()
 	if err != nil {
-		return Result{}, err
+		return err
 	}
 	if !fresh {
 		if err := loadSession(sessionFile, authenticator.jar); err != nil {
-			return Result{}, err
+			return err
 		}
 	}
-	page, err := authenticator.open(ctx, target, credentials)
+	_, err = authenticator.open(ctx, target, credentials)
 	if err != nil {
-		return Result{}, err
+		return err
 	}
 	// Half-finished SSO chains contain one-time state that can poison the next
 	// attempt, so persist only after the requested application is reached.
 	if err := saveSession(sessionFile, authenticator.jar); err != nil {
-		return Result{}, err
+		return err
 	}
-	return Result{
-		URL:    page.URL.String(),
-		Status: page.Status,
-	}, nil
+	return nil
 }
 
 func (a *authenticator) open(ctx context.Context, target string, credentials Credentials) (*page, error) {
