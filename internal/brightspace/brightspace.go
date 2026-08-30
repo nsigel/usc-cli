@@ -24,6 +24,10 @@ const (
 var courseName = regexp.MustCompile(`^(\S+)\s+([A-Z]+-\d+[A-Z]*):\s+(.+)$`)
 var htmlTag = regexp.MustCompile(`<[^>]+>`)
 
+// ErrSessionInvalid means Brightspace did not accept the saved application
+// session. The CLI may be able to restore it through USC SSO.
+var ErrSessionInvalid = errors.New("Brightspace session expired or invalid")
+
 // Doer is the HTTP surface needed by the Brightspace API. It keeps command
 // tests offline and lets authentication retain ownership of cookie handling.
 type Doer interface {
@@ -50,12 +54,20 @@ type Error struct {
 func (e *Error) Error() string {
 	switch e.Status {
 	case 401:
-		return "session expired or invalid — run `usc auth login brightspace`"
+		return ErrSessionInvalid.Error()
 	case 403:
 		return fmt.Sprintf("%s: access denied (403)", e.Label)
 	default:
 		return fmt.Sprintf("%s: HTTP %d — %s", e.Label, e.Status, e.Body)
 	}
+}
+
+// Unwrap makes authentication failures distinguishable from other API errors.
+func (e *Error) Unwrap() error {
+	if e.Status == 401 {
+		return ErrSessionInvalid
+	}
+	return nil
 }
 
 // User is Brightspace's current-user response. Brightspace fields vary by
@@ -231,7 +243,7 @@ func (c *Client) Download(ctx context.Context, contentURL string) (io.ReadCloser
 	}
 	if strings.HasPrefix(strings.ToLower(response.Header.Get("Content-Type")), "text/html") {
 		response.Body.Close()
-		return nil, fmt.Errorf("download did not return a document (received %s) — run `usc auth login brightspace`", response.Header.Get("Content-Type"))
+		return nil, ErrSessionInvalid
 	}
 	return response.Body, nil
 }

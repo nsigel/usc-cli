@@ -3,6 +3,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 
@@ -10,6 +11,26 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
+
+type actionableError struct {
+	err    error
+	action string
+}
+
+func (e *actionableError) Error() string { return e.err.Error() }
+func (e *actionableError) Unwrap() error { return e.err }
+
+func withAction(err error, action string) error {
+	return &actionableError{err: err, action: action}
+}
+
+func errorAction(err error) string {
+	var actionable *actionableError
+	if errors.As(err, &actionable) {
+		return actionable.action
+	}
+	return ""
+}
 
 // New returns a configured usc root command.
 func New(version string) *cobra.Command {

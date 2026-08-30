@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/nsigel/usc-cli/internal/auth"
+	"github.com/nsigel/usc-cli/internal/brightspace"
 	"github.com/nsigel/usc-cli/internal/site"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -25,14 +26,10 @@ func loginCommand() *cobra.Command {
 	var nonInteractive bool
 	var fresh bool
 	cmd := &cobra.Command{
-		Use:   "login [site]",
+		Use:   "login",
 		Short: "Sign in through USC SSO",
-		Args:  cobra.MaximumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			selected, err := authSite(args)
-			if err != nil {
-				return err
-			}
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			// Password and MFA values intentionally have no flags: process listings
 			// and shell histories routinely expose command-line arguments.
 			credentials := auth.Credentials{
@@ -48,22 +45,17 @@ func loginCommand() *cobra.Command {
 			if fresh {
 				login = auth.LoginFresh
 			}
-			result, err := login(cmd.Context(), selected.LoginURL, path, credentials)
+			err = login(cmd.Context(), authenticationTarget(), path, credentials)
 			if errors.Is(err, auth.ErrCredentialsRequired) {
 				if err := completeCredentials(cmd, &credentials, nonInteractive); err != nil {
 					return err
 				}
-				result, err = login(cmd.Context(), selected.LoginURL, path, credentials)
+				err = login(cmd.Context(), authenticationTarget(), path, credentials)
 			}
 			if err != nil {
 				return err
 			}
-			return writeJSON(cmd, map[string]any{
-				"authenticated": true,
-				"site":          selected.Name,
-				"status":        result.Status,
-				"url":           result.URL,
-			})
+			return writeJSON(cmd, map[string]bool{"authenticated": true})
 		},
 	}
 	cmd.Flags().StringVarP(&username, "username", "u", "", "USC NetID (or USC_USERNAME)")
@@ -74,34 +66,25 @@ func loginCommand() *cobra.Command {
 
 func statusCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:   "status [site]",
+		Use:   "status",
 		Short: "Check the saved USC session",
-		Args:  cobra.MaximumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			selected, err := authSite(args)
-			if err != nil {
-				return err
-			}
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			path, err := sessionPath()
 			if err != nil {
 				return err
 			}
-			// Empty credentials make status observational: it may validate cookies,
-			// but it can never silently perform a fresh login.
-			result, err := auth.Login(cmd.Context(), selected.LoginURL, path, auth.Credentials{})
+			// Empty credentials may complete a silent SSO handshake, but they can
+			// never submit secrets or perform an interactive login.
+			err = auth.Login(cmd.Context(), authenticationTarget(), path, auth.Credentials{})
 			if errors.Is(err, auth.ErrCredentialsRequired) {
 				// Being signed out is a valid status result, not a command failure.
-				return writeJSON(cmd, map[string]any{"authenticated": false, "site": selected.Name})
+				return writeJSON(cmd, map[string]bool{"authenticated": false})
 			}
 			if err != nil {
 				return err
 			}
-			return writeJSON(cmd, map[string]any{
-				"authenticated": true,
-				"site":          selected.Name,
-				"status":        result.Status,
-				"url":           result.URL,
-			})
+			return writeJSON(cmd, map[string]bool{"authenticated": true})
 		},
 	}
 }
@@ -124,21 +107,12 @@ func logoutCommand() *cobra.Command {
 	}
 }
 
-func authSite(args []string) (site.Site, error) {
-	// WebReg is the default because its Entra OIDC route exercises USC's primary
-	// SSO path without tying authentication to a course or advising role.
-	name := site.WebReg
-	if len(args) == 1 {
-		name = site.Name(args[0])
-	}
-	selected, err := site.Find(name)
-	if err != nil {
-		return site.Site{}, err
-	}
-	if selected.Login == site.Legacy {
-		return site.Site{}, fmt.Errorf("%s does not use USC SSO", selected.Name)
-	}
-	return selected, nil
+func authenticationTarget() string {
+	// SSO protocols are application-initiated. Brightspace is the product's
+	// authentication bootstrap, but that implementation detail is not part of
+	// the user-facing login contract.
+	selected, _ := site.Find(site.Brightspace)
+	return selected.LoginURL
 }
 
 func sessionPath() (string, error) {
@@ -229,15 +203,20 @@ func first(values ...string) string {
 	return ""
 }
 
+type errorPayload struct {
+	Error  string `json:"error"`
+	Action string `json:"action,omitempty"`
+}
+
 // ErrorPayload returns the stable JSON representation of a command error.
-func ErrorPayload(err error) map[string]any {
-	payload := map[string]any{"error": err.Error()}
-	if errors.Is(err, auth.ErrBypassRejected) {
-		payload["code"] = "duo_bypass_invalid"
-		payload["action"] = "usc auth login"
-	} else if errors.Is(err, auth.ErrCredentialsRequired) {
-		payload["code"] = "credentials_required"
-		payload["action"] = "usc auth login"
+func ErrorPayload(err error) errorPayload {
+	payload := errorPayload{Error: err.Error()}
+	if action := errorAction(err); action != "" {
+		payload.Action = action
+	} else if errors.Is(err, auth.ErrBypassRejected) ||
+		errors.Is(err, auth.ErrCredentialsRequired) ||
+		errors.Is(err, brightspace.ErrSessionInvalid) {
+		payload.Action = "usc auth login"
 	}
 	return payload
 }

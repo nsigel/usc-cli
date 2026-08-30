@@ -1,12 +1,14 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strconv"
 
 	"github.com/nsigel/usc-cli/internal/auth"
 	"github.com/nsigel/usc-cli/internal/brightspace"
+	"github.com/nsigel/usc-cli/internal/site"
 	"github.com/spf13/cobra"
 )
 
@@ -28,7 +30,7 @@ func brightspaceWhoAmICommand() *cobra.Command {
 	return &cobra.Command{
 		Use: "whoami", Short: "Show the authenticated Brightspace user", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			client, err := openBrightspace()
+			client, err := openBrightspace(cmd.Context())
 			if err != nil {
 				return err
 			}
@@ -46,7 +48,7 @@ func coursesCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use: "courses", Short: "List Brightspace enrollments", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			client, err := openBrightspace()
+			client, err := openBrightspace(cmd.Context())
 			if err != nil {
 				return err
 			}
@@ -70,7 +72,7 @@ func contentCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			client, err := openBrightspace()
+			client, err := openBrightspace(cmd.Context())
 			if err != nil {
 				return err
 			}
@@ -97,7 +99,7 @@ func gradesCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			client, err := openBrightspace()
+			client, err := openBrightspace(cmd.Context())
 			if err != nil {
 				return err
 			}
@@ -126,7 +128,7 @@ func announcementsCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use: "announcements [COURSE_ID]", Short: "Show course announcements", Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client, err := openBrightspace()
+			client, err := openBrightspace(cmd.Context())
 			if err != nil {
 				return err
 			}
@@ -176,7 +178,7 @@ func assignmentsCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			client, err := openBrightspace()
+			client, err := openBrightspace(cmd.Context())
 			if err != nil {
 				return err
 			}
@@ -189,15 +191,22 @@ func assignmentsCommand() *cobra.Command {
 	}
 }
 
-func openBrightspace() (*brightspace.Client, error) {
+func openBrightspace(ctx context.Context) (*brightspace.Client, error) {
 	path, err := sessionPath()
 	if err != nil {
 		return nil, err
 	}
-	session, err := auth.OpenSession(path)
-	if errors.Is(err, auth.ErrSessionNotFound) {
-		return nil, fmt.Errorf("no session found — run `usc auth login brightspace`")
+	selected, err := site.Find(site.Brightspace)
+	if err != nil {
+		return nil, err
 	}
+	if err := auth.Login(ctx, selected.LoginURL, path, auth.Credentials{}); err != nil {
+		if errors.Is(err, auth.ErrCredentialsRequired) {
+			return nil, withAction(errors.New("authentication required"), "usc auth login")
+		}
+		return nil, err
+	}
+	session, err := auth.OpenSession(path)
 	if err != nil {
 		return nil, err
 	}
