@@ -25,6 +25,12 @@ go build -o usc ./cmd/usc
 | Content downloads |
 | PDF-to-Markdown conversion with optional OCR |
 
+### Schedule of Classes
+
+| Feature |
+| --- |
+| Public course details and section availability |
+
 ## How it works
 
 ### Authentication storage
@@ -73,6 +79,9 @@ API at `brightspace.usc.edu`. Downloads are fetched from the authenticated
 content URL returned by Brightspace; those URLs do not work without the saved
 session. The CLI does not maintain a separate local cache of course data.
 
+`usc classes` reads public course and section data from `classes.usc.edu`. It
+does not use or require the saved USC session.
+
 ## Command reference
 
 | Command | Description |
@@ -87,7 +96,8 @@ session. The CLI does not maintain a separate local cache of course data.
 | `usc brightspace announcements [COURSE_ID] [--since TIME]` | Show announcements for one course or all courses. |
 | `usc brightspace assignments COURSE_ID` | List assignment folders for a course. Alias: `dropbox`. |
 | `usc brightspace download COURSE_ID TOPIC_ID [--output DIR] [--markdown] [--ocr]` | Download a content item, optionally converting a PDF to Markdown. Markdown conversion requires [Docling](https://docling-project.github.io/docling/) (`pip install docling`); `--ocr` requires `--markdown`. |
-| `usc sites [NAME]` | List supported USC sites and their authentication entry points, or show one site. |
+| `usc classes TERM_CODE COURSE_CODE` | Show a public Schedule of Classes course and all of its sections. |
+| `usc sites [NAME]` | List supported USC sites, or show one site. |
 | `usc version` | Print version information. |
 
 ## Output format
