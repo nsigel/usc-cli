@@ -44,14 +44,14 @@ func New(version string) *cobra.Command {
 	root.PersistentFlags().Bool("json", false, "emit compact JSON")
 	root.PersistentFlags().Bool("pretty", false, "pretty-print JSON")
 	root.MarkFlagsMutuallyExclusive("json", "pretty")
-	root.AddCommand(authCommand(), brightspaceCommand(), sitesCommand(), versionCommand(version))
+	root.AddCommand(authCommand(), brightspaceCommand(), classesCommand(), sitesCommand(), versionCommand(version))
 	return root
 }
 
 func sitesCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "sites [name]",
-		Short: "List USC sites and their authentication entry points",
+		Short: "List supported USC sites",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {

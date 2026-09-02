@@ -8,6 +8,7 @@ type Name string
 
 const (
 	Brightspace Name = "brightspace"
+	Classes     Name = "classes"
 	WebReg      Name = "webreg"
 )
 
@@ -23,16 +24,18 @@ const (
 )
 
 // Site is the small amount of information shared by every integration.
-// Site-specific clients own everything else.
+// Site-specific clients own everything else. LoginURL and Login are empty for
+// public sites.
 type Site struct {
 	Name     Name   `json:"name"`
 	URL      string `json:"url"`
-	LoginURL string `json:"login_url"`
-	Login    Login  `json:"login"`
+	LoginURL string `json:"login_url,omitempty"`
+	Login    Login  `json:"login,omitempty"`
 }
 
 var catalog = []Site{
 	{Name: Brightspace, URL: "https://brightspace.usc.edu/", LoginURL: "https://brightspace.usc.edu/", Login: EntraSAML},
+	{Name: Classes, URL: "https://classes.usc.edu/"},
 	{Name: WebReg, URL: "https://webreg.usc.edu/", LoginURL: "https://webreg.usc.edu/auth/login?returnUrl=%2FTerms", Login: EntraOIDC},
 }
 
