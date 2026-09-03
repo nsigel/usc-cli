@@ -31,6 +31,14 @@ go build -o usc ./cmd/usc
 | --- |
 | Public course details and section availability |
 
+### Agent skill
+
+Print the bundled agent skill and pipe it into any agent skill system:
+
+```sh
+usc skill > SKILL.md
+```
+
 ## How it works
 
 ### Authentication storage
@@ -98,14 +106,16 @@ does not use or require the saved USC session.
 | `usc brightspace download COURSE_ID TOPIC_ID [--output DIR] [--markdown] [--ocr]` | Download a content item, optionally converting a PDF to Markdown. Markdown conversion requires [Docling](https://docling-project.github.io/docling/) (`pip install docling`); `--ocr` requires `--markdown`. |
 | `usc classes TERM_CODE COURSE_CODE` | Show a public Schedule of Classes course and all of its sections. |
 | `usc sites [NAME]` | List supported USC sites, or show one site. |
+| `usc skill` | Print the bundled `SKILL.md` for use with agent skill systems. |
 | `usc version` | Print version information. |
 
 ## Output format
 
-Every command writes JSON to stdout. Output is pretty-printed when stdout is an
-interactive terminal and compact when it is piped or redirected. Pass `--json`
-to force compact JSON or `--pretty` to force pretty-printed JSON; the flags are
-mutually exclusive.
+Every command except `usc skill` writes JSON to stdout. `usc skill` writes its
+raw Markdown so it can be piped directly into an agent skill system. JSON output
+is pretty-printed when stdout is an interactive terminal and compact when it is
+piped or redirected. Pass `--json` to force compact JSON or `--pretty` to force
+pretty-printed JSON; the flags are mutually exclusive.
 
 Errors are written as JSON to stderr and commands return exit code 1. When the
 CLI knows how to recover, the error object also includes an `action` command:
