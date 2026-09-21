@@ -183,6 +183,9 @@ func (a *authenticator) follow(ctx context.Context, current *page) (*page, error
 	if err != nil {
 		return nil, err
 	}
+	if current.Status == http.StatusTemporaryRedirect || current.Status == http.StatusPermanentRedirect {
+		return a.do(ctx, current.RedirectMethod, destination.String(), current.RedirectBody, current.RedirectContentType, current.RedirectReferer, "")
+	}
 	return a.do(ctx, http.MethodGet, destination.String(), nil, "", current.URL, "")
 }
 

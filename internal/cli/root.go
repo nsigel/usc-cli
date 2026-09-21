@@ -44,7 +44,7 @@ func New(version string) *cobra.Command {
 	root.PersistentFlags().Bool("json", false, "emit compact JSON")
 	root.PersistentFlags().Bool("pretty", false, "pretty-print JSON")
 	root.MarkFlagsMutuallyExclusive("json", "pretty")
-	root.AddCommand(authCommand(), brightspaceCommand(), classesCommand(), sitesCommand(), skillCommand(), versionCommand(version))
+	root.AddCommand(authCommand(), brightspaceCommand(), handshakeCommand(), classesCommand(), sitesCommand(), skillCommand(), versionCommand(version))
 	return root
 }
 
