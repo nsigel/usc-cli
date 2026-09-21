@@ -52,6 +52,13 @@ usc handshake career-fair CAREER_FAIR_ID
 - Handshake exposes no event posting timestamp. `posted-desc` uses descending numeric IDs as a new-event monitoring signal; its cursor kind is `id`.
 - Event and fair data is live and requires the saved Handshake application session.
 
+
+## Browser sync
+
+If `usc auth status` is valid, run `usc browser sync --cdp …`, then use the site's
+student/SSO login in Chrome to reach Handshake or other USC apps.
+
+
 ## Public schedule data
 
 ```sh
