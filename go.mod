@@ -10,6 +10,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/net v0.38.0
 	golang.org/x/term v0.38.0
+	nhooyr.io/websocket v1.8.17
 )
 
 require (

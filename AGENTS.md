@@ -3,6 +3,7 @@
 ```text
 cmd/usc/              executable entrypoint
 internal/auth/        USC SSO, Microsoft, Duo, and session-cookie engine
+internal/browser/     Chrome DevTools Protocol cookie sync
 internal/brightspace/ Brightspace API client
 internal/classes/     public Schedule of Classes client
 internal/cli/         Cobra commands and JSON formatting
