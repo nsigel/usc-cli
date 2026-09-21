@@ -9,6 +9,7 @@ type Name string
 const (
 	Brightspace Name = "brightspace"
 	Classes     Name = "classes"
+	Handshake   Name = "handshake"
 	WebReg      Name = "webreg"
 )
 
@@ -36,6 +37,7 @@ type Site struct {
 var catalog = []Site{
 	{Name: Brightspace, URL: "https://brightspace.usc.edu/", LoginURL: "https://brightspace.usc.edu/", Login: EntraSAML},
 	{Name: Classes, URL: "https://classes.usc.edu/"},
+	{Name: Handshake, URL: "https://usc.joinhandshake.com/", LoginURL: "https://usc.joinhandshake.com/auth/saml/70/session/new?redirect_to_idp=true", Login: ShibbolethSAML},
 	{Name: WebReg, URL: "https://webreg.usc.edu/", LoginURL: "https://webreg.usc.edu/auth/login?returnUrl=%2FTerms", Login: EntraOIDC},
 }
 

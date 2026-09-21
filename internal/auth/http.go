@@ -21,10 +21,14 @@ const (
 )
 
 type page struct {
-	URL    *url.URL
-	Status int
-	Header http.Header
-	Body   []byte
+	URL                 *url.URL
+	Status              int
+	Header              http.Header
+	Body                []byte
+	RedirectMethod      string
+	RedirectBody        []byte
+	RedirectContentType string
+	RedirectReferer     *url.URL
 }
 
 func newAuthenticator() (*authenticator, error) {
@@ -99,7 +103,14 @@ func (a *authenticator) do(ctx context.Context, method, rawURL string, body []by
 	request.Header.Set("Accept", documentAccept)
 	request.Header.Set("Accept-Language", "en-US,en;q=0.9")
 	if referer != nil {
-		request.Header.Set("Referer", referer.String())
+		// Browsers apply strict-origin-when-cross-origin by default. Several SAML
+		// consumers reject a cross-site form POST whose Referer contains the IdP's
+		// full state-bearing URL instead of only its origin.
+		refererValue := referer.String()
+		if request.URL.Scheme != referer.Scheme || request.URL.Host != referer.Host {
+			refererValue = referer.Scheme + "://" + referer.Host + "/"
+		}
+		request.Header.Set("Referer", refererValue)
 	}
 	if method == http.MethodPost {
 		// USC's identity providers reject cross-site form posts that do not look
@@ -131,10 +142,20 @@ func (a *authenticator) do(ctx context.Context, method, rawURL string, body []by
 		// pages frequently omit values that are still required.
 		a.rememberMicrosoft(data)
 	}
-	return &page{
+	result := &page{
 		URL:    request.URL,
 		Status: response.StatusCode,
 		Header: response.Header,
 		Body:   data,
-	}, nil
+	}
+	if response.StatusCode == http.StatusTemporaryRedirect || response.StatusCode == http.StatusPermanentRedirect {
+		result.RedirectMethod = method
+		result.RedirectBody = append([]byte(nil), body...)
+		result.RedirectContentType = contentType
+		if referer != nil {
+			copy := *referer
+			result.RedirectReferer = &copy
+		}
+	}
+	return result, nil
 }

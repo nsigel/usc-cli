@@ -10,6 +10,7 @@ import (
 
 	"github.com/nsigel/usc-cli/internal/auth"
 	"github.com/nsigel/usc-cli/internal/brightspace"
+	"github.com/nsigel/usc-cli/internal/handshake"
 	"github.com/nsigel/usc-cli/internal/site"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -26,10 +27,10 @@ func loginCommand() *cobra.Command {
 	var nonInteractive bool
 	var fresh bool
 	cmd := &cobra.Command{
-		Use:   "login",
+		Use:   "login [site]",
 		Short: "Sign in through USC SSO",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
 			// Password and MFA values intentionally have no flags: process listings
 			// and shell histories routinely expose command-line arguments.
 			credentials := auth.Credentials{
@@ -41,16 +42,20 @@ func loginCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			target, err := authenticationTarget(args)
+			if err != nil {
+				return err
+			}
 			login := auth.Login
 			if fresh {
 				login = auth.LoginFresh
 			}
-			err = login(cmd.Context(), authenticationTarget(), path, credentials)
+			err = login(cmd.Context(), target, path, credentials)
 			if errors.Is(err, auth.ErrCredentialsRequired) {
 				if err := completeCredentials(cmd, &credentials, nonInteractive); err != nil {
 					return err
 				}
-				err = login(cmd.Context(), authenticationTarget(), path, credentials)
+				err = login(cmd.Context(), target, path, credentials)
 			}
 			if err != nil {
 				return err
@@ -66,17 +71,21 @@ func loginCommand() *cobra.Command {
 
 func statusCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:   "status",
+		Use:   "status [site]",
 		Short: "Check the saved USC session",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
 			path, err := sessionPath()
+			if err != nil {
+				return err
+			}
+			target, err := authenticationTarget(args)
 			if err != nil {
 				return err
 			}
 			// Empty credentials may complete a silent SSO handshake, but they can
 			// never submit secrets or perform an interactive login.
-			err = auth.Login(cmd.Context(), authenticationTarget(), path, auth.Credentials{})
+			err = auth.Login(cmd.Context(), target, path, auth.Credentials{})
 			if errors.Is(err, auth.ErrCredentialsRequired) {
 				// Being signed out is a valid status result, not a command failure.
 				return writeJSON(cmd, map[string]bool{"authenticated": false})
@@ -107,12 +116,19 @@ func logoutCommand() *cobra.Command {
 	}
 }
 
-func authenticationTarget() string {
-	// SSO protocols are application-initiated. Brightspace is the product's
-	// authentication bootstrap, but that implementation detail is not part of
-	// the user-facing login contract.
-	selected, _ := site.Find(site.Brightspace)
-	return selected.LoginURL
+func authenticationTarget(args []string) (string, error) {
+	name := site.Brightspace
+	if len(args) == 1 {
+		name = site.Name(args[0])
+	}
+	selected, err := site.Find(name)
+	if err != nil {
+		return "", err
+	}
+	if selected.LoginURL == "" {
+		return "", fmt.Errorf("site %q does not use USC authentication", name)
+	}
+	return selected.LoginURL, nil
 }
 
 func sessionPath() (string, error) {
@@ -213,6 +229,8 @@ func ErrorPayload(err error) errorPayload {
 	payload := errorPayload{Error: err.Error()}
 	if action := errorAction(err); action != "" {
 		payload.Action = action
+	} else if errors.Is(err, handshake.ErrSessionInvalid) {
+		payload.Action = "usc auth login handshake"
 	} else if errors.Is(err, auth.ErrBypassRejected) ||
 		errors.Is(err, auth.ErrCredentialsRequired) ||
 		errors.Is(err, brightspace.ErrSessionInvalid) {

@@ -31,6 +31,17 @@ go build -o usc ./cmd/usc
 | --- |
 | Public course details and section availability |
 
+### Handshake
+
+| Feature |
+| --- |
+| Live event-category vocabulary |
+| Event and career-fair search |
+| Category, organizer, keyword, format, date, and USC-posted filters |
+| Cursor pagination and newest-ID monitoring order |
+| Full event descriptions, contacts, registration state, and locations |
+| Full career-fair descriptions, contacts, counts, and sessions |
+
 ### Agent skill
 
 Print the bundled agent skill and pipe it into any agent skill system:
@@ -43,7 +54,7 @@ usc skill > SKILL.md
 
 ### Authentication storage
 
-`usc auth login` follows USC's SSO flow through Microsoft and Duo, then saves
+`usc auth login [site]` follows USC's SSO flow through Microsoft and Duo, then saves
 the cross-domain cookie session to the platform's user configuration directory:
 
 | Platform | Default session path |
@@ -74,11 +85,11 @@ variables:
 USC_USERNAME=netid \
 USC_PASSWORD=password \
 USC_DUO_BYPASS=123456789 \
-usc auth login --non-interactive
+usc auth login handshake --non-interactive
 ```
 
-Passwords and bypass codes are never written to disk. Brightspace commands use
-the saved USC session to establish their own session.
+Passwords and bypass codes are never written to disk. Brightspace and Handshake
+commands use the saved USC session to establish their own application sessions.
 
 ### Command data
 
@@ -90,12 +101,30 @@ session. The CLI does not maintain a separate local cache of course data.
 `usc classes` reads public course and section data from `classes.usc.edu`. It
 does not use or require the saved USC session.
 
+Handshake commands use the same operations as the student events experience at
+`usc.joinhandshake.com`. Run `usc auth login handshake` once before using them.
+Category filters accept IDs, names, or the slugs returned by
+`usc handshake categories`. Native relevance/date ordering uses Handshake's
+opaque cursor. The site exposes no event posted timestamp or posted-time sort,
+so `--sort posted-desc` orders numeric event IDs descending as a practical
+new-event monitoring signal and returns an ID cursor.
+
+```sh
+usc handshake categories
+usc handshake events --category employers --category networking --organizer vcareers@usc.edu
+usc handshake events --category 2,4 --sort posted-desc --limit 25
+usc handshake events --after NEXT_CURSOR
+usc handshake event 2014893
+usc handshake career-fairs --medium virtual
+usc handshake career-fair 65867
+```
+
 ## Command reference
 
 | Command | Description |
 | --- | --- |
-| `usc auth login` | Sign in through USC SSO. Reuses the saved session unless `--fresh` is passed. |
-| `usc auth status` | Check whether the saved USC session can authenticate. |
+| `usc auth login [brightspace\|handshake]` | Sign in through USC SSO. Defaults to Brightspace and reuses the saved session unless `--fresh` is passed. |
+| `usc auth status [brightspace\|handshake]` | Check whether the saved USC session can authenticate the selected service. |
 | `usc auth logout` | Delete the saved USC session. |
 | `usc brightspace whoami` | Show the authenticated Brightspace user. |
 | `usc brightspace courses [--all]` | List course enrollments. |
@@ -104,6 +133,11 @@ does not use or require the saved USC session.
 | `usc brightspace announcements [COURSE_ID] [--since TIME]` | Show announcements for one course or all courses. |
 | `usc brightspace assignments COURSE_ID` | List assignment folders for a course. Alias: `dropbox`. |
 | `usc brightspace download COURSE_ID TOPIC_ID [--output DIR] [--markdown] [--ocr]` | Download a content item, optionally converting a PDF to Markdown. Markdown conversion requires [Docling](https://docling-project.github.io/docling/) (`pip install docling`); `--ocr` requires `--markdown`. |
+| `usc handshake categories` | List live event category IDs, names, and CLI slugs. |
+| `usc handshake events [FILTERS]` | Search events. Filters: `--category`, `--organizer`, `--keyword`, `--medium`, `--date`, `--posted-by-school`, `--sort`, `--limit`, and `--after`. |
+| `usc handshake event EVENT_ID` | Show the full event description, contacts, employers, location, and registration state. |
+| `usc handshake career-fairs [FILTERS]` | Search career fairs with the event-list filters. Alias: `fairs`. |
+| `usc handshake career-fair CAREER_FAIR_ID` | Show career-fair details and sessions. Alias: `fair`. |
 | `usc classes TERM_CODE COURSE_CODE` | Show a public Schedule of Classes course and all of its sections. |
 | `usc sites [NAME]` | List supported USC sites, or show one site. |
 | `usc skill` | Print the bundled `SKILL.md` for use with agent skill systems. |
