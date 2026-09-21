@@ -1,5 +1,22 @@
 # Handshake client design
 
+Import path: `github.com/nsigel/usc-cli/handshake`.
+
+Open a client with the shared USC cookie session:
+
+```go
+path, err := handshake.DefaultSessionFile()
+client, err := handshake.Open(path)
+page, err := client.Events(ctx, handshake.Search{
+    Organizer: "vcareers@usc.edu",
+    Sort:      "posted-desc",
+    Limit:     30,
+})
+```
+
+Auth stays in `internal/auth`; `handshake.Open` is the supported way for other tools
+(monitord, scripts) to reuse `session.json` without going through the `usc` CLI.
+
 ## Problem and observed contract
 
 USC Handshake is an authenticated tenant application rather than a documented

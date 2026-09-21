@@ -37,6 +37,16 @@ usc brightspace download COURSE_ID TOPIC_ID [--output DIRECTORY] [--markdown] [-
 
 ## Handshake
 
+Library import (shares the same `session.json` auth as the CLI):
+
+```go
+import "github.com/nsigel/usc-cli/handshake"
+
+path, _ := handshake.DefaultSessionFile()
+client, err := handshake.Open(path)
+```
+
+
 ```sh
 usc auth login handshake
 usc handshake categories

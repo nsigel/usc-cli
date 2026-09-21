@@ -10,7 +10,7 @@ import (
 
 	"github.com/nsigel/usc-cli/internal/auth"
 	"github.com/nsigel/usc-cli/internal/brightspace"
-	"github.com/nsigel/usc-cli/internal/handshake"
+	"github.com/nsigel/usc-cli/handshake"
 	"github.com/nsigel/usc-cli/internal/site"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
