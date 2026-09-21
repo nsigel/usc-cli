@@ -67,6 +67,34 @@ Set `USC_CONFIG_DIR` to replace the platform-specific `usc` directory. For
 example, `USC_CONFIG_DIR=/path/to/config` stores the session at
 `/path/to/config/session.json`.
 
+
+### Browser sync
+
+`usc browser sync` copies cookies from the saved USC CLI session into a running
+Chrome/Chromium browser over the Chrome DevTools Protocol (CDP). This is an
+explicit cookie sync, not a login handoff.
+
+```sh
+usc browser sync
+usc browser sync --cdp 9224
+usc browser sync --cdp 127.0.0.1:9224
+usc browser sync --cdp http://127.0.0.1:9224
+```
+
+`--cdp` accepts a port, `host:port`, an HTTP(S) CDP endpoint, or a full
+`ws://` / `wss://` debugger URL. When omitted, the CLI uses `USC_CDP` if set,
+otherwise `127.0.0.1:9222`. Some setups (including Grok Bot) expose CDP on
+port `9224`.
+
+Start Chrome with remote debugging enabled, for example:
+
+```sh
+chromium --remote-debugging-port=9222
+```
+
+The command reports attempted/set/skipped counts and the resolved CDP endpoint.
+It never prints cookie values.
+
 ### Duo bypass code
 
 [Duo](https://itservices.usc.edu/duo/) is USC's multi-factor authentication
@@ -126,6 +154,7 @@ usc handshake career-fair 65867
 | `usc auth login [brightspace\|handshake]` | Sign in through USC SSO. Defaults to Brightspace and reuses the saved session unless `--fresh` is passed. |
 | `usc auth status [brightspace\|handshake]` | Check whether the saved USC session can authenticate the selected service. |
 | `usc auth logout` | Delete the saved USC session. |
+| `usc browser sync [--cdp TARGET]` | Copy saved session cookies into Chrome/Chromium over the Chrome DevTools Protocol. Never prints cookie values. |
 | `usc brightspace whoami` | Show the authenticated Brightspace user. |
 | `usc brightspace courses [--all]` | List course enrollments. |
 | `usc brightspace content COURSE_ID [--flat]` | Show a course's content table of contents. |
