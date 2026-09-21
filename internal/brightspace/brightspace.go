@@ -160,20 +160,22 @@ type TableOfContents struct {
 
 // Module is a Brightspace content module and its nested child modules.
 type Module struct {
-	ID          int      `json:"id"`
-	Title       string   `json:"title"`
-	Description *string  `json:"description"`
-	Topics      []Topic  `json:"topics"`
-	Modules     []Module `json:"modules"`
+	ID           int      `json:"id"`
+	Title        string   `json:"title"`
+	Description  *string  `json:"description"`
+	LastModified *string  `json:"last_modified"`
+	Topics       []Topic  `json:"topics"`
+	Modules      []Module `json:"modules"`
 }
 
 // Topic is a Brightspace content topic.
 type Topic struct {
-	ID      int     `json:"id"`
-	Title   string  `json:"title"`
-	Type    int     `json:"type"`
-	URL     string  `json:"url"`
-	DueDate *string `json:"due_date"`
+	ID           int     `json:"id"`
+	Title        string  `json:"title"`
+	Type         int     `json:"type"`
+	URL          string  `json:"url"`
+	DueDate      *string `json:"due_date"`
+	LastModified *string `json:"last_modified"`
 }
 
 // Content returns the full nested content table of contents for courseID.
@@ -249,19 +251,21 @@ func (c *Client) Download(ctx context.Context, contentURL string) (io.ReadCloser
 }
 
 type contentModule struct {
-	ID          int             `json:"ModuleId"`
-	Title       string          `json:"Title"`
-	Description *richText       `json:"Description"`
-	Topics      []contentTopic  `json:"Topics"`
-	Modules     []contentModule `json:"Modules"`
+	ID           int             `json:"ModuleId"`
+	Title        string          `json:"Title"`
+	Description  *richText       `json:"Description"`
+	LastModified *string         `json:"LastModifiedDate"`
+	Topics       []contentTopic  `json:"Topics"`
+	Modules      []contentModule `json:"Modules"`
 }
 
 type contentTopic struct {
-	ID      int     `json:"TopicId"`
-	Title   string  `json:"Title"`
-	Type    int     `json:"Type"`
-	URL     string  `json:"Url"`
-	DueDate *string `json:"DueDate"`
+	ID           int     `json:"TopicId"`
+	Title        string  `json:"Title"`
+	Type         int     `json:"Type"`
+	URL          string  `json:"Url"`
+	DueDate      *string `json:"DueDate"`
+	LastModified *string `json:"LastModifiedDate"`
 }
 
 type richText struct {
@@ -270,13 +274,13 @@ type richText struct {
 }
 
 func normalizeModule(module contentModule) Module {
-	result := Module{ID: module.ID, Title: module.Title}
+	result := Module{ID: module.ID, Title: module.Title, LastModified: module.LastModified}
 	if module.Description != nil {
 		result.Description = stringPointer(module.Description.Text)
 	}
 	result.Topics = make([]Topic, len(module.Topics))
 	for index, topic := range module.Topics {
-		result.Topics[index] = Topic{ID: topic.ID, Title: topic.Title, Type: topic.Type, URL: topic.URL, DueDate: topic.DueDate}
+		result.Topics[index] = Topic{ID: topic.ID, Title: topic.Title, Type: topic.Type, URL: topic.URL, DueDate: topic.DueDate, LastModified: topic.LastModified}
 	}
 	result.Modules = make([]Module, len(module.Modules))
 	for index, child := range module.Modules {

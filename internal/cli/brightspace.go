@@ -229,7 +229,7 @@ func flattenTopics(modules []brightspace.Module, parent string) []map[string]any
 			path = parent + " > " + path
 		}
 		for _, topic := range module.Topics {
-			topics = append(topics, map[string]any{"id": topic.ID, "title": topic.Title, "type": topic.Type, "url": topic.URL, "due_date": topic.DueDate, "module": path})
+			topics = append(topics, map[string]any{"id": topic.ID, "title": topic.Title, "type": topic.Type, "url": topic.URL, "due_date": topic.DueDate, "last_modified": topic.LastModified, "module": path})
 		}
 		topics = append(topics, flattenTopics(module.Modules, path)...)
 	}
