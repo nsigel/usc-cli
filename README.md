@@ -71,8 +71,23 @@ example, `USC_CONFIG_DIR=/path/to/config` stores the session at
 ### Browser sync
 
 `usc browser sync` copies cookies from the saved USC CLI session into a running
-Chrome/Chromium browser over the Chrome DevTools Protocol (CDP). This is an
-explicit cookie sync, not a login handoff.
+Chrome/Chromium browser over the Chrome DevTools Protocol (CDP).
+
+When the CLI session still has a valid USC SSO (Shibboleth / Microsoft) cookie
+set, syncing into the browser is enough to **drive any USC SSO service in
+Chrome**: open the site, choose the campus/student login path, and let it
+complete through Shib/Microsoft using the injected cookies — the same SSO
+handshake the CLI performs, just finished in the browser. That mints
+service-specific cookies (Handshake, Brightspace, and other SSO apps) without
+re-entering NetID, password, or Duo.
+
+Injecting a service’s own application cookies directly can work when the CLI
+already logged into that service, but it is not required. Prefer:
+
+1. Confirm CLI SSO: `usc auth status` (and `usc auth login` if needed)
+2. Sync into Chrome: `usc browser sync --cdp …`
+3. In the browser, open the USC service and use its student/SSO login control
+   (for example Handshake **Student Log-in**)
 
 ```sh
 usc browser sync
@@ -154,7 +169,7 @@ usc handshake career-fair 65867
 | `usc auth login [brightspace\|handshake]` | Sign in through USC SSO. Defaults to Brightspace and reuses the saved session unless `--fresh` is passed. |
 | `usc auth status [brightspace\|handshake]` | Check whether the saved USC session can authenticate the selected service. |
 | `usc auth logout` | Delete the saved USC session. |
-| `usc browser sync [--cdp TARGET]` | Copy saved session cookies into Chrome/Chromium over the Chrome DevTools Protocol. Never prints cookie values. |
+| `usc browser sync [--cdp TARGET]` | Copy saved USC SSO session cookies into Chrome/Chromium over CDP so browser student/SSO login can reach Handshake, Brightspace, and other USC services. Never prints cookie values. |
 | `usc brightspace whoami` | Show the authenticated Brightspace user. |
 | `usc brightspace courses [--all]` | List course enrollments. |
 | `usc brightspace content COURSE_ID [--flat]` | Show a course's content table of contents. |

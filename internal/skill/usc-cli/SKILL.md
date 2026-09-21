@@ -1,6 +1,6 @@
 ---
 name: usc-cli
-description: Access USC Brightspace, Handshake events and career fairs, and the public Schedule of Classes with the Go-based `usc` CLI. Use when retrieving authorized course data, searching career events, reading full event or fair details, or checking current sections.
+description: Access USC Brightspace, Handshake events and career fairs, and the public Schedule of Classes with the Go-based `usc` CLI. Use when retrieving authorized course data, searching career events, reading full event or fair details, checking current sections, or syncing a valid CLI USC SSO session into Chrome so browser student/SSO login can drive Handshake and other USC services.
 ---
 
 # USC CLI
@@ -51,6 +51,24 @@ usc handshake career-fair CAREER_FAIR_ID
 - Organizer matching checks host, employer, and detail contact names/emails.
 - Handshake exposes no event posting timestamp. `posted-desc` uses descending numeric IDs as a new-event monitoring signal; its cursor kind is `id`.
 - Event and fair data is live and requires the saved Handshake application session.
+
+
+## Browser sync (drive USC sites in Chrome)
+
+When the CLI has a valid USC SSO session, sync cookies into a CDP-enabled Chrome
+and complete the site’s own student/SSO login in the browser. That is enough to
+reach Handshake, Brightspace, and other USC SSO apps without re-entering NetID,
+password, or Duo — the browser finishes the same Shib/Microsoft handshake the
+CLI uses.
+
+```sh
+usc auth status
+usc browser sync --cdp 9224   # or USC_CDP / default 127.0.0.1:9222
+```
+
+Then open the target site and click its campus/student login control (for
+example Handshake **Student Log-in**). Prefer this over relying on injected
+application cookies alone.
 
 ## Public schedule data
 
