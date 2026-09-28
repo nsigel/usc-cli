@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -33,11 +34,17 @@ func loginCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Password and MFA values intentionally have no flags: process listings
 			// and shell histories routinely expose command-line arguments.
-			credentials := auth.Credentials{
-				Username:   first(username, os.Getenv("USC_USERNAME")),
-				Password:   os.Getenv("USC_PASSWORD"),
-				BypassCode: os.Getenv("USC_DUO_BYPASS"),
+			savedCredentials, err := loadCredentials()
+			if err != nil {
+				return err
 			}
+			credentials := auth.Credentials{
+				Username:   first(username, os.Getenv("USC_USERNAME"), savedCredentials.Username),
+				Password:   first(os.Getenv("USC_PASSWORD"), savedCredentials.Password),
+				BypassCode: first(os.Getenv("USC_DUO_BYPASS"), savedCredentials.BypassCode),
+			}
+			usingSavedBypassCode := credentials.BypassCode != "" &&
+				os.Getenv("USC_DUO_BYPASS") == "" && savedCredentials.BypassCode != ""
 			path, err := sessionPath()
 			if err != nil {
 				return err
@@ -57,8 +64,22 @@ func loginCommand() *cobra.Command {
 				}
 				err = login(cmd.Context(), target, path, credentials)
 			}
+			if errors.Is(err, auth.ErrBypassRejected) && usingSavedBypassCode && !nonInteractive {
+				// A bypass code can expire. Keep the stored value until a replacement
+				// succeeds, but let an interactive login replace it immediately.
+				credentials.BypassCode = ""
+				if err := completeCredentials(cmd, &credentials, false); err != nil {
+					return err
+				}
+				err = login(cmd.Context(), target, path, credentials)
+			}
 			if err != nil {
 				return err
+			}
+			if credentials.Complete() {
+				if err := saveCredentials(credentials); err != nil {
+					return err
+				}
 			}
 			return writeJSON(cmd, map[string]bool{"authenticated": true})
 		},
@@ -132,6 +153,22 @@ func authenticationTarget(args []string) (string, error) {
 }
 
 func sessionPath() (string, error) {
+	root, err := configDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "session.json"), nil
+}
+
+func credentialsPath() (string, error) {
+	root, err := configDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "credentials.json"), nil
+}
+
+func configDir() (string, error) {
 	// A single cross-domain jar mirrors browser SSO and avoids fake per-site
 	// sessions that would duplicate identity-provider cookies.
 	root := os.Getenv("USC_CONFIG_DIR")
@@ -146,7 +183,72 @@ func sessionPath() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve config directory: %w", err)
 	}
-	return filepath.Join(absolute, "session.json"), nil
+	return absolute, nil
+}
+
+type savedCredentials struct {
+	Username   string `json:"username"`
+	Password   string `json:"password"`
+	BypassCode string `json:"bypass_code"`
+}
+
+func loadCredentials() (savedCredentials, error) {
+	path, err := credentialsPath()
+	if err != nil {
+		return savedCredentials{}, err
+	}
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return savedCredentials{}, nil
+	}
+	if err != nil {
+		return savedCredentials{}, fmt.Errorf("read saved credentials: %w", err)
+	}
+	var credentials savedCredentials
+	if err := json.Unmarshal(data, &credentials); err != nil {
+		return savedCredentials{}, fmt.Errorf("read saved credentials: %w", err)
+	}
+	return credentials, nil
+}
+
+func saveCredentials(credentials auth.Credentials) error {
+	path, err := credentialsPath()
+	if err != nil {
+		return err
+	}
+	directory := filepath.Dir(path)
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		return fmt.Errorf("create configuration directory: %w", err)
+	}
+	data, err := json.MarshalIndent(savedCredentials{
+		Username:   credentials.Username,
+		Password:   credentials.Password,
+		BypassCode: credentials.BypassCode,
+	}, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode credentials: %w", err)
+	}
+	temporary, err := os.CreateTemp(directory, ".credentials-*")
+	if err != nil {
+		return fmt.Errorf("create saved credentials: %w", err)
+	}
+	temporaryName := temporary.Name()
+	defer os.Remove(temporaryName)
+	if err := temporary.Chmod(0o600); err != nil {
+		temporary.Close()
+		return fmt.Errorf("secure saved credentials: %w", err)
+	}
+	if _, err := temporary.Write(append(data, '\n')); err != nil {
+		temporary.Close()
+		return fmt.Errorf("write saved credentials: %w", err)
+	}
+	if err := temporary.Close(); err != nil {
+		return fmt.Errorf("close saved credentials: %w", err)
+	}
+	if err := os.Rename(temporaryName, path); err != nil {
+		return fmt.Errorf("save credentials: %w", err)
+	}
+	return nil
 }
 
 func completeCredentials(cmd *cobra.Command, credentials *auth.Credentials, nonInteractive bool) error {
