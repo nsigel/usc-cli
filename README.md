@@ -118,8 +118,13 @@ USC_DUO_BYPASS=123456789 \
 usc auth login handshake --non-interactive
 ```
 
-Passwords and bypass codes are never written to disk. Brightspace and Handshake
-commands use the saved USC session to establish their own application sessions.
+After a successful login, the CLI saves the username, password, and bypass
+code with mode `0600` in `credentials.json` inside the USC configuration
+directory (for example, `~/Library/Application Support/usc/credentials.json`
+on macOS). Saved credentials are used for later logins; `--username` and the
+`USC_USERNAME`, `USC_PASSWORD`, and `USC_DUO_BYPASS` environment variables
+override their corresponding saved values. Brightspace and Handshake commands
+use the saved USC session to establish their own application sessions.
 
 ### Command data
 
