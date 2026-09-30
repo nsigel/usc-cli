@@ -215,7 +215,8 @@ func (c *Client) Availability(ctx context.Context, options AvailabilityOptions) 
 	}
 	date = time.Date(date.In(location).Year(), date.In(location).Month(), date.In(location).Day(), 0, 0, 0, 0, location)
 	day := date.Format("2006-01-02")
-	endDay := date.AddDate(0, 0, 1).Format("2006-01-02")
+	// Include the following day so evening reservations can cross midnight.
+	endDay := date.AddDate(0, 0, 2).Format("2006-01-02")
 
 	var result []AvailableSlot
 	for _, category := range selected {
@@ -320,7 +321,7 @@ func continuousSlots(space Space, raw []gridSlot, date time.Time, options Availa
 		if err != nil {
 			return nil, err
 		}
-		if !start.Before(date.AddDate(0, 0, 1)) || start.Before(date) {
+		if start.Before(date) {
 			continue
 		}
 		intervals = append(intervals, interval{start: start, end: end, checksum: slot.Checksum, available: slot.ClassName == ""})
@@ -332,7 +333,7 @@ func continuousSlots(space Space, raw []gridSlot, date time.Time, options Availa
 	}
 	var available []AvailableSlot
 	for _, first := range intervals {
-		if !first.available || first.start.Minute()%30 != 0 {
+		if !first.start.Before(date.AddDate(0, 0, 1)) || !first.available || first.start.Minute()%30 != 0 {
 			continue
 		}
 		minuteOfDay := time.Duration(first.start.Hour())*time.Hour + time.Duration(first.start.Minute())*time.Minute

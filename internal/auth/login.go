@@ -49,88 +49,25 @@ type authenticator struct {
 // insufficient and credentials is incomplete, and ErrBypassRejected when Duo
 // rejects the bypass code.
 func Login(ctx context.Context, target, sessionFile string, credentials Credentials) error {
-	return login(ctx, target, sessionFile, credentials, false, "")
-}
-
-// LoginWithReferer is Login with a same-site referring page on the initial
-// request. Some applications reject their SSO entry URL when it is opened
-// without the reservation page that created the application session.
-func LoginWithReferer(ctx context.Context, target, sessionFile string, credentials Credentials, referer string) error {
-	return login(ctx, target, sessionFile, credentials, false, referer)
+	return login(ctx, target, sessionFile, credentials, false)
 }
 
 // LoginFresh ignores the saved session before authenticating and replaces it
 // only after the requested application has been reached successfully.
 func LoginFresh(ctx context.Context, target, sessionFile string, credentials Credentials) error {
-	return login(ctx, target, sessionFile, credentials, true, "")
+	return login(ctx, target, sessionFile, credentials, true)
 }
 
-// LoginFreshWithReferer is LoginFresh with a same-site referring page on the
-// initial request.
-func LoginFreshWithReferer(ctx context.Context, target, sessionFile string, credentials Credentials, referer string) error {
-	return login(ctx, target, sessionFile, credentials, true, referer)
-}
-
-// PrepareSession performs one GET and persists any cookies without interpreting
-// redirects or prompting. It is for services that establish an application
-// cookie before starting an SSO redirect.
-func PrepareSession(ctx context.Context, target, sessionFile string) error {
-	return prepareSession(ctx, target, sessionFile, false)
-}
-
-// PrepareSessionFresh discards saved cookies, performs one GET, and persists
-// the new cookie jar without interpreting redirects or prompting.
-func PrepareSessionFresh(ctx context.Context, target, sessionFile string) error {
-	return prepareSession(ctx, target, sessionFile, true)
-}
-
-func prepareSession(ctx context.Context, target, sessionFile string, fresh bool) error {
-	targetURL, err := url.ParseRequestURI(target)
-	if err != nil || targetURL.Scheme != "https" || targetURL.Host == "" {
-		return errors.New("target must be an absolute HTTPS URL")
-	}
-	authenticator, err := newAuthenticator()
+func login(ctx context.Context, target, sessionFile string, credentials Credentials, fresh bool) error {
+	session, err := OpenSession(sessionFile, SessionOptions{Fresh: fresh, AllowMissing: true})
 	if err != nil {
 		return err
 	}
-	if !fresh {
-		if err := loadSession(sessionFile, authenticator.jar); err != nil {
-			return err
-		}
+	response, err := session.Authenticate(ctx, target, credentials, "")
+	if response != nil {
+		response.Body.Close()
 	}
-	if _, err := authenticator.do(ctx, http.MethodGet, targetURL.String(), nil, "", nil, ""); err != nil {
-		return err
-	}
-	return saveSession(sessionFile, authenticator.jar)
-}
-
-func login(ctx context.Context, target, sessionFile string, credentials Credentials, fresh bool, initialReferer string) error {
-	authenticator, err := newAuthenticator()
-	if err != nil {
-		return err
-	}
-	if !fresh {
-		if err := loadSession(sessionFile, authenticator.jar); err != nil {
-			return err
-		}
-	}
-	var refererURL *url.URL
-	if initialReferer != "" {
-		refererURL, err = url.ParseRequestURI(initialReferer)
-		if err != nil || refererURL.Scheme != "https" || refererURL.Host == "" {
-			return errors.New("referer must be an absolute HTTPS URL")
-		}
-	}
-	_, err = authenticator.open(ctx, target, credentials, refererURL)
-	if err != nil {
-		return err
-	}
-	// Half-finished SSO chains contain one-time state that can poison the next
-	// attempt, so persist only after the requested application is reached.
-	if err := saveSession(sessionFile, authenticator.jar); err != nil {
-		return err
-	}
-	return nil
+	return err
 }
 
 func (a *authenticator) open(ctx context.Context, target string, credentials Credentials, initialReferer *url.URL) (*page, error) {

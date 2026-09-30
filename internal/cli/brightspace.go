@@ -207,7 +207,7 @@ func openBrightspace(ctx context.Context) (*brightspace.Client, error) {
 		}
 		return nil, err
 	}
-	session, err := auth.OpenSession(path)
+	session, err := auth.OpenSession(path, auth.SessionOptions{})
 	if err != nil {
 		return nil, err
 	}

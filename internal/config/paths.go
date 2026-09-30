@@ -37,3 +37,13 @@ func CredentialsPath() (string, error) {
 	}
 	return filepath.Join(root, "credentials.json"), nil
 }
+
+// LibCalReservationsPath returns the private local record of reservations
+// confirmed by this CLI. LibCal does not expose a patron booking-list API.
+func LibCalReservationsPath() (string, error) {
+	root, err := Directory()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "libcal-reservations.json"), nil
+}

@@ -14,7 +14,7 @@ import (
 	"golang.org/x/net/html"
 )
 
-var ErrNoAvailability = errors.New("no matching Leavey spaces are available")
+var ErrNoAvailability = &Error{Code: "libcal_no_availability", Message: "no matching Leavey spaces are available"}
 
 const bookingMethodID = "11"
 
@@ -29,15 +29,24 @@ type ReservationDetails struct {
 
 // Reservation is the confirmed LibCal booking returned after form submission.
 type Reservation struct {
-	Space Space     `json:"space"`
-	Start time.Time `json:"start"`
-	End   time.Time `json:"end"`
-	State string    `json:"state"`
+	Space       Space     `json:"space"`
+	Start       time.Time `json:"start"`
+	End         time.Time `json:"end"`
+	State       string    `json:"state"`
+	ConfirmedAt time.Time `json:"confirmed_at"`
 }
 
 // BookEarliest finds and books the earliest matching Leavey slot. Group rooms
 // are searched by default; set IncludePods to allow one-person pods.
-func (c *Client) BookEarliest(ctx context.Context, options AvailabilityOptions, details ReservationDetails) (Reservation, error) {
+func (c *Client) BookEarliest(ctx context.Context, options AvailabilityOptions, details ReservationDetails) (reservation Reservation, resultErr error) {
+	if !details.AcceptTerms {
+		return Reservation{}, errors.New("booking requires acceptance of the LibCal reservation terms")
+	}
+	tx, err := c.beginCheckout(ctx, false)
+	if err != nil {
+		return Reservation{}, err
+	}
+	defer tx.finish(&resultErr)
 	available, err := c.Availability(ctx, options)
 	if err != nil {
 		return Reservation{}, err
@@ -45,13 +54,22 @@ func (c *Client) BookEarliest(ctx context.Context, options AvailabilityOptions, 
 	if len(available) == 0 {
 		return Reservation{}, ErrNoAvailability
 	}
-	return c.Book(ctx, available[0], details)
+	return c.book(ctx, available[0], details, tx)
 }
 
 // Book reserves one slot returned by Availability. It creates a temporary
 // LibCal hold, completes the booking form, and removes the hold if submission
 // fails.
 func (c *Client) Book(ctx context.Context, slot AvailableSlot, details ReservationDetails) (reservation Reservation, resultErr error) {
+	tx, err := c.beginCheckout(ctx, false)
+	if err != nil {
+		return Reservation{}, err
+	}
+	defer tx.finish(&resultErr)
+	return c.book(ctx, slot, details, tx)
+}
+
+func (c *Client) book(ctx context.Context, slot AvailableSlot, details ReservationDetails, tx *checkout) (Reservation, error) {
 	if !details.AcceptTerms {
 		return Reservation{}, errors.New("booking requires acceptance of the LibCal reservation terms")
 	}
@@ -61,72 +79,54 @@ func (c *Client) Book(ctx context.Context, slot AvailableSlot, details Reservati
 	if slot.End.Sub(slot.Start) < 30*time.Minute || slot.End.Sub(slot.Start) > 2*time.Hour || slot.End.Sub(slot.Start)%(30*time.Minute) != 0 {
 		return Reservation{}, errors.New("reservation duration must be 30 minutes to 2 hours in 30-minute increments")
 	}
-	booking, err := c.addPendingBooking(ctx, slot)
+	form, err := c.prepareCheckout(ctx, slot, tx)
 	if err != nil {
 		return Reservation{}, err
 	}
-	confirmed := false
-	defer func() {
-		if !confirmed {
-			cleanupContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-			if err := c.removePendingBooking(cleanupContext, slot, booking); err != nil {
-				resultErr = errors.Join(resultErr, fmt.Errorf("release temporary LibCal room hold: %w", err))
-			}
-		}
-	}()
-	updatedBooking, err := c.setPendingDuration(ctx, slot, booking)
+	values, err := fillBookingForm(form, details, slot, *tx.pending)
 	if err != nil {
 		return Reservation{}, err
 	}
-	booking = updatedBooking
-
-	formData, err := c.bookingForm(ctx, slot, booking)
-	if err != nil {
-		if !isBadRequest(err) || c.authenticate == nil {
-			return Reservation{}, err
-		}
-		if err := c.authenticate(ctx, authURLForSpace(slot.Space), refererForSpace(slot.Space)); err != nil {
-			return Reservation{}, err
-		}
-		formData, err = c.bookingForm(ctx, slot, booking)
-		if err != nil {
-			return Reservation{}, err
-		}
-	}
-	if formData.Redirect != "" {
-		if c.authenticate == nil {
-			return Reservation{}, ErrAuthenticationRequired
-		}
-		if err := c.authenticate(ctx, formData.Redirect, refererForSpace(slot.Space)); err != nil {
-			return Reservation{}, err
-		}
-		formData, err = c.bookingForm(ctx, slot, booking)
-		if err != nil {
-			return Reservation{}, err
-		}
-		if formData.Redirect != "" {
-			return Reservation{}, ErrAuthenticationRequired
-		}
-	}
-	form, err := parseBookingForm(formData.HTML)
-	if err != nil {
-		return Reservation{}, err
-	}
-	form.Referer = refererForSpace(slot.Space)
-	values, err := fillBookingForm(form, details, slot, booking)
-	if err != nil {
+	// Persist before the POST: a killed process must never silently retry a
+	// reservation whose confirmation was lost.
+	tx.state.Submitting = true
+	if err := tx.save(); err != nil {
+		tx.state.Submitting = false
 		return Reservation{}, err
 	}
 	response, err := c.submitBookingForm(ctx, form, values)
 	if err != nil {
-		return Reservation{}, err
+		var rejected *ResponseError
+		if errors.As(err, &rejected) && rejected.Status >= 400 && rejected.Status < 500 {
+			tx.state.Submitting = false
+			return Reservation{}, err
+		}
+		return Reservation{}, fmt.Errorf("%w: %v", ErrBookingUnknown, err)
 	}
 	if err := checkBookingResponse(response); err != nil {
-		return Reservation{}, err
+		var rejected *Error
+		if errors.As(err, &rejected) {
+			tx.state.Submitting = false
+			return Reservation{}, err
+		}
+		return Reservation{}, fmt.Errorf("%w: %v", ErrBookingUnknown, err)
 	}
-	confirmed = true
-	return Reservation{Space: slot.Space, Start: slot.Start, End: slot.End, State: "confirmed"}, nil
+	tx.state = checkoutState{}
+	tx.pending = nil
+	if err := tx.save(); err != nil {
+		return Reservation{}, fmt.Errorf("booking confirmed, but could not clear recovery state; do not retry: %w", err)
+	}
+	reservation := Reservation{
+		Space: slot.Space, Start: slot.Start, End: slot.End,
+		State: "confirmed", ConfirmedAt: time.Now(),
+	}
+	if err := c.recordReservation(reservation); err != nil {
+		return Reservation{}, fmt.Errorf(
+			"booking confirmed for %s from %s to %s, but could not record it locally; do not retry: %w",
+			reservation.Space.Name, reservation.Start.Format(time.RFC3339), reservation.End.Format(time.RFC3339), err,
+		)
+	}
+	return reservation, nil
 }
 
 type pendingBooking struct {
@@ -172,7 +172,7 @@ func (c *Client) addPendingBooking(ctx context.Context, slot AvailableSlot) (pen
 		return pendingBooking{}, fmt.Errorf("decode LibCal booking hold: %w", err)
 	}
 	if response.Error != "" {
-		return pendingBooking{}, fmt.Errorf("LibCal could not hold the selected time: %s", safeMessage(response.Error))
+		return pendingBooking{}, libcalError(response.Error)
 	}
 	for _, booking := range response.Bookings {
 		if booking.EID != slot.Space.ID {
@@ -219,7 +219,7 @@ func (c *Client) setPendingDuration(ctx context.Context, slot AvailableSlot, boo
 		return pendingBooking{}, fmt.Errorf("decode LibCal reservation duration update: %w", err)
 	}
 	if response.Error != "" {
-		return pendingBooking{}, fmt.Errorf("LibCal could not set the requested duration: %s", safeMessage(response.Error))
+		return pendingBooking{}, libcalError(response.Error)
 	}
 	for _, updated := range response.Bookings {
 		if updated.ID == booking.ID && updated.EID == slot.Space.ID {
@@ -251,7 +251,7 @@ func (c *Client) removePendingBooking(ctx context.Context, slot AvailableSlot, b
 		return fmt.Errorf("decode LibCal room hold release: %w", err)
 	}
 	if response.Error != "" {
-		return fmt.Errorf("LibCal could not release the temporary room hold: %s", safeMessage(response.Error))
+		return libcalError(response.Error)
 	}
 	for _, remaining := range response.Bookings {
 		if remaining.ID == booking.ID {
@@ -306,7 +306,7 @@ func (c *Client) bookingForm(ctx context.Context, slot AvailableSlot, booking pe
 		return response, nil
 	}
 	if response.Error != "" {
-		return bookingPageResponse{}, fmt.Errorf("LibCal booking form: %s", safeMessage(response.Error))
+		return bookingPageResponse{}, libcalError(response.Error)
 	}
 	if response.HTML == "" {
 		return bookingPageResponse{}, errors.New("LibCal returned no reservation form")
@@ -327,19 +327,6 @@ func normalizeAuthRedirect(value string) (string, error) {
 		return "", errors.New("LibCal returned an unsupported authentication redirect")
 	}
 	return target.String(), nil
-}
-
-func authURLForSpace(space Space) string {
-	category := categoryBySlug(space.CategorySlug)
-	if category.ID == 0 {
-		category = categoryBySlug(CategorySecond)
-	}
-	return baseURL + "/spaces/auth?returnUrl=" + url.QueryEscape(categoryReturnURL(category))
-}
-
-func isBadRequest(err error) bool {
-	var responseError *ResponseError
-	return errors.As(err, &responseError) && responseError.Status == http.StatusBadRequest
 }
 
 type bookingForm struct {
@@ -450,6 +437,10 @@ func fillBookingForm(form bookingForm, details ReservationDetails, slot Availabl
 	values := make(url.Values)
 	firstName, lastName := splitName(details.Name)
 	for _, field := range form.Fields {
+		if field.Type == "hidden" {
+			values.Set(field.Name, field.Value)
+			continue
+		}
 		value, provided := details.Fields[field.Name]
 		if !provided {
 			value = field.Value
@@ -512,6 +503,9 @@ func fillBookingForm(form bookingForm, details ReservationDetails, slot Availabl
 		if value != "" {
 			values.Add(field.Name, value)
 		}
+	}
+	if form.Action == "/ajax/equipment/checkout" {
+		return values, nil
 	}
 	serializedBookings, err := json.Marshal([]map[string]any{{
 		"id": booking.ID, "eid": booking.EID, "seat_id": booking.SeatID,
@@ -596,14 +590,20 @@ func checkBookingResponse(data []byte) error {
 	var wire map[string]any
 	if json.Unmarshal(data, &wire) == nil {
 		if message, ok := wire["error"].(string); ok && message != "" {
-			return fmt.Errorf("LibCal rejected the reservation: %s", safeMessage(message))
+			return libcalError(message)
 		}
-		if _, ok := wire["html"].(string); ok {
+		// LibCal's bookingSuccessCallback treats nonempty HTML without an
+		// error as success; confirmation wording varies by category.
+		if body, ok := wire["html"].(string); ok && strings.TrimSpace(body) != "" {
 			return nil
 		}
 	}
+	var checkoutHTML string
+	if json.Unmarshal(data, &checkoutHTML) == nil {
+		data = []byte(checkoutHTML)
+	}
 	text := strings.ToLower(strings.TrimSpace(textFromHTML(data)))
-	if strings.Contains(text, "reservation confirmed") || strings.Contains(text, "reservation was confirmed") || strings.Contains(text, "successfully booked") {
+	if strings.Contains(text, "booking confirmed") || strings.Contains(text, "reservation confirmed") || strings.Contains(text, "reservation was confirmed") || strings.Contains(text, "successfully booked") {
 		return nil
 	}
 	return errors.New("LibCal did not return a reservation confirmation")

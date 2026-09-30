@@ -93,16 +93,44 @@ usc libcal spaces rooms
 usc libcal room SPACE_ID
 usc libcal availability --date tomorrow --after 18:00 --duration 60
 usc libcal availability --date tomorrow --after 18:00 --include-pods
+usc libcal reservations
 usc auth login libcal
 usc libcal book --date tomorrow --after 18:00 --name "Your Name" \
-  --email you@usc.edu --accept-terms
+  --email you@usc.edu --space SPACE_ID --start 18:30 --accept-terms
 ```
 
-`libcal book` reserves the earliest matching room. It does not prompt; pass
+`libcal book` reserves the earliest matching room unless `--space` and `--start`
+select an exact slot returned by `availability`. It does not prompt; pass
 `--accept-terms` to confirm the displayed reservation terms, and repeat
-`--field FIELD=VALUE` for any additional fields LibCal requires. The public Go
+`--field FIELD=VALUE` for any additional fields LibCal requires. The
+`reservations` command reads the private local history of bookings confirmed by
+this CLI; LibCal has no patron booking-list API, so its `complete` field is false
+and browser bookings may be absent. The history is stored at
+`$USC_CONFIG_DIR/libcal-reservations.json` (or the platform configuration
+directory when that variable is unset). The public Go
 package can also be imported: use `libcal.NewPublic()` for reads and
 `libcal.Open(ctx)` to reuse the CLI's saved USC session for bookings.
+
+Checkout follows the form returned by SSO instead of staging the same booking
+again. Failed or interrupted commands release their temporary checkout using
+LibCal's session-end endpoint. The CLI saves unfinished checkout IDs privately
+and releases them before the next booking, with one checkout allowed at a time.
+`usc libcal release` explicitly releases unfinished CLI checkout state; it does
+not cancel confirmed reservations.
+
+Errors include an actionable `error` string and a stable `code`, including
+`libcal_slot_unavailable`, `libcal_stale_slot`, `libcal_checkout_expired`,
+`libcal_authentication_required`, `libcal_booking_limit`,
+`libcal_invalid_details`, `libcal_rate_limited`, `libcal_checkout_busy`,
+`libcal_cleanup_failed`, `libcal_selected_slot_unavailable`, and
+`libcal_booking_unknown`. If submission times out
+or the process dies during submission, check the confirmation email before
+retrying. Only then use `usc libcal release` to acknowledge the unknown result.
+Never automatically retry a submission with an unknown outcome.
+
+A hard kill or lost connection before LibCal returns a checkout ID cannot be
+recovered locally; LibCal's temporary hold expiry remains the fallback.
+
 
 ### Marshall EMS credentials
 
@@ -230,7 +258,9 @@ usc handshake career-fair 65867
 | `usc libcal spaces [rooms\|pods\|all\|lvl1\|lvl2\|lvl3]` | List Leavey spaces. |
 | `usc libcal room SPACE_ID` | Show a Leavey space's details. |
 | `usc libcal availability [FILTERS]` | Find availability by date, time, duration, category, and capacity. |
-| `usc libcal book [FILTERS]` | Book the earliest matching room; use `--include-pods` to allow pods. |
+| `usc libcal book [FILTERS]` | Book a matching room; use `--space ID --start HH:MM` to select an exact availability result. |
+| `usc libcal reservations [--all]` | List upcoming or all reservations confirmed by this CLI. |
+| `usc libcal release` | Release unfinished CLI checkout state; never cancels confirmed reservations. |
 | `usc classes TERM_CODE COURSE_CODE` | Show a public Schedule of Classes course and all of its sections. |
 | `usc sites [NAME]` | List supported USC sites, or show one site. |
 | `usc skill` | Print the bundled `SKILL.md` for use with agent skill systems. |

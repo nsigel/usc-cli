@@ -377,12 +377,17 @@ func first(values ...string) string {
 
 type errorPayload struct {
 	Error  string `json:"error"`
+	Code   string `json:"code,omitempty"`
 	Action string `json:"action,omitempty"`
 }
 
 // ErrorPayload returns the stable JSON representation of a command error.
 func ErrorPayload(err error) errorPayload {
 	payload := errorPayload{Error: err.Error()}
+	var coded interface{ ErrorCode() string }
+	if errors.As(err, &coded) {
+		payload.Code = coded.ErrorCode()
+	}
 	if action := errorAction(err); action != "" {
 		payload.Action = action
 	} else if errors.Is(err, handshake.ErrSessionInvalid) {

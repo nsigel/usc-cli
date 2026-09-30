@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -112,11 +113,7 @@ func cloneCookie(cookie *http.Cookie) http.Cookie {
 	return clone
 }
 
-func loadSession(name string, jar *sessionJar) error {
-	return loadSessionWithPolicy(name, jar, nil)
-}
-
-func loadSessionWithPolicy(name string, jar *sessionJar, ignoredDomains map[string]bool) error {
+func loadSession(name string, jar *sessionJar, ignoredDomains []string) error {
 	data, err := os.ReadFile(name)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
@@ -144,33 +141,31 @@ func loadSessionWithPolicy(name string, jar *sessionJar, ignoredDomains map[stri
 	return nil
 }
 
-func saveSessionReplacingDomains(name string, jar *sessionJar, domains map[string]bool, preserve map[string]bool) error {
+func saveSessionReplacingDomains(name string, jar *sessionJar, domains, preserve []string) error {
 	existing, err := newSessionJar()
 	if err != nil {
 		return err
 	}
-	if err := loadSession(name, existing); err != nil {
+	if err := loadSession(name, existing, nil); err != nil {
 		return err
 	}
+	// Keep only the explicitly preserved cookies from disk. Re-merging all
+	// saved cookies would resurrect cookies deleted during authentication.
 	for key, entry := range existing.entries {
-		if cookieMatchesDomains(entry, domains) && !preserve[entry.Cookie.Name] {
+		if !cookieMatchesDomains(entry, domains) || !slices.Contains(preserve, entry.Cookie.Name) {
 			delete(existing.entries, key)
 		}
 	}
-	for _, entry := range jar.snapshot() {
-		if preserve[entry.Cookie.Name] {
+	for key, entry := range jar.entries {
+		if cookieMatchesDomains(entry, domains) && slices.Contains(preserve, entry.Cookie.Name) {
 			continue
 		}
-		source, err := url.ParseRequestURI(entry.SetBy)
-		if err != nil || source.Scheme != "https" || source.Host == "" {
-			return errors.New("invalid cookie source in session")
-		}
-		existing.SetCookies(source, []*http.Cookie{&entry.Cookie})
+		existing.entries[key] = entry
 	}
 	return saveSession(name, existing)
 }
 
-func cookieMatchesDomains(entry storedCookie, domains map[string]bool) bool {
+func cookieMatchesDomains(entry storedCookie, domains []string) bool {
 	if len(domains) == 0 {
 		return false
 	}
@@ -181,9 +176,9 @@ func cookieMatchesDomains(entry storedCookie, domains map[string]bool) bool {
 	return hostMatchesDomains(entry.Cookie.Domain, domains)
 }
 
-func hostMatchesDomains(host string, domains map[string]bool) bool {
+func hostMatchesDomains(host string, domains []string) bool {
 	host = strings.TrimPrefix(strings.ToLower(host), ".")
-	for domain := range domains {
+	for _, domain := range domains {
 		domain = strings.TrimPrefix(strings.ToLower(domain), ".")
 		if host == domain || strings.HasSuffix(host, "."+domain) {
 			return true

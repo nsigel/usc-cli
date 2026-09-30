@@ -13,20 +13,23 @@ import (
 
 func libcalCommand() *cobra.Command {
 	cmd := &cobra.Command{Use: "libcal", Short: "Check and reserve Leavey Library spaces"}
-	cmd.AddCommand(libcalCategoriesCommand(), libcalSpacesCommand(), libcalRoomCommand(), libcalAvailabilityCommand(), libcalBookCommand())
+	cmd.AddCommand(libcalCategoriesCommand(), libcalSpacesCommand(), libcalRoomCommand(), libcalAvailabilityCommand(), libcalBookCommand(), libcalReservationsCommand(), libcalReleaseCommand())
 	return cmd
 }
 
 func libcalBookCommand() *cobra.Command {
-	var dateText, afterText, beforeText, categoryText, capacityText, name, email string
-	var durationMinutes int
+	var dateText, afterText, beforeText, categoryText, capacityText, name, email, startText string
+	var durationMinutes, spaceID int
 	var includePods, acceptTerms bool
 	var customFields []string
 	cmd := &cobra.Command{
 		Use:   "book",
-		Short: "Book the earliest matching Leavey study room",
+		Short: "Book a matching Leavey study room",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if (spaceID > 0) != (startText != "") {
+				return errors.New("--space and --start must be used together")
+			}
 			date, err := parseLibCalDate(dateText)
 			if err != nil {
 				return err
@@ -59,13 +62,35 @@ func libcalBookCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			details := libcal.ReservationDetails{
+				Name: name, Email: email, Fields: fields, AcceptTerms: acceptTerms,
+			}
+			var selected *libcal.AvailableSlot
+			if spaceID > 0 || startText != "" {
+				start, err := libcal.TimeOfDay(startText)
+				if err != nil {
+					return fmt.Errorf("invalid --start: %w", err)
+				}
+				slots, err := libcal.NewPublic().Availability(cmd.Context(), options)
+				if err != nil {
+					return err
+				}
+				slot, ok := selectLibCalSlot(slots, spaceID, start)
+				if !ok {
+					return &libcal.Error{Code: "libcal_selected_slot_unavailable", Message: "the selected LibCal space and start time are no longer available; refresh availability"}
+				}
+				selected = &slot
+			}
 			client, err := libcal.Open(cmd.Context())
 			if err != nil {
 				return err
 			}
-			reservation, err := client.BookEarliest(cmd.Context(), options, libcal.ReservationDetails{
-				Name: name, Email: email, Fields: fields, AcceptTerms: acceptTerms,
-			})
+			var reservation libcal.Reservation
+			if selected != nil {
+				reservation, err = client.Book(cmd.Context(), *selected, details)
+			} else {
+				reservation, err = client.BookEarliest(cmd.Context(), options, details)
+			}
 			if err != nil {
 				return err
 			}
@@ -79,10 +104,45 @@ func libcalBookCommand() *cobra.Command {
 	cmd.Flags().StringVar(&categoryText, "category", "rooms", "rooms, pods, all, lvl1, lvl2, or lvl3")
 	cmd.Flags().BoolVar(&includePods, "include-pods", false, "include one-person study pods with group rooms")
 	cmd.Flags().StringVar(&capacityText, "capacity", "", "capacity band: 1-4, 5-8, or 9-12 people")
+	cmd.Flags().IntVar(&spaceID, "space", 0, "exact space ID selected from availability (requires --start)")
+	cmd.Flags().StringVar(&startText, "start", "", "exact start time selected from availability, HH:MM (requires --space)")
 	cmd.Flags().StringVar(&name, "name", "", "name to use if LibCal requests it")
 	cmd.Flags().StringVar(&email, "email", "", "USC email to use if LibCal requests it")
 	cmd.Flags().StringArrayVar(&customFields, "field", nil, "additional LibCal form value as FIELD=VALUE (repeatable)")
 	cmd.Flags().BoolVar(&acceptTerms, "accept-terms", false, "confirm acceptance of the displayed LibCal reservation terms")
+	return cmd
+}
+
+func selectLibCalSlot(slots []libcal.AvailableSlot, spaceID int, start time.Duration) (libcal.AvailableSlot, bool) {
+	for _, slot := range slots {
+		minute := time.Duration(slot.Start.Hour())*time.Hour + time.Duration(slot.Start.Minute())*time.Minute
+		if slot.Space.ID == spaceID && minute == start {
+			return slot, true
+		}
+	}
+	return libcal.AvailableSlot{}, false
+}
+
+func libcalReservationsCommand() *cobra.Command {
+	var all bool
+	cmd := &cobra.Command{
+		Use:   "reservations",
+		Short: "List reservations confirmed by this CLI",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			reservations, err := libcal.Reservations(all)
+			if err != nil {
+				return err
+			}
+			return writeJSON(cmd, map[string]any{
+				"source":       "local_cli_history",
+				"complete":     false,
+				"reservations": reservations,
+				"count":        len(reservations),
+			})
+		},
+	}
+	cmd.Flags().BoolVar(&all, "all", false, "include past reservations")
 	return cmd
 }
 
@@ -239,4 +299,23 @@ func parseCapacityRange(value string) (int, int, error) {
 		return 0, 0, errors.New("capacity must be one of 1-4, 5-8, or 9-12")
 	}
 	return minimum, maximum, nil
+}
+
+// libcalReleaseCommand only releases temporary checkout state, never a reservation.
+func libcalReleaseCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "release",
+		Short: "Release an unfinished CLI checkout (check confirmation email first if submission was interrupted)",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			client, err := libcal.Open(cmd.Context())
+			if err != nil {
+				return err
+			}
+			if err := client.Release(cmd.Context()); err != nil {
+				return err
+			}
+			return writeJSON(cmd, map[string]bool{"released": true})
+		},
+	}
 }

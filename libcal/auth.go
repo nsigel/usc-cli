@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/nsigel/usc-cli/internal/auth"
+	http "github.com/saucesteals/fhttp"
 )
 
 // Authenticate performs LibCal's booking-specific USC SSO handoff without
@@ -14,53 +16,31 @@ import (
 // room is staged, so this briefly holds an available 2nd-floor room and always
 // removes that hold before returning.
 func Authenticate(ctx context.Context, sessionFile string, credentials auth.Credentials, fresh bool) (resultErr error) {
-	open := func() (*auth.Session, error) {
-		return auth.OpenSessionWithDomainPolicy(sessionFile, []string{"libcal.usc.edu", "libauth.com"}, []string{"lc_ebcart"})
-	}
-	if fresh {
-		open = func() (*auth.Session, error) { return auth.OpenFreshSession(sessionFile) }
-	}
-	session, err := open()
+	session, err := auth.OpenSession(sessionFile, auth.SessionOptions{
+		Fresh:           fresh,
+		AllowMissing:    true,
+		ResetDomains:    []string{"libcal.usc.edu", "libauth.com"},
+		PreserveCookies: []string{"lc_ebcart"},
+	})
 	if err != nil {
 		return fmt.Errorf("open USC session: %w", err)
 	}
 	client := New(session)
+	client.checkoutPath = filepath.Join(filepath.Dir(sessionFile), "libcal-checkout.json")
+	client.authenticate = func(ctx context.Context, target, referer string) (*http.Response, error) {
+		return session.Authenticate(ctx, target, credentials, referer)
+	}
+	tx, err := client.beginCheckout(ctx, false)
+	if err != nil {
+		return err
+	}
+	defer tx.finish(&resultErr)
 	slot, err := authProbeSlot(ctx, client)
 	if err != nil {
 		return err
 	}
-	booking, err := client.addPendingBooking(ctx, slot)
-	if err != nil {
-		return fmt.Errorf("stage temporary LibCal room hold: %w", err)
-	}
-	defer func() {
-		cleanupContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if err := client.removePendingBooking(cleanupContext, slot, booking); err != nil {
-			cleanupErr := fmt.Errorf("release temporary LibCal room hold: %w", err)
-			resultErr = errors.Join(resultErr, cleanupErr)
-		}
-	}()
-
-	updated, err := client.setPendingDuration(ctx, slot, booking)
-	if err != nil {
-		return fmt.Errorf("prepare temporary LibCal room hold: %w", err)
-	}
-	booking = updated
-	form, err := client.bookingForm(ctx, slot, booking)
-	if err != nil {
-		if !isBadRequest(err) {
-			return err
-		}
-		return session.Authenticate(ctx, authURLForSpace(slot.Space), credentials, refererForSpace(slot.Space))
-	}
-	if form.Redirect != "" {
-		return session.Authenticate(ctx, form.Redirect, credentials, refererForSpace(slot.Space))
-	}
-	if form.HTML == "" {
-		return errors.New("LibCal did not complete its USC sign-in handoff")
-	}
-	return nil
+	_, err = client.prepareCheckout(ctx, slot, tx)
+	return err
 }
 
 func authProbeSlot(ctx context.Context, client *Client) (AvailableSlot, error) {

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -24,7 +25,7 @@ const (
 
 // ErrAuthenticationRequired means LibCal needs the user to sign in through
 // USC SSO. Run `usc auth login libcal` and retry.
-var ErrAuthenticationRequired = errors.New("LibCal authentication required")
+var ErrAuthenticationRequired = &Error{Code: "libcal_authentication_required", Message: "LibCal authentication required; run usc auth login libcal"}
 
 // Doer is the HTTP surface used by Client. It accepts the same request type as
 // usc-cli's authenticated session so callers can supply their own transport.
@@ -34,8 +35,10 @@ type Doer interface {
 
 // Client reads and books Leavey Library spaces through LibCal.
 type Client struct {
-	http         Doer
-	authenticate func(context.Context, string, string) error
+	http             Doer
+	authenticate     func(context.Context, string, string) (*http.Response, error)
+	checkoutPath     string
+	reservationsPath string
 }
 
 // New creates a LibCal client using the supplied HTTP client.
@@ -56,49 +59,29 @@ func Open(ctx context.Context) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("find USC session: %w", err)
 	}
-	session, err := auth.OpenSessionWithDomainPolicy(path, []string{"libcal.usc.edu", "libauth.com"}, []string{"lc_ebcart"})
+	reservationsPath, err := config.LibCalReservationsPath()
+	if err != nil {
+		return nil, fmt.Errorf("find local LibCal reservations: %w", err)
+	}
+	session, err := auth.OpenSession(path, auth.SessionOptions{
+		AllowMissing:    true,
+		ResetDomains:    []string{"libcal.usc.edu", "libauth.com"},
+		PreserveCookies: []string{"lc_ebcart"},
+	})
 	if err != nil {
 		return nil, fmt.Errorf("open USC session: %w", err)
 	}
 	client := New(session)
-	client.authenticate = func(ctx context.Context, target, referer string) error {
-		err := session.Authenticate(ctx, target, auth.Credentials{}, referer)
+	client.checkoutPath = filepath.Join(filepath.Dir(path), "libcal-checkout.json")
+	client.reservationsPath = reservationsPath
+	client.authenticate = func(ctx context.Context, target, referer string) (*http.Response, error) {
+		response, err := session.Authenticate(ctx, target, auth.Credentials{}, referer)
 		if errors.Is(err, auth.ErrCredentialsRequired) {
-			return ErrAuthenticationRequired
+			return response, ErrAuthenticationRequired
 		}
-		return err
+		return response, err
 	}
 	return client, nil
-}
-
-// ResponseError describes a rejected LibCal HTTP request without exposing the
-// response body, which may contain user or session state.
-type ResponseError struct {
-	Operation string
-	Status    int
-	BodyBytes int
-	Reason    string
-}
-
-func (e *ResponseError) Error() string {
-	message := fmt.Sprintf("LibCal %s: HTTP %d", e.Operation, e.Status)
-	if e.Status == http.StatusUnauthorized || e.Status == http.StatusForbidden {
-		message = fmt.Sprintf("LibCal %s: %v (HTTP %d)", e.Operation, ErrAuthenticationRequired, e.Status)
-	}
-	if e.BodyBytes > 0 {
-		message += fmt.Sprintf(" (%d-byte response)", e.BodyBytes)
-	}
-	if e.Reason != "" {
-		message += ": " + e.Reason
-	}
-	return message
-}
-
-func (e *ResponseError) Unwrap() error {
-	if e.Status == http.StatusUnauthorized || e.Status == http.StatusForbidden {
-		return ErrAuthenticationRequired
-	}
-	return nil
 }
 
 func (c *Client) request(ctx context.Context, method, path string, form url.Values, accept string) ([]byte, error) {
@@ -139,41 +122,14 @@ func (c *Client) requestFrom(ctx context.Context, method, path string, form url.
 		return nil, err
 	}
 	if response.StatusCode >= 300 && response.StatusCode < 400 {
-		location, _ := url.Parse(response.Header.Get("Location"))
-		if strings.Contains(location.Path, "/spaces/auth") || strings.Contains(location.Host, "login.usc.edu") {
+		location, err := url.Parse(response.Header.Get("Location"))
+		if err == nil && (strings.Contains(location.Path, "/spaces/auth") || strings.Contains(location.Host, "login.usc.edu")) {
 			return nil, ErrAuthenticationRequired
 		}
-		return nil, &ResponseError{Operation: method + " " + path, Status: response.StatusCode}
+		return nil, responseError(method+" "+path, response.StatusCode, nil)
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, &ResponseError{
-			Operation: method + " " + path,
-			Status:    response.StatusCode,
-			BodyBytes: len(data),
-			Reason:    responseReason(data),
-		}
+		return nil, responseError(method+" "+path, response.StatusCode, data)
 	}
 	return data, nil
-}
-
-func responseReason(data []byte) string {
-	body := strings.ToLower(string(data))
-	switch {
-	case strings.Contains(body, "invalid id"):
-		return "LibCal rejected the session identifier"
-	case strings.Contains(body, "patron"):
-		return "LibCal rejected reservation identity data"
-	case strings.Contains(body, "checksum"):
-		return "LibCal rejected the availability slot"
-	case strings.Contains(body, "authentication") || strings.Contains(body, "sign in"):
-		return "LibCal rejected the authentication state"
-	case strings.Contains(body, "reservation") || strings.Contains(body, "booking") || strings.Contains(body, "room"):
-		return "LibCal rejected the reservation details"
-	case strings.Contains(body, "session") || strings.Contains(body, "state") || strings.Contains(body, "token"):
-		return "LibCal rejected the session state"
-	case strings.Contains(body, "request") || strings.Contains(body, "data") || strings.Contains(body, "field"):
-		return "LibCal rejected the request data"
-	default:
-		return "LibCal rejected the request"
-	}
 }
