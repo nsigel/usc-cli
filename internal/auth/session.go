@@ -113,6 +113,10 @@ func cloneCookie(cookie *http.Cookie) http.Cookie {
 }
 
 func loadSession(name string, jar *sessionJar) error {
+	return loadSessionWithPolicy(name, jar, nil)
+}
+
+func loadSessionWithPolicy(name string, jar *sessionJar, ignoredDomains map[string]bool) error {
 	data, err := os.ReadFile(name)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
@@ -128,6 +132,9 @@ func loadSession(name string, jar *sessionJar) error {
 		return fmt.Errorf("unsupported session version %d", session.Version)
 	}
 	for _, entry := range session.Cookies {
+		if cookieMatchesDomains(entry, ignoredDomains) {
+			continue
+		}
 		source, err := url.ParseRequestURI(entry.SetBy)
 		if err != nil || source.Scheme != "https" || source.Host == "" {
 			return errors.New("invalid cookie source in session")
@@ -135,6 +142,54 @@ func loadSession(name string, jar *sessionJar) error {
 		jar.SetCookies(source, []*http.Cookie{&entry.Cookie})
 	}
 	return nil
+}
+
+func saveSessionReplacingDomains(name string, jar *sessionJar, domains map[string]bool, preserve map[string]bool) error {
+	existing, err := newSessionJar()
+	if err != nil {
+		return err
+	}
+	if err := loadSession(name, existing); err != nil {
+		return err
+	}
+	for key, entry := range existing.entries {
+		if cookieMatchesDomains(entry, domains) && !preserve[entry.Cookie.Name] {
+			delete(existing.entries, key)
+		}
+	}
+	for _, entry := range jar.snapshot() {
+		if preserve[entry.Cookie.Name] {
+			continue
+		}
+		source, err := url.ParseRequestURI(entry.SetBy)
+		if err != nil || source.Scheme != "https" || source.Host == "" {
+			return errors.New("invalid cookie source in session")
+		}
+		existing.SetCookies(source, []*http.Cookie{&entry.Cookie})
+	}
+	return saveSession(name, existing)
+}
+
+func cookieMatchesDomains(entry storedCookie, domains map[string]bool) bool {
+	if len(domains) == 0 {
+		return false
+	}
+	source, err := url.ParseRequestURI(entry.SetBy)
+	if err == nil && hostMatchesDomains(source.Hostname(), domains) {
+		return true
+	}
+	return hostMatchesDomains(entry.Cookie.Domain, domains)
+}
+
+func hostMatchesDomains(host string, domains map[string]bool) bool {
+	host = strings.TrimPrefix(strings.ToLower(host), ".")
+	for domain := range domains {
+		domain = strings.TrimPrefix(strings.ToLower(domain), ".")
+		if host == domain || strings.HasSuffix(host, "."+domain) {
+			return true
+		}
+	}
+	return false
 }
 
 func saveSession(name string, jar *sessionJar) error {

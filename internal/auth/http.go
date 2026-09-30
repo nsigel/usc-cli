@@ -111,6 +111,17 @@ func (a *authenticator) do(ctx context.Context, method, rawURL string, body []by
 			refererValue = referer.Scheme + "://" + referer.Host + "/"
 		}
 		request.Header.Set("Referer", refererValue)
+		if method == http.MethodGet {
+			fetchSite := "cross-site"
+			if request.URL.Scheme == referer.Scheme && request.URL.Host == referer.Host {
+				fetchSite = "same-origin"
+			}
+			request.Header.Set("Sec-Fetch-Dest", "document")
+			request.Header.Set("Sec-Fetch-Mode", "navigate")
+			request.Header.Set("Sec-Fetch-Site", fetchSite)
+			request.Header.Set("Sec-Fetch-User", "?1")
+			request.Header.Set("Upgrade-Insecure-Requests", "1")
+		}
 	}
 	if method == http.MethodPost {
 		// USC's identity providers reject cross-site form posts that do not look

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,15 +12,17 @@ import (
 
 	"github.com/nsigel/usc-cli/internal/auth"
 	"github.com/nsigel/usc-cli/internal/brightspace"
+	"github.com/nsigel/usc-cli/internal/config"
 	"github.com/nsigel/usc-cli/internal/handshake"
 	"github.com/nsigel/usc-cli/internal/site"
+	libcalclient "github.com/nsigel/usc-cli/libcal"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
 
 func authCommand() *cobra.Command {
 	cmd := &cobra.Command{Use: "auth", Short: "Manage the shared USC session"}
-	cmd.AddCommand(loginCommand(), statusCommand(), logoutCommand())
+	cmd.AddCommand(loginCommand(), statusCommand(), logoutCommand(), marshallAuthCommand())
 	return cmd
 }
 
@@ -45,7 +48,7 @@ func loginCommand() *cobra.Command {
 			}
 			usingSavedBypassCode := credentials.BypassCode != "" &&
 				os.Getenv("USC_DUO_BYPASS") == "" && savedCredentials.BypassCode != ""
-			path, err := sessionPath()
+			path, err := config.SessionPath()
 			if err != nil {
 				return err
 			}
@@ -53,16 +56,12 @@ func loginCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			login := auth.Login
-			if fresh {
-				login = auth.LoginFresh
-			}
-			err = login(cmd.Context(), target, path, credentials)
+			err = loginTarget(cmd.Context(), target, path, credentials, fresh)
 			if errors.Is(err, auth.ErrCredentialsRequired) {
 				if err := completeCredentials(cmd, &credentials, nonInteractive); err != nil {
 					return err
 				}
-				err = login(cmd.Context(), target, path, credentials)
+				err = loginTarget(cmd.Context(), target, path, credentials, fresh)
 			}
 			if errors.Is(err, auth.ErrBypassRejected) && usingSavedBypassCode && !nonInteractive {
 				// A bypass code can expire. Keep the stored value until a replacement
@@ -71,7 +70,7 @@ func loginCommand() *cobra.Command {
 				if err := completeCredentials(cmd, &credentials, false); err != nil {
 					return err
 				}
-				err = login(cmd.Context(), target, path, credentials)
+				err = loginTarget(cmd.Context(), target, path, credentials, fresh)
 			}
 			if err != nil {
 				return err
@@ -96,7 +95,7 @@ func statusCommand() *cobra.Command {
 		Short: "Check the saved USC session",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			path, err := sessionPath()
+			path, err := config.SessionPath()
 			if err != nil {
 				return err
 			}
@@ -106,7 +105,7 @@ func statusCommand() *cobra.Command {
 			}
 			// Empty credentials may complete a silent SSO handshake, but they can
 			// never submit secrets or perform an interactive login.
-			err = auth.Login(cmd.Context(), target, path, auth.Credentials{})
+			err = loginTarget(cmd.Context(), target, path, auth.Credentials{}, false)
 			if errors.Is(err, auth.ErrCredentialsRequired) {
 				// Being signed out is a valid status result, not a command failure.
 				return writeJSON(cmd, map[string]bool{"authenticated": false})
@@ -125,7 +124,7 @@ func logoutCommand() *cobra.Command {
 		Short: "Delete the saved USC session",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			path, err := sessionPath()
+			path, err := config.SessionPath()
 			if err != nil {
 				return err
 			}
@@ -152,48 +151,31 @@ func authenticationTarget(args []string) (string, error) {
 	return selected.LoginURL, nil
 }
 
-func sessionPath() (string, error) {
-	root, err := configDir()
-	if err != nil {
-		return "", err
+func loginTarget(ctx context.Context, target, sessionFile string, credentials auth.Credentials, fresh bool) error {
+	if target == site.LibCalLoginURL {
+		return libcalclient.Authenticate(ctx, sessionFile, credentials, fresh)
 	}
-	return filepath.Join(root, "session.json"), nil
-}
-
-func credentialsPath() (string, error) {
-	root, err := configDir()
-	if err != nil {
-		return "", err
+	login := auth.Login
+	if fresh {
+		login = auth.LoginFresh
 	}
-	return filepath.Join(root, "credentials.json"), nil
-}
-
-func configDir() (string, error) {
-	// A single cross-domain jar mirrors browser SSO and avoids fake per-site
-	// sessions that would duplicate identity-provider cookies.
-	root := os.Getenv("USC_CONFIG_DIR")
-	if root == "" {
-		config, err := os.UserConfigDir()
-		if err != nil {
-			return "", fmt.Errorf("find config directory: %w", err)
-		}
-		root = filepath.Join(config, "usc")
-	}
-	absolute, err := filepath.Abs(root)
-	if err != nil {
-		return "", fmt.Errorf("resolve config directory: %w", err)
-	}
-	return absolute, nil
+	return login(ctx, target, sessionFile, credentials)
 }
 
 type savedCredentials struct {
-	Username   string `json:"username"`
-	Password   string `json:"password"`
-	BypassCode string `json:"bypass_code"`
+	Username   string                    `json:"username"`
+	Password   string                    `json:"password"`
+	BypassCode string                    `json:"bypass_code"`
+	Marshall   *savedMarshallCredentials `json:"marshall,omitempty"`
+}
+
+type savedMarshallCredentials struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
 }
 
 func loadCredentials() (savedCredentials, error) {
-	path, err := credentialsPath()
+	path, err := config.CredentialsPath()
 	if err != nil {
 		return savedCredentials{}, err
 	}
@@ -212,7 +194,27 @@ func loadCredentials() (savedCredentials, error) {
 }
 
 func saveCredentials(credentials auth.Credentials) error {
-	path, err := credentialsPath()
+	saved, err := loadCredentials()
+	if err != nil {
+		return err
+	}
+	saved.Username = credentials.Username
+	saved.Password = credentials.Password
+	saved.BypassCode = credentials.BypassCode
+	return writeCredentials(saved)
+}
+
+func saveMarshallCredentials(email, password string) error {
+	saved, err := loadCredentials()
+	if err != nil {
+		return err
+	}
+	saved.Marshall = &savedMarshallCredentials{Email: email, Password: password}
+	return writeCredentials(saved)
+}
+
+func writeCredentials(credentials savedCredentials) error {
+	path, err := config.CredentialsPath()
 	if err != nil {
 		return err
 	}
@@ -220,11 +222,7 @@ func saveCredentials(credentials auth.Credentials) error {
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return fmt.Errorf("create configuration directory: %w", err)
 	}
-	data, err := json.MarshalIndent(savedCredentials{
-		Username:   credentials.Username,
-		Password:   credentials.Password,
-		BypassCode: credentials.BypassCode,
-	}, "", "  ")
+	data, err := json.MarshalIndent(credentials, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode credentials: %w", err)
 	}
@@ -249,6 +247,62 @@ func saveCredentials(credentials auth.Credentials) error {
 		return fmt.Errorf("save credentials: %w", err)
 	}
 	return nil
+}
+
+func marshallAuthCommand() *cobra.Command {
+	var email string
+	var nonInteractive bool
+	cmd := &cobra.Command{
+		Use:   "marshall [EMAIL]",
+		Short: "Save Marshall EMS credentials",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			saved, err := loadCredentials()
+			if err != nil {
+				return err
+			}
+			if len(args) == 1 {
+				email = first(email, args[0])
+			}
+			savedEmail, savedPassword := "", ""
+			if saved.Marshall != nil {
+				savedEmail = saved.Marshall.Email
+				savedPassword = saved.Marshall.Password
+			}
+			email = first(email, os.Getenv("USC_MARSHALL_EMAIL"), savedEmail)
+			password := first(os.Getenv("USC_MARSHALL_PASSWORD"), savedPassword, os.Getenv("USC_PASSWORD"), saved.Password)
+
+			if email == "" {
+				if nonInteractive {
+					return errors.New("Marshall email is required; set USC_MARSHALL_EMAIL or pass the email address")
+				}
+				email, err = prompt(cmd, bufio.NewReader(cmd.InOrStdin()), "Marshall email (user@marshall.usc.edu): ", false)
+				if err != nil {
+					return err
+				}
+			}
+			email = strings.TrimSpace(email)
+			if !strings.HasSuffix(strings.ToLower(email), "@marshall.usc.edu") || len(email) == len("@marshall.usc.edu") {
+				return errors.New("Marshall email must end in @marshall.usc.edu")
+			}
+			if password == "" {
+				if nonInteractive {
+					return errors.New("Marshall password is required; set USC_MARSHALL_PASSWORD or run usc auth marshall interactively")
+				}
+				password, err = prompt(cmd, bufio.NewReader(cmd.InOrStdin()), "Marshall password: ", true)
+				if err != nil {
+					return err
+				}
+			}
+			if err := saveMarshallCredentials(email, password); err != nil {
+				return err
+			}
+			return writeJSON(cmd, map[string]any{"credentials_saved": true, "email": email})
+		},
+	}
+	cmd.Flags().StringVar(&email, "email", "", "Marshall email address (or USC_MARSHALL_EMAIL)")
+	cmd.Flags().BoolVar(&nonInteractive, "non-interactive", false, "fail instead of prompting")
+	return cmd
 }
 
 func completeCredentials(cmd *cobra.Command, credentials *auth.Credentials, nonInteractive bool) error {
@@ -333,6 +387,8 @@ func ErrorPayload(err error) errorPayload {
 		payload.Action = action
 	} else if errors.Is(err, handshake.ErrSessionInvalid) {
 		payload.Action = "usc auth login handshake"
+	} else if errors.Is(err, libcalclient.ErrAuthenticationRequired) {
+		payload.Action = "usc auth login libcal"
 	} else if errors.Is(err, auth.ErrBypassRejected) ||
 		errors.Is(err, auth.ErrCredentialsRequired) ||
 		errors.Is(err, brightspace.ErrSessionInvalid) {

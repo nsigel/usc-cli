@@ -49,16 +49,46 @@ type authenticator struct {
 // insufficient and credentials is incomplete, and ErrBypassRejected when Duo
 // rejects the bypass code.
 func Login(ctx context.Context, target, sessionFile string, credentials Credentials) error {
-	return login(ctx, target, sessionFile, credentials, false)
+	return login(ctx, target, sessionFile, credentials, false, "")
+}
+
+// LoginWithReferer is Login with a same-site referring page on the initial
+// request. Some applications reject their SSO entry URL when it is opened
+// without the reservation page that created the application session.
+func LoginWithReferer(ctx context.Context, target, sessionFile string, credentials Credentials, referer string) error {
+	return login(ctx, target, sessionFile, credentials, false, referer)
 }
 
 // LoginFresh ignores the saved session before authenticating and replaces it
 // only after the requested application has been reached successfully.
 func LoginFresh(ctx context.Context, target, sessionFile string, credentials Credentials) error {
-	return login(ctx, target, sessionFile, credentials, true)
+	return login(ctx, target, sessionFile, credentials, true, "")
 }
 
-func login(ctx context.Context, target, sessionFile string, credentials Credentials, fresh bool) error {
+// LoginFreshWithReferer is LoginFresh with a same-site referring page on the
+// initial request.
+func LoginFreshWithReferer(ctx context.Context, target, sessionFile string, credentials Credentials, referer string) error {
+	return login(ctx, target, sessionFile, credentials, true, referer)
+}
+
+// PrepareSession performs one GET and persists any cookies without interpreting
+// redirects or prompting. It is for services that establish an application
+// cookie before starting an SSO redirect.
+func PrepareSession(ctx context.Context, target, sessionFile string) error {
+	return prepareSession(ctx, target, sessionFile, false)
+}
+
+// PrepareSessionFresh discards saved cookies, performs one GET, and persists
+// the new cookie jar without interpreting redirects or prompting.
+func PrepareSessionFresh(ctx context.Context, target, sessionFile string) error {
+	return prepareSession(ctx, target, sessionFile, true)
+}
+
+func prepareSession(ctx context.Context, target, sessionFile string, fresh bool) error {
+	targetURL, err := url.ParseRequestURI(target)
+	if err != nil || targetURL.Scheme != "https" || targetURL.Host == "" {
+		return errors.New("target must be an absolute HTTPS URL")
+	}
 	authenticator, err := newAuthenticator()
 	if err != nil {
 		return err
@@ -68,7 +98,30 @@ func login(ctx context.Context, target, sessionFile string, credentials Credenti
 			return err
 		}
 	}
-	_, err = authenticator.open(ctx, target, credentials)
+	if _, err := authenticator.do(ctx, http.MethodGet, targetURL.String(), nil, "", nil, ""); err != nil {
+		return err
+	}
+	return saveSession(sessionFile, authenticator.jar)
+}
+
+func login(ctx context.Context, target, sessionFile string, credentials Credentials, fresh bool, initialReferer string) error {
+	authenticator, err := newAuthenticator()
+	if err != nil {
+		return err
+	}
+	if !fresh {
+		if err := loadSession(sessionFile, authenticator.jar); err != nil {
+			return err
+		}
+	}
+	var refererURL *url.URL
+	if initialReferer != "" {
+		refererURL, err = url.ParseRequestURI(initialReferer)
+		if err != nil || refererURL.Scheme != "https" || refererURL.Host == "" {
+			return errors.New("referer must be an absolute HTTPS URL")
+		}
+	}
+	_, err = authenticator.open(ctx, target, credentials, refererURL)
 	if err != nil {
 		return err
 	}
@@ -80,13 +133,13 @@ func login(ctx context.Context, target, sessionFile string, credentials Credenti
 	return nil
 }
 
-func (a *authenticator) open(ctx context.Context, target string, credentials Credentials) (*page, error) {
+func (a *authenticator) open(ctx context.Context, target string, credentials Credentials, initialReferer *url.URL) (*page, error) {
 	targetURL, err := url.ParseRequestURI(target)
 	if err != nil || targetURL.Scheme != "https" || targetURL.Host == "" {
 		return nil, errors.New("target must be an absolute HTTPS URL")
 	}
 
-	current, err := a.do(ctx, http.MethodGet, targetURL.String(), nil, "", nil, "")
+	current, err := a.do(ctx, http.MethodGet, targetURL.String(), nil, "", initialReferer, "")
 	if err != nil {
 		return nil, err
 	}
@@ -222,6 +275,9 @@ func needsMicrosoftReload(page *page) bool {
 func noContinuation(page *page) error {
 	if isMicrosoftPage(page) {
 		return fmt.Errorf("microsoft page has no form or supported redirect (title: %q)", pageTitle(page.Body))
+	}
+	if page.URL.Hostname() == "libcal.usc.edu" {
+		return fmt.Errorf("no safe continuation for %s%s (HTTP %d, content type %q, %d-byte body)", page.URL.Host, page.URL.Path, page.Status, page.Header.Get("Content-Type"), len(page.Body))
 	}
 	return fmt.Errorf("no safe continuation for %s%s (HTTP %d)", page.URL.Host, page.URL.Path, page.Status)
 }

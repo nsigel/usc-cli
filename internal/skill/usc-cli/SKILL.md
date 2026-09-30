@@ -1,6 +1,6 @@
 ---
 name: usc-cli
-description: Access USC Brightspace, Handshake events and career fairs, and the public Schedule of Classes with the Go-based `usc` CLI. Use when retrieving authorized course data, searching career events, reading full event or fair details, or checking current sections.
+description: Access USC Brightspace, Handshake events and career fairs, Leavey Library room availability and bookings, and the public Schedule of Classes with the Go-based `usc` CLI. Use when retrieving authorized course data, searching career events, booking or checking study spaces, or checking current sections.
 ---
 
 # USC CLI
@@ -9,8 +9,10 @@ description: Access USC Brightspace, Handshake events and career fairs, and the 
 
 - Run `usc auth status` before every Brightspace request.
 - Run `usc auth status handshake` before every Handshake request.
+- Run `usc auth login libcal` before a LibCal booking; availability and room listings are public.
 - Treat authentication sessions, passwords, Duo codes, and cookies as secrets. Never print, store, or share them.
 - Do not submit coursework, alter enrollment, or send messages.
+- Only book a room when the user explicitly requests a reservation. Include `--accept-terms` only when the user has agreed to the reservation terms.
 
 ## Locate a course
 
@@ -51,6 +53,27 @@ usc handshake career-fair CAREER_FAIR_ID
 - Organizer matching checks host, employer, and detail contact names/emails.
 - Handshake exposes no event posting timestamp. `posted-desc` uses descending numeric IDs as a new-event monitoring signal; its cursor kind is `id`.
 - Event and fair data is live and requires the saved Handshake application session.
+
+## Leavey Library / LibCal
+
+```sh
+usc libcal categories
+usc libcal spaces rooms
+usc libcal room SPACE_ID
+usc libcal availability --date tomorrow --after 18:00 --duration 60
+usc libcal availability --date tomorrow --after 18:00 --include-pods
+usc auth login libcal
+usc libcal book --date tomorrow --after 18:00 --duration 60 --accept-terms
+```
+
+- Group study rooms are the default. Add `--include-pods` or select `--category pods` only when one-person pods are acceptable; group rooms win ties at the same time.
+- Use `--capacity 5-8` or `--capacity 9-12` for group rooms, and `--capacity 1-4` for pods. `--category lvl1|lvl2|lvl3` selects a floor.
+- Dates and times use Los Angeles local time. Reservations are limited to two hours per day, one week in advance, and released if the patron does not arrive within ten minutes.
+- Booking can require `--name`, `--email`, and repeatable `--field FIELD=VALUE` arguments. `--accept-terms` is an explicit confirmation; the command never prompts.
+- Leavey discovery and availability are public; booking requires the USC SSO session. Do not assume a booking succeeded unless the command returns a confirmation object.
+- LibCal exposes its SSO handoff only during checkout; `usc auth login libcal` and `usc auth status libcal` briefly stage and release a one-hour room hold without submitting a reservation.
+
+Marshall EMS credential setup is `usc auth marshall user@marshall.usc.edu`. It stores Marshall credentials only; Marshall booking commands are not available yet. EMS currently uses a browser-style HTTP Negotiate/NTLM challenge.
 
 
 ## Browser sync
