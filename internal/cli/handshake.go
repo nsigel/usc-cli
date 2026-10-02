@@ -6,10 +6,8 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/nsigel/usc-cli/internal/auth"
-	"github.com/nsigel/usc-cli/internal/config"
-	"github.com/nsigel/usc-cli/internal/handshake"
-	"github.com/nsigel/usc-cli/internal/site"
+	"github.com/nsigel/usc-cli/auth"
+	"github.com/nsigel/usc-cli/handshake"
 	"github.com/spf13/cobra"
 )
 
@@ -35,7 +33,7 @@ func handshakeCategoriesCommand() *cobra.Command {
 			}
 			categories, err := client.Categories(cmd.Context())
 			if err != nil {
-				return handshakeError(err)
+				return err
 			}
 			return writeJSON(cmd, map[string]any{"categories": categories})
 		},
@@ -53,7 +51,7 @@ func handshakeEventsCommand() *cobra.Command {
 			}
 			page, err := client.Events(cmd.Context(), search)
 			if err != nil {
-				return handshakeError(err)
+				return err
 			}
 			return writeJSON(cmd, handshakePage("events", page.Items, page))
 		},
@@ -76,7 +74,7 @@ func handshakeEventCommand() *cobra.Command {
 			}
 			event, err := client.Event(cmd.Context(), id)
 			if err != nil {
-				return handshakeError(err)
+				return err
 			}
 			return writeJSON(cmd, event)
 		},
@@ -94,7 +92,7 @@ func handshakeCareerFairsCommand() *cobra.Command {
 			}
 			page, err := client.CareerFairs(cmd.Context(), search)
 			if err != nil {
-				return handshakeError(err)
+				return err
 			}
 			return writeJSON(cmd, handshakePage("career_fairs", page.Items, page))
 		},
@@ -117,7 +115,7 @@ func handshakeCareerFairCommand() *cobra.Command {
 			}
 			fair, err := client.CareerFair(cmd.Context(), id)
 			if err != nil {
-				return handshakeError(err)
+				return err
 			}
 			return writeJSON(cmd, fair)
 		},
@@ -147,32 +145,11 @@ func handshakePage[T any](key string, items []T, page handshake.Page[T]) map[str
 }
 
 func openHandshake(ctx context.Context) (*handshake.Client, error) {
-	path, err := config.SessionPath()
-	if err != nil {
-		return nil, err
+	client, err := handshake.Open(ctx)
+	if errors.Is(err, auth.ErrCredentialsRequired) {
+		return nil, withAction(errors.New("authentication required"), "usc auth login handshake")
 	}
-	selected, err := site.Find(site.Handshake)
-	if err != nil {
-		return nil, err
-	}
-	if err := auth.Login(ctx, selected.LoginURL, path, auth.Credentials{}); err != nil {
-		if errors.Is(err, auth.ErrCredentialsRequired) {
-			return nil, withAction(errors.New("authentication required"), "usc auth login handshake")
-		}
-		return nil, err
-	}
-	session, err := auth.OpenSession(path, auth.SessionOptions{})
-	if err != nil {
-		return nil, err
-	}
-	return handshake.New(session), nil
-}
-
-func handshakeError(err error) error {
-	if errors.Is(err, handshake.ErrSessionInvalid) {
-		return withAction(err, "usc auth login handshake")
-	}
-	return err
+	return client, err
 }
 
 func positiveID(value, label string) (int, error) {

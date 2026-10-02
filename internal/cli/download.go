@@ -11,7 +11,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/nsigel/usc-cli/internal/brightspace"
+	"github.com/nsigel/usc-cli/brightspace"
 	"github.com/spf13/cobra"
 )
 

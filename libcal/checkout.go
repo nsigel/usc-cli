@@ -30,7 +30,7 @@ type checkout struct {
 	client  *Client
 	file    *os.File
 	state   checkoutState
-	slot    AvailableSlot
+	slot    availableSlot
 	pending *pendingBooking
 }
 
@@ -160,7 +160,7 @@ func (c *Client) endCheckout(ctx context.Context, session string) error {
 // as input elements in the HTML. Parse only the known literals, never execute JS.
 var checkoutInputPattern = regexp.MustCompile(`appendHiddenInput\('(?P<name>returnUrl|logoutUrl|session)',\s*("(?:\\.|[^"\\])*"|[0-9]+),`)
 
-func (c *Client) prepareCheckout(ctx context.Context, slot AvailableSlot, tx *checkout) (bookingForm, error) {
+func (c *Client) checkoutForm(ctx context.Context, slot availableSlot, tx *checkout) (bookingForm, error) {
 	booking, err := c.addPendingBooking(ctx, slot)
 	if err != nil {
 		return bookingForm{}, err
@@ -170,6 +170,7 @@ func (c *Client) prepareCheckout(ctx context.Context, slot AvailableSlot, tx *ch
 	if err != nil {
 		return bookingForm{}, err
 	}
+	tx.pending = &updated
 	booking = updated
 	page, err := c.bookingForm(ctx, slot, booking)
 	if err != nil {

@@ -13,114 +13,86 @@ import (
 
 func libcalCommand() *cobra.Command {
 	cmd := &cobra.Command{Use: "libcal", Short: "Check and reserve Leavey Library spaces"}
-	cmd.AddCommand(libcalCategoriesCommand(), libcalSpacesCommand(), libcalRoomCommand(), libcalAvailabilityCommand(), libcalBookCommand(), libcalReservationsCommand(), libcalReleaseCommand())
+	cmd.AddCommand(libcalCategoriesCommand(), libcalSpacesCommand(), libcalRoomCommand(), libcalScheduleCommand(), libcalBookCommand(), libcalReservationsCommand(), libcalReleaseCommand())
 	return cmd
 }
 
+// Selection flags deliberately use complete timestamps, so exact selections
+// survive cross-midnight bookings and daylight-saving transitions.
+type libcalSelectionFlags struct {
+	spaceID int
+	start   string
+	end     string
+}
+
+func (f *libcalSelectionFlags) add(cmd *cobra.Command) {
+	cmd.Flags().IntVar(&f.spaceID, "space", 0, "exact LibCal space ID")
+	cmd.Flags().StringVar(&f.start, "start", "", "exact start timestamp from schedule, RFC3339 with UTC offset")
+	cmd.Flags().StringVar(&f.end, "end", "", "chosen end timestamp within available schedule intervals, RFC3339 with UTC offset (maximum 2 hours)")
+}
+
+func (f libcalSelectionFlags) selection() (libcal.Selection, error) {
+	if f.spaceID < 1 || f.start == "" || f.end == "" {
+		return libcal.Selection{}, errors.New("--space, --start, and --end are required")
+	}
+	start, err := time.Parse(time.RFC3339, f.start)
+	if err != nil {
+		return libcal.Selection{}, errors.New("--start must be an RFC3339 timestamp with a UTC offset")
+	}
+	selection := libcal.Selection{SpaceID: f.spaceID, Start: start}
+	if f.end != "" {
+		selection.End, err = time.Parse(time.RFC3339, f.end)
+		if err != nil {
+			return libcal.Selection{}, errors.New("--end must be an RFC3339 timestamp with a UTC offset")
+		}
+		if !selection.End.After(selection.Start) {
+			return libcal.Selection{}, errors.New("--end must be after --start")
+		}
+	}
+	if err := selection.Validate(); err != nil {
+		return libcal.Selection{}, err
+	}
+	return selection, nil
+}
+
 func libcalBookCommand() *cobra.Command {
-	var dateText, afterText, beforeText, categoryText, capacityText, name, email, startText string
-	var durationMinutes, spaceID int
-	var includePods, acceptTerms bool
+	var flags libcalSelectionFlags
+	var name, email string
+	var acceptTerms bool
 	var customFields []string
 	cmd := &cobra.Command{
-		Use:   "book",
-		Short: "Book a matching Leavey study room",
-		Args:  cobra.NoArgs,
+		Use: "book", Short: "Book an explicitly selected space, start, and end", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if (spaceID > 0) != (startText != "") {
-				return errors.New("--space and --start must be used together")
-			}
-			date, err := parseLibCalDate(dateText)
+			selection, err := flags.selection()
 			if err != nil {
 				return err
 			}
-			options := libcal.AvailabilityOptions{
-				Date:        date,
-				Duration:    time.Duration(durationMinutes) * time.Minute,
-				Category:    libcal.Category(strings.ToLower(categoryText)),
-				IncludePods: includePods,
-			}
-			if afterText != "" {
-				options.After, err = libcal.TimeOfDay(afterText)
-				if err != nil {
-					return err
-				}
-			}
-			if beforeText != "" {
-				options.Before, err = libcal.TimeOfDay(beforeText)
-				if err != nil {
-					return err
-				}
-			}
-			if capacityText != "" {
-				options.MinCapacity, options.MaxCapacity, err = parseCapacityRange(capacityText)
-				if err != nil {
-					return err
-				}
+			if !acceptTerms {
+				return errors.New("booking requires --accept-terms to accept the LibCal reservation terms")
 			}
 			fields, err := parseLibCalFields(customFields)
 			if err != nil {
 				return err
 			}
-			details := libcal.ReservationDetails{
-				Name: name, Email: email, Fields: fields, AcceptTerms: acceptTerms,
-			}
-			var selected *libcal.AvailableSlot
-			if spaceID > 0 || startText != "" {
-				start, err := libcal.TimeOfDay(startText)
-				if err != nil {
-					return fmt.Errorf("invalid --start: %w", err)
-				}
-				slots, err := libcal.NewPublic().Availability(cmd.Context(), options)
-				if err != nil {
-					return err
-				}
-				slot, ok := selectLibCalSlot(slots, spaceID, start)
-				if !ok {
-					return &libcal.Error{Code: "libcal_selected_slot_unavailable", Message: "the selected LibCal space and start time are no longer available; refresh availability"}
-				}
-				selected = &slot
-			}
 			client, err := libcal.Open(cmd.Context())
 			if err != nil {
 				return err
 			}
-			var reservation libcal.Reservation
-			if selected != nil {
-				reservation, err = client.Book(cmd.Context(), *selected, details)
-			} else {
-				reservation, err = client.BookEarliest(cmd.Context(), options, details)
-			}
+			reservation, err := client.Book(cmd.Context(), selection, libcal.ReservationDetails{
+				Name: name, Email: email, Fields: fields, AcceptTerms: acceptTerms,
+			})
 			if err != nil {
 				return err
 			}
 			return writeJSON(cmd, reservation)
 		},
 	}
-	cmd.Flags().StringVar(&dateText, "date", "today", "date in Los Angeles time: today, tomorrow, or YYYY-MM-DD")
-	cmd.Flags().StringVar(&afterText, "after", "", "earliest start time, HH:MM in 24-hour format")
-	cmd.Flags().StringVar(&beforeText, "before", "", "latest start time, HH:MM in 24-hour format")
-	cmd.Flags().IntVar(&durationMinutes, "duration", 60, "reservation length in minutes (30-120, in 30-minute increments)")
-	cmd.Flags().StringVar(&categoryText, "category", "rooms", "rooms, pods, all, lvl1, lvl2, or lvl3")
-	cmd.Flags().BoolVar(&includePods, "include-pods", false, "include one-person study pods with group rooms")
-	cmd.Flags().StringVar(&capacityText, "capacity", "", "capacity band: 1-4, 5-8, or 9-12 people")
-	cmd.Flags().IntVar(&spaceID, "space", 0, "exact space ID selected from availability (requires --start)")
-	cmd.Flags().StringVar(&startText, "start", "", "exact start time selected from availability, HH:MM (requires --space)")
+	flags.add(cmd)
 	cmd.Flags().StringVar(&name, "name", "", "name to use if LibCal requests it")
-	cmd.Flags().StringVar(&email, "email", "", "USC email to use if LibCal requests it")
-	cmd.Flags().StringArrayVar(&customFields, "field", nil, "additional LibCal form value as FIELD=VALUE (repeatable)")
-	cmd.Flags().BoolVar(&acceptTerms, "accept-terms", false, "confirm acceptance of the displayed LibCal reservation terms")
+	cmd.Flags().StringVar(&email, "email", "", "email to use if LibCal requests it")
+	cmd.Flags().StringArrayVar(&customFields, "field", nil, "explicit checkout answer as FIELD=VALUE (repeatable)")
+	cmd.Flags().BoolVar(&acceptTerms, "accept-terms", false, "accept the LibCal reservation terms")
 	return cmd
-}
-
-func selectLibCalSlot(slots []libcal.AvailableSlot, spaceID int, start time.Duration) (libcal.AvailableSlot, bool) {
-	for _, slot := range slots {
-		minute := time.Duration(slot.Start.Hour())*time.Hour + time.Duration(slot.Start.Minute())*time.Minute
-		if slot.Space.ID == spaceID && minute == start {
-			return slot, true
-		}
-	}
-	return libcal.AvailableSlot{}, false
 }
 
 func libcalReservationsCommand() *cobra.Command {
@@ -207,31 +179,23 @@ func libcalRoomCommand() *cobra.Command {
 	}
 }
 
-func libcalAvailabilityCommand() *cobra.Command {
-	var dateText, afterText, beforeText, categoryText, capacityText string
-	var durationMinutes int
-	var includePods bool
+func libcalScheduleCommand() *cobra.Command {
+	var dateText, endDateText, categoryText, capacityText string
+	var minCapacity, maxCapacity int
 	cmd := &cobra.Command{
-		Use: "availability", Short: "Find available Leavey study rooms", Args: cobra.NoArgs,
+		Use: "schedule", Aliases: []string{"availability"},
+		Short: "Read the server's schedule intervals without choosing a duration", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			date, err := parseLibCalDate(dateText)
 			if err != nil {
 				return err
 			}
-			options := libcal.AvailabilityOptions{
-				Date:        date,
-				Duration:    time.Duration(durationMinutes) * time.Minute,
-				Category:    libcal.Category(strings.ToLower(categoryText)),
-				IncludePods: includePods,
+			options := libcal.ScheduleOptions{
+				Date: date, Category: libcal.Category(strings.ToLower(categoryText)),
+				MinCapacity: minCapacity, MaxCapacity: maxCapacity,
 			}
-			if afterText != "" {
-				options.After, err = libcal.TimeOfDay(afterText)
-				if err != nil {
-					return err
-				}
-			}
-			if beforeText != "" {
-				options.Before, err = libcal.TimeOfDay(beforeText)
+			if endDateText != "" {
+				options.EndDate, err = parseLibCalDate(endDateText)
 				if err != nil {
 					return err
 				}
@@ -242,27 +206,21 @@ func libcalAvailabilityCommand() *cobra.Command {
 					return err
 				}
 			}
-			slots, err := libcal.NewPublic().Availability(cmd.Context(), options)
+			schedule, err := libcal.NewPublic().Schedule(cmd.Context(), options)
 			if err != nil {
 				return err
 			}
-			return writeJSON(cmd, map[string]any{
-				"location":         "Leavey Library",
-				"date":             date.Format("2006-01-02"),
-				"timezone":         "America/Los_Angeles",
-				"duration_minutes": durationMinutes,
-				"availability":     slots,
-				"count":            len(slots),
-			})
+			return writeJSON(cmd, schedule)
 		},
 	}
-	cmd.Flags().StringVar(&dateText, "date", "today", "date in Los Angeles time: today, tomorrow, or YYYY-MM-DD")
-	cmd.Flags().StringVar(&afterText, "after", "", "earliest start time, HH:MM in 24-hour format")
-	cmd.Flags().StringVar(&beforeText, "before", "", "latest start time, HH:MM in 24-hour format")
-	cmd.Flags().IntVar(&durationMinutes, "duration", 60, "reservation length in minutes (30-120, in 30-minute increments)")
-	cmd.Flags().StringVar(&categoryText, "category", "rooms", "rooms, pods, all, lvl1, lvl2, or lvl3")
-	cmd.Flags().BoolVar(&includePods, "include-pods", false, "include one-person study pods with group rooms")
-	cmd.Flags().StringVar(&capacityText, "capacity", "", "capacity band: 1-4, 5-8, or 9-12 people")
+	cmd.Flags().StringVar(&dateText, "date", "today", "start date in Los Angeles time: today, tomorrow, or YYYY-MM-DD")
+	cmd.Flags().StringVar(&endDateText, "end-date", "", "exclusive end date; defaults to the following day")
+	cmd.Flags().StringVar(&categoryText, "category", "all", "rooms, pods, all, lvl1, lvl2, or lvl3")
+	cmd.Flags().StringVar(&capacityText, "capacity", "", "inclusive capacity range, e.g. 6-12")
+	cmd.Flags().IntVar(&minCapacity, "min-capacity", 0, "minimum space capacity (0 means no minimum)")
+	cmd.Flags().IntVar(&maxCapacity, "max-capacity", 0, "maximum space capacity (0 means no maximum)")
+	cmd.MarkFlagsMutuallyExclusive("capacity", "min-capacity")
+	cmd.MarkFlagsMutuallyExclusive("capacity", "max-capacity")
 	return cmd
 }
 
@@ -285,18 +243,18 @@ func parseLibCalDate(value string) (time.Time, error) {
 func parseCapacityRange(value string) (int, int, error) {
 	parts := strings.Split(strings.TrimSpace(value), "-")
 	if len(parts) != 2 {
-		return 0, 0, errors.New("capacity must be one of 1-4, 5-8, or 9-12")
+		return 0, 0, errors.New("capacity must be a positive inclusive range, e.g. 6-12")
 	}
 	minimum, err := strconv.Atoi(parts[0])
 	if err != nil {
-		return 0, 0, errors.New("capacity must be one of 1-4, 5-8, or 9-12")
+		return 0, 0, errors.New("capacity must be a positive inclusive range, e.g. 6-12")
 	}
 	maximum, err := strconv.Atoi(parts[1])
 	if err != nil {
-		return 0, 0, errors.New("capacity must be one of 1-4, 5-8, or 9-12")
+		return 0, 0, errors.New("capacity must be a positive inclusive range, e.g. 6-12")
 	}
-	if !(minimum == 1 && maximum == 4 || minimum == 5 && maximum == 8 || minimum == 9 && maximum == 12) {
-		return 0, 0, errors.New("capacity must be one of 1-4, 5-8, or 9-12")
+	if minimum < 1 || maximum < minimum {
+		return 0, 0, errors.New("capacity must be a positive inclusive range, e.g. 6-12")
 	}
 	return minimum, maximum, nil
 }

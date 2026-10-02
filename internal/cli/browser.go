@@ -4,9 +4,9 @@ import (
 	"errors"
 	"os"
 
-	"github.com/nsigel/usc-cli/internal/auth"
-	"github.com/nsigel/usc-cli/internal/browser"
-	"github.com/nsigel/usc-cli/internal/config"
+	"github.com/nsigel/usc-cli/auth"
+	"github.com/nsigel/usc-cli/browser"
+	"github.com/nsigel/usc-cli/config"
 	"github.com/spf13/cobra"
 )
 

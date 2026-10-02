@@ -9,7 +9,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/nsigel/usc-cli/internal/config"
+	"github.com/nsigel/usc-cli/config"
 )
 
 const reservationsVersion = 1
@@ -27,6 +27,16 @@ func Reservations(includePast bool) ([]Reservation, error) {
 		return nil, err
 	}
 	return reservationsAt(path, includePast)
+}
+
+// Reservations reads this client's local booking history. OpenWithOptions
+// selects its location alongside the session file. This is not a complete
+// list of bookings made through LibCal or other clients.
+func (c *Client) Reservations(includePast bool) ([]Reservation, error) {
+	if c == nil || c.reservationsPath == "" {
+		return nil, errors.New("local reservation history requires libcal.Open or libcal.OpenWithOptions")
+	}
+	return reservationsAt(c.reservationsPath, includePast)
 }
 
 func reservationsAt(path string, includePast bool) ([]Reservation, error) {

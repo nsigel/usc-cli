@@ -13,8 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nsigel/usc-cli/internal/auth"
-	"github.com/nsigel/usc-cli/internal/config"
+	"github.com/nsigel/usc-cli/auth"
 	http "github.com/saucesteals/fhttp"
 )
 
@@ -24,7 +23,7 @@ const (
 )
 
 // ErrAuthenticationRequired means LibCal needs the user to sign in through
-// USC SSO. Run `usc auth login libcal` and retry.
+// USC SSO. Run usc auth login libcal to establish the shared session and retry.
 var ErrAuthenticationRequired = &Error{Code: "libcal_authentication_required", Message: "LibCal authentication required; run usc auth login libcal"}
 
 // Doer is the HTTP surface used by Client. It accepts the same request type as
@@ -55,14 +54,21 @@ func NewPublic() *Client {
 // The SSO handoff is deferred until LibCal generates its booking-specific auth
 // redirect. It never prompts; authentication commands own credential collection.
 func Open(ctx context.Context) (*Client, error) {
-	path, err := config.SessionPath()
+	return OpenWithOptions(ctx, auth.Options{})
+}
+
+// OpenWithOptions creates a client with an optional session path and explicit
+// credentials for the deferred checkout SSO handoff. Checkout recovery and
+// reservation history are stored alongside the selected session file.
+func OpenWithOptions(ctx context.Context, options auth.Options) (*Client, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	path, err := options.SessionPath()
 	if err != nil {
 		return nil, fmt.Errorf("find USC session: %w", err)
 	}
-	reservationsPath, err := config.LibCalReservationsPath()
-	if err != nil {
-		return nil, fmt.Errorf("find local LibCal reservations: %w", err)
-	}
+	reservationsPath := filepath.Join(filepath.Dir(path), "libcal-reservations.json")
 	session, err := auth.OpenSession(path, auth.SessionOptions{
 		AllowMissing:    true,
 		ResetDomains:    []string{"libcal.usc.edu", "libauth.com"},
@@ -75,7 +81,7 @@ func Open(ctx context.Context) (*Client, error) {
 	client.checkoutPath = filepath.Join(filepath.Dir(path), "libcal-checkout.json")
 	client.reservationsPath = reservationsPath
 	client.authenticate = func(ctx context.Context, target, referer string) (*http.Response, error) {
-		response, err := session.Authenticate(ctx, target, auth.Credentials{}, referer)
+		response, err := session.Authenticate(ctx, target, options.Credentials, referer)
 		if errors.Is(err, auth.ErrCredentialsRequired) {
 			return response, ErrAuthenticationRequired
 		}
