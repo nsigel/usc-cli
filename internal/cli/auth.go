@@ -329,7 +329,7 @@ func completeCredentials(cmd *cobra.Command, credentials *auth.Credentials, nonI
 	}{
 		{label: "USC NetID: ", value: &credentials.Username},
 		{label: "USC password: ", secret: true, value: &credentials.Password},
-		{label: "Duo bypass code: ", secret: true, value: &credentials.BypassCode},
+		{label: "Duo bypass code: ", value: &credentials.BypassCode},
 	} {
 		if *item.value == "" {
 			value, err := prompt(cmd, reader, item.label, item.secret)
