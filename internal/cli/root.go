@@ -7,7 +7,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/nsigel/usc-cli/internal/site"
+	"github.com/nsigel/usc-cli/site"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )

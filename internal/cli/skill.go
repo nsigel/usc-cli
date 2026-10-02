@@ -1,7 +1,7 @@
 package cli
 
 import (
-	"github.com/nsigel/usc-cli/internal/skill"
+	"github.com/nsigel/usc-cli/skill"
 	"github.com/spf13/cobra"
 )
 

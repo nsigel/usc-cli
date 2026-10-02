@@ -9,12 +9,10 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
-	"strings"
 	"time"
 )
 
-// Category identifies a Leavey LibCal reservation category. Rooms is the
-// default; Pods is a separate one-person category.
+// Category identifies a Leavey LibCal reservation category.
 type Category string
 
 const (
@@ -76,7 +74,7 @@ var (
 // Spaces lists reservable Leavey spaces. A blank selector or "all" includes
 // group study rooms and pods; "rooms" excludes pods by default.
 func (c *Client) Spaces(ctx context.Context, selector Category) ([]Space, error) {
-	selected, err := selectCategories(selector, true)
+	selected, err := selectCategories(selector)
 	if err != nil {
 		return nil, err
 	}
@@ -161,110 +159,197 @@ func stringPropertyValue(block, name string) (string, error) {
 	return value, nil
 }
 
-// AvailableSlot is one continuous available start time for a space. Checksum
-// is an opaque LibCal value used only when Reserve is called.
-type AvailableSlot struct {
-	Space           Space     `json:"space"`
-	Start           time.Time `json:"start"`
-	End             time.Time `json:"end"`
-	DurationMinutes int       `json:"duration_minutes"`
-	Checksum        string    `json:"-"`
+// Selection identifies the exact space, start, and end to reserve.
+type Selection struct {
+	SpaceID int       `json:"space_id"`
+	Start   time.Time `json:"start"`
+	End     time.Time `json:"end"`
 }
 
-// AvailabilityOptions filters Leavey's availability grid.
-type AvailabilityOptions struct {
+type availableSlot struct {
+	Space    Space
+	Start    time.Time
+	End      time.Time
+	Checksum string
+}
+
+// ScheduleOptions selects a date range and optional inventory filters.
+// EndDate is exclusive and defaults to the day after Date. No duration,
+// ranking, or room-type preference is applied.
+type ScheduleOptions struct {
 	Date        time.Time
-	After       time.Duration
-	Before      time.Duration
-	Duration    time.Duration
+	EndDate     time.Time
 	Category    Category
-	IncludePods bool
 	MinCapacity int
 	MaxCapacity int
 }
 
-// Availability returns continuous start times that satisfy the requested
-// duration. LibCal reports each room in 30-minute grid intervals.
-func (c *Client) Availability(ctx context.Context, options AvailabilityOptions) ([]AvailableSlot, error) {
-	if options.Duration == 0 {
-		options.Duration = time.Hour
+// Schedule contains the server's intervals, including unavailable intervals.
+// Missing intervals are not evidence of availability. WindowEnd is preserved
+// per category. Callers choose continuous intervals of up to two hours.
+type Schedule struct {
+	StartDate  string             `json:"start_date"`
+	EndDate    string             `json:"end_date"`
+	Timezone   string             `json:"timezone"`
+	Categories []CategorySchedule `json:"categories"`
+}
+
+type CategorySchedule struct {
+	Category  CategoryInfo    `json:"category"`
+	WindowEnd bool            `json:"window_end"`
+	Spaces    []SpaceSchedule `json:"spaces"`
+}
+
+type SpaceSchedule struct {
+	Space     Space      `json:"space"`
+	Intervals []Interval `json:"intervals"`
+}
+
+type Interval struct {
+	Start     time.Time `json:"start"`
+	End       time.Time `json:"end"`
+	Available bool      `json:"available"`
+	Status    string    `json:"status"`
+	checksum  string
+}
+
+// Schedule returns the live grid without synthesizing durations or choosing
+// a slot. Callers select a continuous span of up to two hours for Book.
+func (c *Client) Schedule(ctx context.Context, options ScheduleOptions) (Schedule, error) {
+	if options.MinCapacity < 0 || options.MaxCapacity < 0 ||
+		(options.MaxCapacity > 0 && options.MinCapacity > options.MaxCapacity) {
+		return Schedule{}, errors.New("capacity bounds must be nonnegative and minimum must not exceed maximum")
 	}
-	if options.Duration < 30*time.Minute || options.Duration > 2*time.Hour || options.Duration%(30*time.Minute) != 0 {
-		return nil, errors.New("duration must be a multiple of 30 minutes between 30 minutes and 2 hours")
-	}
-	if options.After < 0 || options.After >= 24*time.Hour || options.Before < 0 || options.Before >= 24*time.Hour {
-		return nil, errors.New("time filters must be between 00:00 and 23:59")
-	}
-	if options.Before > 0 && options.After > 0 && options.Before <= options.After {
-		return nil, errors.New("end time must be later than start time")
-	}
-	selected, err := selectCategories(options.Category, false)
+	selected, err := selectCategories(options.Category)
 	if err != nil {
-		return nil, err
-	}
-	if options.IncludePods && !containsCategory(selected, CategoryPods) {
-		selected = append(selected, categoryBySlug(CategoryPods))
+		return Schedule{}, err
 	}
 	location, err := pacific()
 	if err != nil {
-		return nil, err
+		return Schedule{}, err
 	}
 	date := options.Date
 	if date.IsZero() {
-		date = time.Now().In(location)
+		date = time.Now()
 	}
-	date = time.Date(date.In(location).Year(), date.In(location).Month(), date.In(location).Day(), 0, 0, 0, 0, location)
-	day := date.Format("2006-01-02")
-	// Include the following day so evening reservations can cross midnight.
-	endDay := date.AddDate(0, 0, 2).Format("2006-01-02")
-
-	var result []AvailableSlot
+	date = localDay(date, location)
+	end := options.EndDate
+	if end.IsZero() {
+		end = date.AddDate(0, 0, 1)
+	} else {
+		end = localDay(end, location)
+	}
+	if !end.After(date) {
+		return Schedule{}, errors.New("end date must be after start date")
+	}
+	result := Schedule{
+		StartDate: date.Format("2006-01-02"), EndDate: end.Format("2006-01-02"),
+		Timezone: location.String(), Categories: []CategorySchedule{},
+	}
 	for _, category := range selected {
 		spaces, err := c.spacesForCategory(ctx, category)
 		if err != nil {
-			return nil, err
+			return Schedule{}, err
 		}
-		byID := make(map[int]Space, len(spaces))
+		grid, err := c.grid(ctx, category.ID, result.StartDate, result.EndDate)
+		if err != nil {
+			return Schedule{}, fmt.Errorf("check %s schedule: %w", category.Name, err)
+		}
+		entry := CategorySchedule{Category: category.CategoryInfo, WindowEnd: grid.WindowEnd, Spaces: []SpaceSchedule{}}
+		byID := make(map[int]int)
 		for _, space := range spaces {
-			if options.MinCapacity > 0 && space.Capacity < options.MinCapacity {
+			if options.MinCapacity > 0 && space.Capacity < options.MinCapacity ||
+				options.MaxCapacity > 0 && space.Capacity > options.MaxCapacity {
 				continue
 			}
-			if options.MaxCapacity > 0 && space.Capacity > options.MaxCapacity {
-				continue
-			}
-			byID[space.ID] = space
+			byID[space.ID] = len(entry.Spaces)
+			entry.Spaces = append(entry.Spaces, SpaceSchedule{Space: space, Intervals: []Interval{}})
 		}
-		if len(byID) == 0 {
+		for _, raw := range grid.Slots {
+			index, ok := byID[raw.ItemID]
+			if !ok {
+				continue
+			}
+			start, err := parseLibCalTime(raw.Start, location)
+			if err != nil {
+				return Schedule{}, err
+			}
+			finish, err := parseLibCalTime(raw.End, location)
+			if err != nil {
+				return Schedule{}, err
+			}
+			entry.Spaces[index].Intervals = append(entry.Spaces[index].Intervals, Interval{
+				Start: start, End: finish, Available: raw.ClassName == "",
+				Status: raw.ClassName, checksum: raw.Checksum,
+			})
+		}
+		for i := range entry.Spaces {
+			sort.SliceStable(entry.Spaces[i].Intervals, func(a, b int) bool {
+				return entry.Spaces[i].Intervals[a].Start.Before(entry.Spaces[i].Intervals[b].Start)
+			})
+		}
+		result.Categories = append(result.Categories, entry)
+	}
+	return result, nil
+}
+
+func localDay(value time.Time, location *time.Location) time.Time {
+	value = value.In(location)
+	return time.Date(value.Year(), value.Month(), value.Day(), 0, 0, 0, 0, location)
+}
+
+// Validate rejects invalid inputs and durations over two hours without requests.
+func (s Selection) Validate() error {
+	if s.SpaceID < 1 || s.Start.IsZero() || s.End.IsZero() {
+		return errors.New("an explicit space, start, and end are required")
+	}
+	if !s.End.After(s.Start) {
+		return errors.New("end must be after start")
+	}
+	if s.End.Sub(s.Start) > 2*time.Hour {
+		return &Error{Code: "libcal_duration_limit", Message: "a LibCal reservation cannot exceed 2 hours; choose a shorter interval from the schedule"}
+	}
+	if s.Start.Second() != 0 || s.Start.Nanosecond() != 0 ||
+		(s.End.Second() != 0 || s.End.Nanosecond() != 0) {
+		return errors.New("start and end must use whole minutes")
+	}
+	return nil
+}
+
+// Resolve only the selected space and start; LibCal's hold response validates
+// the requested end. Never substitute a different room, start, or duration.
+func (c *Client) selectedSlot(ctx context.Context, selection Selection) (availableSlot, error) {
+	if err := selection.Validate(); err != nil {
+		return availableSlot{}, err
+	}
+	spaces, err := c.Spaces(ctx, CategoryAll)
+	if err != nil {
+		return availableSlot{}, err
+	}
+	for _, space := range spaces {
+		if space.ID != selection.SpaceID {
 			continue
 		}
-		grid, err := c.grid(ctx, category.ID, day, endDay)
+		schedule, err := c.Schedule(ctx, ScheduleOptions{Date: selection.Start, Category: space.CategorySlug})
 		if err != nil {
-			return nil, fmt.Errorf("check %s availability: %w", category.Name, err)
+			return availableSlot{}, err
 		}
-		roomSlots := make(map[int][]gridSlot)
-		for _, slot := range grid.Slots {
-			if _, ok := byID[slot.ItemID]; ok {
-				roomSlots[slot.ItemID] = append(roomSlots[slot.ItemID], slot)
+		for _, category := range schedule.Categories {
+			for _, room := range category.Spaces {
+				if room.Space.ID != selection.SpaceID {
+					continue
+				}
+				for _, interval := range room.Intervals {
+					if interval.Start.Equal(selection.Start) && interval.Available && interval.checksum != "" {
+						end := selection.End.In(interval.Start.Location())
+						return availableSlot{Space: room.Space, Start: interval.Start, End: end, Checksum: interval.checksum}, nil
+					}
+				}
 			}
 		}
-		for id, slots := range roomSlots {
-			candidates, err := continuousSlots(byID[id], slots, date, options)
-			if err != nil {
-				return nil, err
-			}
-			result = append(result, candidates...)
-		}
+		return availableSlot{}, &Error{Code: "libcal_selected_slot_unavailable", Message: "the selected space and start are unavailable; refresh the schedule"}
 	}
-	sort.Slice(result, func(i, j int) bool {
-		if !result[i].Start.Equal(result[j].Start) {
-			return result[i].Start.Before(result[j].Start)
-		}
-		if result[i].Space.Kind != result[j].Space.Kind {
-			return result[i].Space.Kind == "room"
-		}
-		return result[i].Space.Name < result[j].Space.Name
-	})
-	return result, nil
+	return availableSlot{}, fmt.Errorf("Leavey space %d was not found", selection.SpaceID)
 }
 
 type gridResponse struct {
@@ -304,69 +389,6 @@ func (c *Client) grid(ctx context.Context, categoryID int, start, end string) (g
 	return result, nil
 }
 
-func continuousSlots(space Space, raw []gridSlot, date time.Time, options AvailabilityOptions) ([]AvailableSlot, error) {
-	location := date.Location()
-	type interval struct {
-		start, end time.Time
-		checksum   string
-		available  bool
-	}
-	intervals := make([]interval, 0, len(raw))
-	for _, slot := range raw {
-		start, err := parseLibCalTime(slot.Start, location)
-		if err != nil {
-			return nil, err
-		}
-		end, err := parseLibCalTime(slot.End, location)
-		if err != nil {
-			return nil, err
-		}
-		if start.Before(date) {
-			continue
-		}
-		intervals = append(intervals, interval{start: start, end: end, checksum: slot.Checksum, available: slot.ClassName == ""})
-	}
-	sort.Slice(intervals, func(i, j int) bool { return intervals[i].start.Before(intervals[j].start) })
-	byStart := make(map[int64]interval, len(intervals))
-	for _, slot := range intervals {
-		byStart[slot.start.Unix()] = slot
-	}
-	var available []AvailableSlot
-	for _, first := range intervals {
-		if !first.start.Before(date.AddDate(0, 0, 1)) || !first.available || first.start.Minute()%30 != 0 {
-			continue
-		}
-		minuteOfDay := time.Duration(first.start.Hour())*time.Hour + time.Duration(first.start.Minute())*time.Minute
-		if options.After > 0 && minuteOfDay < options.After {
-			continue
-		}
-		if options.Before > 0 && minuteOfDay >= options.Before {
-			continue
-		}
-		end := first.start.Add(options.Duration)
-		cursor := first.start
-		ok := true
-		for cursor.Before(end) {
-			part, found := byStart[cursor.Unix()]
-			if !found || !part.available || !part.end.After(cursor) || part.end.After(end) {
-				ok = false
-				break
-			}
-			cursor = part.end
-		}
-		if ok && cursor.Equal(end) {
-			available = append(available, AvailableSlot{
-				Space:           space,
-				Start:           first.start,
-				End:             end,
-				DurationMinutes: int(options.Duration / time.Minute),
-				Checksum:        first.checksum,
-			})
-		}
-	}
-	return available, nil
-}
-
 func parseLibCalTime(value string, location *time.Location) (time.Time, error) {
 	for _, layout := range []string{"2006-01-02 15:04:05", "2006-01-02 15:04"} {
 		if parsed, err := time.ParseInLocation(layout, value, location); err == nil {
@@ -376,11 +398,11 @@ func parseLibCalTime(value string, location *time.Location) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("parse LibCal time %q", value)
 }
 
-func selectCategories(selector Category, includeAll bool) ([]categoryPage, error) {
+func selectCategories(selector Category) ([]categoryPage, error) {
 	switch selector {
-	case "", CategoryRooms:
+	case CategoryRooms:
 		return append([]categoryPage(nil), leaveyCategories[:3]...), nil
-	case CategoryAll:
+	case "", CategoryAll:
 		return append([]categoryPage(nil), leaveyCategories...), nil
 	case CategoryPods:
 		return []categoryPage{categoryBySlug(CategoryPods)}, nil
@@ -391,10 +413,7 @@ func selectCategories(selector Category, includeAll bool) ([]categoryPage, error
 	case CategoryThird:
 		return []categoryPage{categoryBySlug(CategoryThird)}, nil
 	default:
-		if includeAll {
-			return nil, fmt.Errorf("unknown Leavey category %q (use rooms, pods, all, lvl1, lvl2, or lvl3)", selector)
-		}
-		return nil, fmt.Errorf("unknown Leavey category %q (use rooms, pods, lvl1, lvl2, or lvl3)", selector)
+		return nil, fmt.Errorf("unknown Leavey category %q (use rooms, pods, all, lvl1, lvl2, or lvl3)", selector)
 	}
 }
 
@@ -416,15 +435,6 @@ func categoryReturnURL(category categoryPage) string {
 	return category.Path
 }
 
-func containsCategory(categories []categoryPage, target Category) bool {
-	for _, category := range categories {
-		if category.Slug == target {
-			return true
-		}
-	}
-	return false
-}
-
 func pacific() (*time.Location, error) {
 	location, err := time.LoadLocation("America/Los_Angeles")
 	if err != nil {
@@ -444,14 +454,4 @@ func DateInLosAngeles(value string) (time.Time, error) {
 		return time.Time{}, errors.New("date must use YYYY-MM-DD")
 	}
 	return parsed, nil
-}
-
-// TimeOfDay parses a local time such as "18:30" into a duration since
-// midnight, suitable for AvailabilityOptions.After or Before.
-func TimeOfDay(value string) (time.Duration, error) {
-	parsed, err := time.Parse("15:04", strings.TrimSpace(value))
-	if err != nil {
-		return 0, errors.New("time must use HH:MM in 24-hour format")
-	}
-	return time.Duration(parsed.Hour())*time.Hour + time.Duration(parsed.Minute())*time.Minute, nil
 }

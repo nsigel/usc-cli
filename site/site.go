@@ -15,8 +15,10 @@ const (
 )
 
 const (
-	// LibCalLoginURL is the category-scoped USC SSO entry used by the auth command.
-	LibCalLoginURL = "https://libcal.usc.edu/spaces/auth?returnUrl=%2Freserve%2Flvl2%3Fc%3D2"
+	// SharedSSOLoginURL enters USC Shibboleth through Handshake's explicit SAML
+	// login. LibCal reuses the resulting USC session during checkout because its
+	// own SSO entry requires booking state. Login must never stage a room.
+	SharedSSOLoginURL = "https://usc.joinhandshake.com/auth/saml/70/session/new?redirect_to_idp=true"
 )
 
 // Login identifies how a site enters USC authentication. It does not imply
@@ -43,8 +45,8 @@ type Site struct {
 var catalog = []Site{
 	{Name: Brightspace, URL: "https://brightspace.usc.edu/", LoginURL: "https://brightspace.usc.edu/", Login: EntraSAML},
 	{Name: Classes, URL: "https://classes.usc.edu/"},
-	{Name: Handshake, URL: "https://usc.joinhandshake.com/", LoginURL: "https://usc.joinhandshake.com/auth/saml/70/session/new?redirect_to_idp=true", Login: ShibbolethSAML},
-	{Name: LibCal, URL: "https://libcal.usc.edu/", LoginURL: LibCalLoginURL, Login: ShibbolethSAML},
+	{Name: Handshake, URL: "https://usc.joinhandshake.com/", LoginURL: SharedSSOLoginURL, Login: ShibbolethSAML},
+	{Name: LibCal, URL: "https://libcal.usc.edu/", LoginURL: SharedSSOLoginURL, Login: ShibbolethSAML},
 	{Name: WebReg, URL: "https://webreg.usc.edu/", LoginURL: "https://webreg.usc.edu/auth/login?returnUrl=%2FTerms", Login: EntraOIDC},
 }
 

@@ -47,7 +47,7 @@ func (c *Client) CareerFairs(context.Context, Search) (Page[CareerFairSummary], 
 func (c *Client) CareerFair(context.Context, int) (CareerFairDetail, error)
 ```
 
-`internal/handshake` owns endpoints, GraphQL documents, wire types, validation,
+`handshake` owns endpoints, GraphQL documents, wire types, validation,
 pagination, page-data parsing, and normalization. Category names and slugs are
 resolved against the live category query, while numeric IDs remain accepted.
 The CLI translates flags to `Search` and emits normalized domain records.
