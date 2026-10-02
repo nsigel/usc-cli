@@ -42,6 +42,14 @@ go build -o usc ./cmd/usc
 | Full event descriptions, contacts, registration state, and locations |
 | Full career-fair descriptions, contacts, counts, and sessions |
 
+### Library spaces
+
+| Feature |
+| --- |
+| Live Leavey room and pod inventory |
+| Availability by date, time, duration, and capacity |
+| Earliest-room booking, with study pods opt-in |
+
 ### Agent skill
 
 Print the bundled agent skill and pipe it into any agent skill system:
@@ -66,6 +74,77 @@ the cross-domain cookie session to the platform's user configuration directory:
 Set `USC_CONFIG_DIR` to replace the platform-specific `usc` directory. For
 example, `USC_CONFIG_DIR=/path/to/config` stores the session at
 `/path/to/config/session.json`.
+
+### LibCal reservations
+
+Leavey room discovery and availability are public. Reservation booking uses
+the saved USC SSO session; sign in with `usc auth login libcal` first. Group
+study rooms are the default, and single-person study pods are opt-in. Both
+types require a USC email, share a two-hour daily limit and one-week booking
+window, and are released if the patron does not arrive within ten minutes.
+Pods have a capacity band of 1–4 and are for one person; group rooms have 5–8
+or 9–12 capacity bands and give groups priority. LibCal only exposes its SSO
+handoff during checkout, so `usc auth login libcal` and `usc auth status libcal`
+briefly stage a one-hour room hold and release it without submitting a booking.
+
+```sh
+usc libcal categories
+usc libcal spaces rooms
+usc libcal room SPACE_ID
+usc libcal availability --date tomorrow --after 18:00 --duration 60
+usc libcal availability --date tomorrow --after 18:00 --include-pods
+usc libcal reservations
+usc auth login libcal
+usc libcal book --date tomorrow --after 18:00 --name "Your Name" \
+  --email you@usc.edu --space SPACE_ID --start 18:30 --accept-terms
+```
+
+`libcal book` reserves the earliest matching room unless `--space` and `--start`
+select an exact slot returned by `availability`. It does not prompt; pass
+`--accept-terms` to confirm the displayed reservation terms, and repeat
+`--field FIELD=VALUE` for any additional fields LibCal requires. The
+`reservations` command reads the private local history of bookings confirmed by
+this CLI; LibCal has no patron booking-list API, so its `complete` field is false
+and browser bookings may be absent. The history is stored at
+`$USC_CONFIG_DIR/libcal-reservations.json` (or the platform configuration
+directory when that variable is unset). The public Go
+package can also be imported: use `libcal.NewPublic()` for reads and
+`libcal.Open(ctx)` to reuse the CLI's saved USC session for bookings.
+
+Checkout follows the form returned by SSO instead of staging the same booking
+again. Failed or interrupted commands release their temporary checkout using
+LibCal's session-end endpoint. The CLI saves unfinished checkout IDs privately
+and releases them before the next booking, with one checkout allowed at a time.
+`usc libcal release` explicitly releases unfinished CLI checkout state; it does
+not cancel confirmed reservations.
+
+Errors include an actionable `error` string and a stable `code`, including
+`libcal_slot_unavailable`, `libcal_stale_slot`, `libcal_checkout_expired`,
+`libcal_authentication_required`, `libcal_booking_limit`,
+`libcal_invalid_details`, `libcal_rate_limited`, `libcal_checkout_busy`,
+`libcal_cleanup_failed`, `libcal_selected_slot_unavailable`, and
+`libcal_booking_unknown`. If submission times out
+or the process dies during submission, check the confirmation email before
+retrying. Only then use `usc libcal release` to acknowledge the unknown result.
+Never automatically retry a submission with an unknown outcome.
+
+A hard kill or lost connection before LibCal returns a checkout ID cannot be
+recovered locally; LibCal's temporary hold expiry remains the fallback.
+
+
+### Marshall EMS credentials
+
+Marshall EMS currently challenges clients with HTTP `Negotiate`/`NTLM`, which
+the browser presents as a native authentication dialog. `usc auth marshall`
+stores the Marshall email and password in `credentials.json`; it does not yet
+provide Marshall booking commands or validate an EMS login. The password is
+optional when a USC password is already saved, and is never accepted as a
+command-line flag.
+
+```sh
+usc auth marshall user@marshall.usc.edu
+# Or set USC_MARSHALL_EMAIL and optionally USC_MARSHALL_PASSWORD.
+```
 
 
 ### Browser sync
@@ -158,8 +237,9 @@ usc handshake career-fair 65867
 
 | Command | Description |
 | --- | --- |
-| `usc auth login [brightspace\|handshake]` | Sign in through USC SSO. Defaults to Brightspace and reuses the saved session unless `--fresh` is passed. |
-| `usc auth status [brightspace\|handshake]` | Check whether the saved USC session can authenticate the selected service. |
+| `usc auth login [brightspace\|handshake\|libcal]` | Sign in through USC SSO. Defaults to Brightspace and reuses the saved session unless `--fresh` is passed. |
+| `usc auth status [brightspace\|handshake\|libcal]` | Check whether the saved USC session can authenticate the selected service. |
+| `usc auth marshall [EMAIL]` | Save Marshall EMS credentials; the password defaults to the saved USC password. |
 | `usc auth logout` | Delete the saved USC session. |
 | `usc browser sync [--cdp TARGET]` | Copy the saved USC session into Chrome over CDP. Never prints cookie values. |
 | `usc brightspace whoami` | Show the authenticated Brightspace user. |
@@ -174,6 +254,13 @@ usc handshake career-fair 65867
 | `usc handshake event EVENT_ID` | Show the full event description, contacts, employers, location, and registration state. |
 | `usc handshake career-fairs [FILTERS]` | Search career fairs with the event-list filters. Alias: `fairs`. |
 | `usc handshake career-fair CAREER_FAIR_ID` | Show career-fair details and sessions. Alias: `fair`. |
+| `usc libcal categories` | List Leavey room and pod categories. |
+| `usc libcal spaces [rooms\|pods\|all\|lvl1\|lvl2\|lvl3]` | List Leavey spaces. |
+| `usc libcal room SPACE_ID` | Show a Leavey space's details. |
+| `usc libcal availability [FILTERS]` | Find availability by date, time, duration, category, and capacity. |
+| `usc libcal book [FILTERS]` | Book a matching room; use `--space ID --start HH:MM` to select an exact availability result. |
+| `usc libcal reservations [--all]` | List upcoming or all reservations confirmed by this CLI. |
+| `usc libcal release` | Release unfinished CLI checkout state; never cancels confirmed reservations. |
 | `usc classes TERM_CODE COURSE_CODE` | Show a public Schedule of Classes course and all of its sections. |
 | `usc sites [NAME]` | List supported USC sites, or show one site. |
 | `usc skill` | Print the bundled `SKILL.md` for use with agent skill systems. |

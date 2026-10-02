@@ -6,6 +6,7 @@ import (
 
 	"github.com/nsigel/usc-cli/internal/auth"
 	"github.com/nsigel/usc-cli/internal/browser"
+	"github.com/nsigel/usc-cli/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -25,7 +26,7 @@ func browserSyncCommand() *cobra.Command {
 		Short: "Copy saved USC session cookies into Chrome via CDP",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			path, err := sessionPath()
+			path, err := config.SessionPath()
 			if err != nil {
 				return err
 			}

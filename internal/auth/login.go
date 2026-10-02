@@ -59,34 +59,24 @@ func LoginFresh(ctx context.Context, target, sessionFile string, credentials Cre
 }
 
 func login(ctx context.Context, target, sessionFile string, credentials Credentials, fresh bool) error {
-	authenticator, err := newAuthenticator()
+	session, err := OpenSession(sessionFile, SessionOptions{Fresh: fresh, AllowMissing: true})
 	if err != nil {
 		return err
 	}
-	if !fresh {
-		if err := loadSession(sessionFile, authenticator.jar); err != nil {
-			return err
-		}
+	response, err := session.Authenticate(ctx, target, credentials, "")
+	if response != nil {
+		response.Body.Close()
 	}
-	_, err = authenticator.open(ctx, target, credentials)
-	if err != nil {
-		return err
-	}
-	// Half-finished SSO chains contain one-time state that can poison the next
-	// attempt, so persist only after the requested application is reached.
-	if err := saveSession(sessionFile, authenticator.jar); err != nil {
-		return err
-	}
-	return nil
+	return err
 }
 
-func (a *authenticator) open(ctx context.Context, target string, credentials Credentials) (*page, error) {
+func (a *authenticator) open(ctx context.Context, target string, credentials Credentials, initialReferer *url.URL) (*page, error) {
 	targetURL, err := url.ParseRequestURI(target)
 	if err != nil || targetURL.Scheme != "https" || targetURL.Host == "" {
 		return nil, errors.New("target must be an absolute HTTPS URL")
 	}
 
-	current, err := a.do(ctx, http.MethodGet, targetURL.String(), nil, "", nil, "")
+	current, err := a.do(ctx, http.MethodGet, targetURL.String(), nil, "", initialReferer, "")
 	if err != nil {
 		return nil, err
 	}
@@ -222,6 +212,9 @@ func needsMicrosoftReload(page *page) bool {
 func noContinuation(page *page) error {
 	if isMicrosoftPage(page) {
 		return fmt.Errorf("microsoft page has no form or supported redirect (title: %q)", pageTitle(page.Body))
+	}
+	if page.URL.Hostname() == "libcal.usc.edu" {
+		return fmt.Errorf("no safe continuation for %s%s (HTTP %d, content type %q, %d-byte body)", page.URL.Host, page.URL.Path, page.Status, page.Header.Get("Content-Type"), len(page.Body))
 	}
 	return fmt.Errorf("no safe continuation for %s%s (HTTP %d)", page.URL.Host, page.URL.Path, page.Status)
 }

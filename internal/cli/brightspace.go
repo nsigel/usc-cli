@@ -8,6 +8,7 @@ import (
 
 	"github.com/nsigel/usc-cli/internal/auth"
 	"github.com/nsigel/usc-cli/internal/brightspace"
+	"github.com/nsigel/usc-cli/internal/config"
 	"github.com/nsigel/usc-cli/internal/site"
 	"github.com/spf13/cobra"
 )
@@ -192,7 +193,7 @@ func assignmentsCommand() *cobra.Command {
 }
 
 func openBrightspace(ctx context.Context) (*brightspace.Client, error) {
-	path, err := sessionPath()
+	path, err := config.SessionPath()
 	if err != nil {
 		return nil, err
 	}
@@ -206,7 +207,7 @@ func openBrightspace(ctx context.Context) (*brightspace.Client, error) {
 		}
 		return nil, err
 	}
-	session, err := auth.OpenSession(path)
+	session, err := auth.OpenSession(path, auth.SessionOptions{})
 	if err != nil {
 		return nil, err
 	}

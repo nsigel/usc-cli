@@ -10,7 +10,13 @@ const (
 	Brightspace Name = "brightspace"
 	Classes     Name = "classes"
 	Handshake   Name = "handshake"
+	LibCal      Name = "libcal"
 	WebReg      Name = "webreg"
+)
+
+const (
+	// LibCalLoginURL is the category-scoped USC SSO entry used by the auth command.
+	LibCalLoginURL = "https://libcal.usc.edu/spaces/auth?returnUrl=%2Freserve%2Flvl2%3Fc%3D2"
 )
 
 // Login identifies how a site enters USC authentication. It does not imply
@@ -38,6 +44,7 @@ var catalog = []Site{
 	{Name: Brightspace, URL: "https://brightspace.usc.edu/", LoginURL: "https://brightspace.usc.edu/", Login: EntraSAML},
 	{Name: Classes, URL: "https://classes.usc.edu/"},
 	{Name: Handshake, URL: "https://usc.joinhandshake.com/", LoginURL: "https://usc.joinhandshake.com/auth/saml/70/session/new?redirect_to_idp=true", Login: ShibbolethSAML},
+	{Name: LibCal, URL: "https://libcal.usc.edu/", LoginURL: LibCalLoginURL, Login: ShibbolethSAML},
 	{Name: WebReg, URL: "https://webreg.usc.edu/", LoginURL: "https://webreg.usc.edu/auth/login?returnUrl=%2FTerms", Login: EntraOIDC},
 }
 

@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/nsigel/usc-cli/internal/auth"
+	"github.com/nsigel/usc-cli/internal/config"
 	"github.com/nsigel/usc-cli/internal/handshake"
 	"github.com/nsigel/usc-cli/internal/site"
 	"github.com/spf13/cobra"
@@ -146,7 +147,7 @@ func handshakePage[T any](key string, items []T, page handshake.Page[T]) map[str
 }
 
 func openHandshake(ctx context.Context) (*handshake.Client, error) {
-	path, err := sessionPath()
+	path, err := config.SessionPath()
 	if err != nil {
 		return nil, err
 	}
@@ -160,7 +161,7 @@ func openHandshake(ctx context.Context) (*handshake.Client, error) {
 		}
 		return nil, err
 	}
-	session, err := auth.OpenSession(path)
+	session, err := auth.OpenSession(path, auth.SessionOptions{})
 	if err != nil {
 		return nil, err
 	}
