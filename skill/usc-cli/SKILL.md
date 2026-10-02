@@ -56,46 +56,64 @@ usc handshake career-fair CAREER_FAIR_ID
 
 ## Leavey Library / LibCal
 
-The Leavey catalog is stable enough to use directly:
+Use live `categories`, `spaces`, or `room` data for room names, IDs, kinds,
+and actual capacities. `rooms` includes group rooms; `pods` is one-person
+pods; `all` includes both. `lvl1`, `lvl2`, and `lvl3` select group-room
+floors. Discovery defaults to all categories without ranking them.
 
-| Category | Spaces |
-| --- | --- |
-| `lvl1`, group rooms | 31391: 113B (6); 35418: 113C (8); 31392: 113D (6); 31393: 113E (6); 31394: 113F (6) |
-| `lvl2`, group rooms | 18361: 201A (5); 18362: 201B (5); 18363: 201C (5); 18364: 201E (5); 18365: 201F (5); 18366: 201G (5); 18367: 202B (5); 18368: 202C (5); 18369: 202D (5); 18370: 202E (5); 18371: 202F (5); 18372: 202G (5); 18373: 202H (5); 18360: 202I (12) |
-| `lvl3`, group rooms | 18412: 301C (5); 18413: 301D (5); 18414: 301E (5); 18415: 301F (5); 18418: 302C (10) |
-| `pods`, one person | 233278: 210-A; 233279: 210-B; 233280: 210-C; 209556: 310-A; 233276: 310-B; 233277: 310-C; 211079: 310-D |
+Read `usc libcal schedule --date YYYY-MM-DD` (alias: `availability`).
+Optional filters are `--category`, `--min-capacity`, `--max-capacity`,
+or an inclusive `--capacity MIN-MAX` range such as `6-12`. `--end-date`
+is exclusive; extend it to include dates across midnight.
 
-Numbers in parentheses are capacities. `rooms` means all group-room floors;
-`all` also includes pods. Use `categories`, `spaces`, or `room` only to refresh
-or verify this catalog when the live site may have changed.
+The schedule is enough to choose a duration. Each entry in
+`categories[].spaces[].intervals[]` has `start`, `end`, `available`,
+and the server's `status`. Join adjacent available intervals for the same
+space and choose a continuous reservation of **up to two hours**. For
+"maximum time," select the longest suitable available span, capped at two
+hours. Respect interval boundaries; gaps and unavailable intervals cannot
+be included. Rank options using the user's constraints and preferences.
 
-For every availability or booking request:
+For a discovery request, return matching options. For an explicit booking
+request, pass the chosen `--space`, `--start`, and `--end` directly to
+`usc libcal book`, with `--accept-terms` when the user has agreed to the
+terms. Booking retrieves end-time checksums and completes checkout through
+HTTP requests internally. The CLI and Go package reject selections longer
+than two hours before sending requests.
 
-1. Run `usc libcal availability` with the user's date, time window, duration, room type, floor, and capacity constraints. For “maximum time,” try 120 minutes; if none match and the user means the longest available slot, retry 90, 60, then 30 minutes and stop at the first duration with results. Keep pods opt-in and include valid slots that cross midnight.
-2. Rank the returned slots by the user's stated preferences. Treat date, time window, room type, minimum capacity, and floor as hard constraints. Then prefer the requested start time, requested duration, smallest sufficient capacity, and earlier time, in that order unless the user expressed another preference.
-3. If the user asked only to find or check rooms, return the best matching options and do not book.
-4. If the user explicitly asked to book, select a returned slot and book that exact slot with `--space ID --start HH:MM` plus the same date, duration, category, and capacity filters. Do not use broad earliest-match booking after presenting a specific option.
-5. If authentication is required, run `usc auth login libcal --non-interactive`, refresh availability, and retry the same exact selection if it remains available. The returned confirmation is the source of truth.
+If checkout requires additional answers, its validation error identifies the
+field and available choices. Retry with explicit `--field FIELD=VALUE`
+answers; do not invent dropdown answers. `--name` and `--email` are
+optional conveniences, overridden by explicit field answers.
+Reservation terms are published at https://libcal.usc.edu/reserve/lvl1.
 
-Example for a group room tonight after 8 p.m., for the maximum two hours:
+If authentication is required, run `usc auth login libcal --non-interactive`
+without booking flags, refresh the schedule, and retry the same selection if
+still available. Authentication never stages a room.
+
+Pass full RFC3339 timestamps with UTC offsets. This example shows the normal
+schedule-to-book flow across midnight; replace its dates and selection with
+live values and use `--accept-terms` only after agreement.
 
 ```sh
-usc libcal availability --date today --after 20:00 --duration 120 --category rooms
-usc libcal book --date today --after 20:00 --duration 120 --category rooms \
-  --space 18364 --start 23:00 --accept-terms
+usc libcal schedule --date 2026-10-02 --end-date 2026-10-04 --category rooms --min-capacity 6
+usc libcal book --space 31391 --start 2026-10-02T23:00:00-07:00 \
+  --end 2026-10-03T01:00:00-07:00 --accept-terms
 ```
 
-- Group study rooms are the default. Add `--include-pods` or select `--category pods` only when one-person pods are acceptable; group rooms win ties at the same time.
-- Capacity filters are bands: `--capacity 1-4|5-8|9-12`. Check each space's actual capacity against the group size. `--category lvl1|lvl2|lvl3` selects a floor.
-- Dates and times use Los Angeles local time. Reservations are limited to two hours per day, one week in advance, and released if the patron does not arrive within ten minutes.
-- Booking can require `--name`, `--email`, and repeatable `--field FIELD=VALUE` arguments. `--accept-terms` is an explicit confirmation; the command never prompts.
-- `usc libcal reservations` lists upcoming reservations confirmed by this CLI; add `--all` for its past records. Its `complete: false` field means bookings made in a browser or before local recording was added may be absent. Availability is not the user's booking history. Check email for the authoritative complete history; do not book again to check.
+- `usc auth login libcal` and `usc auth status libcal` establish/check shared USC
+  SSO through the existing Handshake SAML entry. `book` completes LibCal's
+  checkout-specific handoff. Only auth commands can prompt.
+- `usc libcal reservations` lists upcoming reservations confirmed by this CLI;
+  add `--all` for past records. `complete: false` means browser or older
+  bookings may be absent. Check email for authoritative complete history;
+  do not book again to check.
 - `usc libcal release` releases unfinished CLI checkout state only.
-- `usc auth login libcal` and `usc auth status libcal` briefly stage and release a one-hour room hold. Avoid using them as public availability checks.
 
 ### LibCal failure recovery
 
 - Normal errors and Ctrl-C release temporary holds. The next booking recovers recorded abandoned checkouts automatically.
+- For `libcal_duration_limit`, choose a span of at most two hours from the schedule.
 - Errors include a stable `code` and an explanatory `error` string. For `libcal_slot_unavailable`, `libcal_selected_slot_unavailable`, or `libcal_stale_slot`, refresh availability. For `libcal_authentication_required`, authenticate as described above.
 - For `libcal_checkout_busy`, wait for the other command. For `libcal_cleanup_failed`, retry `usc libcal release`.
 - Never automatically retry `libcal_booking_unknown`: first check whether a confirmation email arrived. Then use `usc libcal release` to acknowledge the result before starting another booking. Release never cancels a confirmed reservation.

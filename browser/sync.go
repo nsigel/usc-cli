@@ -3,7 +3,7 @@ package browser
 import (
 	"context"
 
-	"github.com/nsigel/usc-cli/internal/auth"
+	"github.com/nsigel/usc-cli/auth"
 )
 
 // SyncResult is the JSON-safe outcome of syncing cookies into a browser.

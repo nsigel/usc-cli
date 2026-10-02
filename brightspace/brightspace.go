@@ -52,9 +52,10 @@ type Error struct {
 }
 
 func (e *Error) Error() string {
-	switch e.Status {
-	case 401:
+	if e.Unwrap() != nil {
 		return ErrSessionInvalid.Error()
+	}
+	switch e.Status {
 	case 403:
 		return fmt.Sprintf("%s: access denied (403)", e.Label)
 	default:
@@ -64,7 +65,9 @@ func (e *Error) Error() string {
 
 // Unwrap makes authentication failures distinguishable from other API errors.
 func (e *Error) Unwrap() error {
-	if e.Status == 401 {
+	// USC returns 403 for an unauthenticated whoami request. This endpoint
+	// checks identity, not course permissions; other 403s remain access denied.
+	if e.Status == http.StatusUnauthorized || e.Status == http.StatusForbidden && e.Label == "whoami" {
 		return ErrSessionInvalid
 	}
 	return nil

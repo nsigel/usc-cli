@@ -14,8 +14,6 @@ import (
 	"golang.org/x/net/html"
 )
 
-var ErrNoAvailability = &Error{Code: "libcal_no_availability", Message: "no matching Leavey spaces are available"}
-
 const bookingMethodID = "11"
 
 // ReservationDetails supplies the identity and any custom fields LibCal asks
@@ -36,9 +34,12 @@ type Reservation struct {
 	ConfirmedAt time.Time `json:"confirmed_at"`
 }
 
-// BookEarliest finds and books the earliest matching Leavey slot. Group rooms
-// are searched by default; set IncludePods to allow one-person pods.
-func (c *Client) BookEarliest(ctx context.Context, options AvailabilityOptions, details ReservationDetails) (reservation Reservation, resultErr error) {
+// Book reserves exactly the caller-selected space, start, and end. It refreshes
+// the start checksum and validates the end against LibCal's current options.
+func (c *Client) Book(ctx context.Context, selection Selection, details ReservationDetails) (reservation Reservation, resultErr error) {
+	if err := selection.Validate(); err != nil {
+		return Reservation{}, err
+	}
 	if !details.AcceptTerms {
 		return Reservation{}, errors.New("booking requires acceptance of the LibCal reservation terms")
 	}
@@ -47,39 +48,18 @@ func (c *Client) BookEarliest(ctx context.Context, options AvailabilityOptions, 
 		return Reservation{}, err
 	}
 	defer tx.finish(&resultErr)
-	available, err := c.Availability(ctx, options)
+	slot, err := c.selectedSlot(ctx, selection)
 	if err != nil {
 		return Reservation{}, err
 	}
-	if len(available) == 0 {
-		return Reservation{}, ErrNoAvailability
-	}
-	return c.book(ctx, available[0], details, tx)
-}
-
-// Book reserves one slot returned by Availability. It creates a temporary
-// LibCal hold, completes the booking form, and removes the hold if submission
-// fails.
-func (c *Client) Book(ctx context.Context, slot AvailableSlot, details ReservationDetails) (reservation Reservation, resultErr error) {
-	tx, err := c.beginCheckout(ctx, false)
-	if err != nil {
-		return Reservation{}, err
-	}
-	defer tx.finish(&resultErr)
 	return c.book(ctx, slot, details, tx)
 }
 
-func (c *Client) book(ctx context.Context, slot AvailableSlot, details ReservationDetails, tx *checkout) (Reservation, error) {
+func (c *Client) book(ctx context.Context, slot availableSlot, details ReservationDetails, tx *checkout) (Reservation, error) {
 	if !details.AcceptTerms {
 		return Reservation{}, errors.New("booking requires acceptance of the LibCal reservation terms")
 	}
-	if slot.Space.ID < 1 || slot.Space.CategoryID < 1 || slot.Checksum == "" {
-		return Reservation{}, errors.New("booking requires an AvailableSlot returned by Availability")
-	}
-	if slot.End.Sub(slot.Start) < 30*time.Minute || slot.End.Sub(slot.Start) > 2*time.Hour || slot.End.Sub(slot.Start)%(30*time.Minute) != 0 {
-		return Reservation{}, errors.New("reservation duration must be 30 minutes to 2 hours in 30-minute increments")
-	}
-	form, err := c.prepareCheckout(ctx, slot, tx)
+	form, err := c.checkoutForm(ctx, slot, tx)
 	if err != nil {
 		return Reservation{}, err
 	}
@@ -148,7 +128,7 @@ type addBookingResponse struct {
 	Error    string           `json:"error"`
 }
 
-func (c *Client) addPendingBooking(ctx context.Context, slot AvailableSlot) (pendingBooking, error) {
+func (c *Client) addPendingBooking(ctx context.Context, slot availableSlot) (pendingBooking, error) {
 	date := slot.Start.Format("2006-01-02")
 	endDate := slot.Start.AddDate(0, 0, 1).Format("2006-01-02")
 	values := url.Values{
@@ -183,7 +163,7 @@ func (c *Client) addPendingBooking(ctx context.Context, slot AvailableSlot) (pen
 	return pendingBooking{}, errors.New("LibCal did not return the selected room hold")
 }
 
-func (c *Client) setPendingDuration(ctx context.Context, slot AvailableSlot, booking pendingBooking) (pendingBooking, error) {
+func (c *Client) setPendingDuration(ctx context.Context, slot availableSlot, booking pendingBooking) (pendingBooking, error) {
 	selected := -1
 	for i, option := range booking.Options {
 		end, err := parseLibCalTime(option, slot.Start.Location())
@@ -233,7 +213,7 @@ func (c *Client) setPendingDuration(ctx context.Context, slot AvailableSlot, boo
 	return pendingBooking{}, errors.New("LibCal did not return the updated room hold")
 }
 
-func (c *Client) removePendingBooking(ctx context.Context, slot AvailableSlot, booking pendingBooking) error {
+func (c *Client) removePendingBooking(ctx context.Context, slot availableSlot, booking pendingBooking) error {
 	values := url.Values{
 		"removeId": {strconv.Itoa(booking.ID)},
 		"lid":      {strconv.Itoa(leaveyLocationID)},
@@ -278,7 +258,7 @@ type bookingPageResponse struct {
 	Error    string `json:"error"`
 }
 
-func (c *Client) bookingForm(ctx context.Context, slot AvailableSlot, booking pendingBooking) (bookingPageResponse, error) {
+func (c *Client) bookingForm(ctx context.Context, slot availableSlot, booking pendingBooking) (bookingPageResponse, error) {
 	category := categoryBySlug(slot.Space.CategorySlug)
 	if category.ID == 0 {
 		return bookingPageResponse{}, errors.New("unsupported Leavey reservation category")
@@ -348,6 +328,7 @@ type bookingFormField struct {
 
 type bookingOption struct {
 	Value    string
+	Label    string
 	Disabled bool
 	Selected bool
 }
@@ -387,7 +368,7 @@ func parseBookingForm(raw string) (bookingForm, error) {
 		return false
 	})
 	walk(formNode, func(node *html.Node) bool {
-		if node.Type != html.ElementNode {
+		if node.Type != html.ElementNode || hasAttr(node, "disabled") {
 			return false
 		}
 		switch node.Data {
@@ -396,7 +377,7 @@ func parseBookingForm(raw string) (bookingForm, error) {
 			if typeName == "" {
 				typeName = "text"
 			}
-			if typeName == "submit" || typeName == "button" || typeName == "reset" || attr(node, "name") == "" {
+			if typeName == "password" || typeName == "submit" || typeName == "button" || typeName == "reset" || attr(node, "name") == "" {
 				return false
 			}
 			class := " " + attr(node, "class") + " "
@@ -416,10 +397,14 @@ func parseBookingForm(raw string) (bookingForm, error) {
 			if name == "" {
 				return false
 			}
-			field := bookingFormField{Name: name, Type: "select", Label: labels[attr(node, "id")], Required: hasAttr(node, "required")}
+			field := bookingFormField{Name: name, Type: "select", Label: labels[attr(node, "id")], Required: hasAttr(node, "required") || strings.Contains(" "+attr(node, "class")+" ", " notempty ")}
 			walk(node, func(option *html.Node) bool {
 				if option.Type == html.ElementNode && option.Data == "option" {
-					field.Options = append(field.Options, bookingOption{Value: attr(option, "value"), Disabled: hasAttr(option, "disabled"), Selected: hasAttr(option, "selected")})
+					value := attr(option, "value")
+					if !hasAttr(option, "value") {
+						value = textContent(option)
+					}
+					field.Options = append(field.Options, bookingOption{Value: value, Label: textContent(option), Disabled: hasAttr(option, "disabled") || option.Parent != nil && hasAttr(option.Parent, "disabled"), Selected: hasAttr(option, "selected")})
 				}
 				return false
 			})
@@ -433,9 +418,22 @@ func parseBookingForm(raw string) (bookingForm, error) {
 	return result, nil
 }
 
-func fillBookingForm(form bookingForm, details ReservationDetails, slot AvailableSlot, booking pendingBooking) (url.Values, error) {
+func fillBookingForm(form bookingForm, details ReservationDetails, slot availableSlot, booking pendingBooking) (url.Values, error) {
 	values := make(url.Values)
 	firstName, lastName := splitName(details.Name)
+	for name := range details.Fields {
+		found := false
+		for _, field := range form.Fields {
+			if field.Name == name && field.Type != "hidden" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, &Error{Code: "libcal_invalid_details", Message: "unknown checkout field " + name}
+		}
+	}
+	radios := make(map[string]bool)
 	for _, field := range form.Fields {
 		if field.Type == "hidden" {
 			values.Set(field.Name, field.Value)
@@ -449,7 +447,7 @@ func fillBookingForm(form bookingForm, details ReservationDetails, slot Availabl
 		name := strings.ToLower(field.Name)
 		switch field.Type {
 		case "email":
-			if details.Email != "" {
+			if !provided && details.Email != "" {
 				value = details.Email
 			}
 		case "checkbox":
@@ -460,13 +458,32 @@ func fillBookingForm(form bookingForm, details ReservationDetails, slot Availabl
 				if value == "" {
 					value = "1"
 				}
-			} else if !field.Checked && !provided {
+			} else if provided && value == "" || !provided && !field.Checked {
+				if field.Required {
+					return nil, fieldError(form, field, "this checkbox is required")
+				}
 				continue
 			}
 		case "radio":
-			if !field.Checked && !provided {
+			if radios[field.Name] {
 				continue
 			}
+			radios[field.Name] = true
+			value = ""
+			required := false
+			for _, choice := range form.Fields {
+				if choice.Type != "radio" || choice.Name != field.Name {
+					continue
+				}
+				required = required || choice.Required
+				if provided && details.Fields[field.Name] == choice.Value || !provided && choice.Checked {
+					value = choice.Value
+				}
+			}
+			if provided && value == "" && details.Fields[field.Name] != "" {
+				return nil, fieldError(form, field, "invalid choice")
+			}
+			field.Required = required
 		case "select":
 			if !provided {
 				for _, option := range field.Options {
@@ -475,17 +492,20 @@ func fillBookingForm(form bookingForm, details ReservationDetails, slot Availabl
 						break
 					}
 				}
-				if value == "" {
-					for _, option := range field.Options {
-						if !option.Disabled && option.Value != "" {
-							value = option.Value
-							break
-						}
+			}
+			if value != "" {
+				valid := false
+				for _, option := range field.Options {
+					if option.Value == value && !option.Disabled {
+						valid = true
 					}
+				}
+				if !valid {
+					return nil, fieldError(form, field, "invalid choice")
 				}
 			}
 		default:
-			if value == "" {
+			if !provided && value == "" {
 				if strings.Contains(name+" "+label, "email") && details.Email != "" {
 					value = details.Email
 				} else if strings.Contains(name+" "+label, "first name") || strings.Contains(name, "firstname") {
@@ -498,7 +518,7 @@ func fillBookingForm(form bookingForm, details ReservationDetails, slot Availabl
 			}
 		}
 		if value == "" && field.Required {
-			return nil, fmt.Errorf("LibCal requires the %s field; pass it with --field %s=VALUE", field.Name, field.Name)
+			return nil, fieldError(form, field, "a value is required")
 		}
 		if value != "" {
 			values.Add(field.Name, value)
@@ -665,4 +685,27 @@ func hasAttr(node *html.Node, name string) bool {
 		}
 	}
 	return false
+}
+
+// Include available choices in validation errors so callers can correct a
+// request without a separate form-discovery workflow.
+func fieldError(form bookingForm, field bookingFormField, reason string) error {
+	choices := []string{}
+	for _, option := range field.Options {
+		if !option.Disabled && option.Value != "" {
+			choices = append(choices, fmt.Sprintf("%q (%s)", option.Value, option.Label))
+		}
+	}
+	if field.Type == "radio" {
+		for _, option := range form.Fields {
+			if option.Type == "radio" && option.Name == field.Name {
+				choices = append(choices, fmt.Sprintf("%q (%s)", option.Value, option.Label))
+			}
+		}
+	}
+	message := fmt.Sprintf("LibCal field %s: %s; pass --field %s=VALUE", field.Name, reason, field.Name)
+	if len(choices) > 0 {
+		message += "; choices: " + strings.Join(choices, ", ")
+	}
+	return &Error{Code: "libcal_invalid_details", Message: message}
 }

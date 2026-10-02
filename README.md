@@ -10,6 +10,92 @@ Build it with Go 1.24 or later:
 go build -o usc ./cmd/usc
 ```
 
+## Go library
+
+All service clients and shared authentication are importable without running
+`usc`. Install the module in your Go project:
+
+```sh
+go get github.com/nsigel/usc-cli
+```
+
+| Package (under `github.com/nsigel/usc-cli/`) | Entry point |
+| --- | --- |
+| `brightspace` | `Open(ctx)` for authenticated course data and downloads |
+| `handshake` | `Open(ctx)` for authenticated events and career fairs |
+| `libcal` | `NewPublic()` for availability; `Open(ctx)` for booking |
+| `classes` | `New()` for public course and section data |
+| `auth` | `Open(ctx, site.Name, Options)` for USC SSO; `Login` / `LoginFresh` for explicit login |
+| `browser` | `SyncCookies(ctx, sessionFile, target)` for Chrome CDP sync |
+| `site` | `All()` / `Find(name)` for the site catalog |
+| `config` | Shared session, credential, and reservation file paths |
+| `skill` | `WriteUSC(writer)` for the embedded agent skill |
+
+Only command parsing, terminal prompts, CLI output formatting, and the CLI's
+Docling conversion wrapper remain internal. Brightspace's `Download` method
+returns an authenticated stream that applications can save or convert themselves.
+
+```go
+client, err := brightspace.Open(ctx)
+if err != nil {
+    return err
+}
+courses, err := client.Courses(ctx, false)
+```
+
+`brightspace.Open`, `handshake.Open`, and `libcal.Open` share the CLI's session
+path, including `USC_CONFIG_DIR`. Brightspace and Handshake establish their
+application sessions through USC SSO when opened. LibCal defers authentication
+until its checkout handoff; availability does not need login.
+
+For a standalone application, use `OpenWithOptions` (available in all three
+packages) with `auth.Options`:
+
+```go
+client, err := brightspace.OpenWithOptions(ctx, auth.Options{
+    SessionFile: "/private/app/usc/session.json", // optional; defaults to the CLI path
+    Credentials: auth.Credentials{
+        Username: os.Getenv("USC_USERNAME"),
+        Password: os.Getenv("USC_PASSWORD"),
+        BypassCode: os.Getenv("USC_DUO_BYPASS"),
+    },
+})
+```
+
+The library never prompts, reads saved passwords, or implicitly loads credentials
+from environment variables. Supply credentials explicitly as above when fresh
+SSO is needed. Successful authentication persists cookies with private file
+permissions; supplied passwords and bypass codes are not saved by these APIs.
+Missing credentials return `auth.ErrCredentialsRequired`; LibCal translates this
+to `libcal.ErrAuthenticationRequired`. Use `errors.Is` to handle these errors, or use the shared lightweight classifier
+for the same JSON shape as the CLI:
+
+```go
+// import usc "github.com/nsigel/usc-cli"
+info := usc.DescribeError(err, site.Brightspace)
+// {"error":"credentials are required","action":"usc auth login"}
+```
+
+This only describes the error; it does not recover, retry, or initiate login.
+If a later Brightspace or Handshake request returns `ErrSessionInvalid`, reopen
+the client. API operations are not automatically replayed.
+
+LibCal stores checkout recovery and booking history beside the selected session
+file. `client.Reservations(includePast)` reads that client's history; the
+package-level `libcal.Reservations` reads the default configuration directory.
+Treat a client/session as sequential: concurrent use and concurrent writes to a
+shared session file are not supported. Use separate session files for independent
+workers. LibCal clients sharing a directory serialize checkout via its file lock.
+Custom transports for `New` use `github.com/saucesteals/fhttp` request/response
+types, as does `auth.Session`; these differ from the standard `net/http` types.
+
+Runnable examples:
+
+```sh
+go run ./examples/availability  # today's Leavey room intervals, no login needed
+go run ./examples/brightspace  # enrollments using saved SSO or explicit env credentials
+```
+
 ## Features
 
 ### Brightspace
@@ -47,8 +133,8 @@ go build -o usc ./cmd/usc
 | Feature |
 | --- |
 | Live Leavey room and pod inventory |
-| Availability by date, time, duration, and capacity |
-| Earliest-room booking, with study pods opt-in |
+| Structured schedules with actual capacities and interval status |
+| Explicit-slot booking and inspectable checkout forms |
 
 ### Agent skill
 
@@ -77,39 +163,61 @@ example, `USC_CONFIG_DIR=/path/to/config` stores the session at
 
 ### LibCal reservations
 
-Leavey room discovery and availability are public. Reservation booking uses
-the saved USC SSO session; sign in with `usc auth login libcal` first. Group
-study rooms are the default, and single-person study pods are opt-in. Both
-types require a USC email, share a two-hour daily limit and one-week booking
-window, and are released if the patron does not arrive within ten minutes.
-Pods have a capacity band of 1–4 and are for one person; group rooms have 5–8
-or 9–12 capacity bands and give groups priority. LibCal only exposes its SSO
-handoff during checkout, so `usc auth login libcal` and `usc auth status libcal`
-briefly stage a one-hour room hold and release it without submitting a booking.
+Leavey room discovery and schedules are public. The CLI exposes rooms and pods
+without choosing a room, start, duration, or form answer. Agents inspect the
+schedule, choose up to two hours of continuous availability, then book the exact
+selection. The client handles checkout using direct HTTP requests.
+
+`schedule` (alias `availability`) returns each category's `window_end` and
+each space's metadata plus `intervals`: `start`, `end`, `available`, and
+the original server `status`. Intervals retain the server's granularity;
+missing intervals do not imply availability. The default category is `all`.
+`--end-date` is exclusive and defaults to the next day; extend it when
+inspecting a schedule across midnight. Capacity filters accept arbitrary bounds:
+`--capacity 6-12`, `--min-capacity 6`, or `--max-capacity 12`.
+
+The CLI and package reject any selection longer than two hours locally with
+`libcal_duration_limit`, before making requests. This checks the selected
+reservation's duration, not cumulative usage across other reservations.
+
+Use full RFC3339 timestamps with UTC offsets, using the schedule's interval
+boundaries. The timestamps below are illustrative; choose current
+values from live responses.
 
 ```sh
-usc libcal categories
-usc libcal spaces rooms
-usc libcal room SPACE_ID
-usc libcal availability --date tomorrow --after 18:00 --duration 60
-usc libcal availability --date tomorrow --after 18:00 --include-pods
-usc libcal reservations
+usc libcal schedule --date 2026-10-02 --end-date 2026-10-04 --category rooms --min-capacity 6
+# If authentication is required, sign in to USC SSO:
 usc auth login libcal
-usc libcal book --date tomorrow --after 18:00 --name "Your Name" \
-  --email you@usc.edu --space SPACE_ID --start 18:30 --accept-terms
+# With terms accepted and any required field answers supplied:
+usc libcal book --space 31391 --start 2026-10-02T23:00:00-07:00 \
+  --end 2026-10-03T01:00:00-07:00 --accept-terms
+usc libcal reservations
 ```
 
-`libcal book` reserves the earliest matching room unless `--space` and `--start`
-select an exact slot returned by `availability`. It does not prompt; pass
-`--accept-terms` to confirm the displayed reservation terms, and repeat
-`--field FIELD=VALUE` for any additional fields LibCal requires. The
-`reservations` command reads the private local history of bookings confirmed by
-this CLI; LibCal has no patron booking-list API, so its `complete` field is false
-and browser bookings may be absent. The history is stored at
-`$USC_CONFIG_DIR/libcal-reservations.json` (or the platform configuration
-directory when that variable is unset). The public Go
-package can also be imported: use `libcal.NewPublic()` for reads and
-`libcal.Open(ctx)` to reuse the CLI's saved USC session for bookings.
+`book` requires `--space`, `--start`, and `--end`; it never selects a
+replacement. Repeat `--field FIELD=VALUE` to supply explicit checkout answers.
+Required dropdowns without a server-selected answer must be supplied; the CLI
+never picks the first available option. Validation errors identify missing fields
+and list available choices so the agent can correct the request. `--name` and `--email` are optional
+identity conveniences, with explicit `--field` answers taking precedence.
+Only authentication commands can prompt.
+
+Booking reuses the saved USC SSO session. `usc auth login libcal` and
+`usc auth status libcal` establish/check that shared session through the existing
+Handshake SAML entry, without booking flags or room holds. Their status describes
+shared USC SSO; `book` completes LibCal's checkout-specific authentication handoff.
+
+The public Go package exposes `Client.Schedule(ctx, ScheduleOptions)` and
+`Client.Book(ctx, Selection, ReservationDetails)`. `Selection.Validate()` checks
+inputs without making requests.
+Use `libcal.NewPublic()` for public reads and `libcal.Open(ctx)` to reuse
+the CLI session. The former duration-filtered `Availability` and
+`BookEarliest` APIs have been removed.
+
+The `reservations` command reads private local history of bookings confirmed
+by this CLI; its `complete` field is false and browser bookings may be absent.
+History is stored at `$USC_CONFIG_DIR/libcal-reservations.json` (or the platform
+configuration directory when that variable is unset).
 
 Checkout follows the form returned by SSO instead of staging the same booking
 again. Failed or interrupted commands release their temporary checkout using
@@ -237,8 +345,8 @@ usc handshake career-fair 65867
 
 | Command | Description |
 | --- | --- |
-| `usc auth login [brightspace\|handshake\|libcal]` | Sign in through USC SSO. Defaults to Brightspace and reuses the saved session unless `--fresh` is passed. |
-| `usc auth status [brightspace\|handshake\|libcal]` | Check whether the saved USC session can authenticate the selected service. |
+| `usc auth login [brightspace\|handshake\|libcal]` | Sign in through USC SSO. Defaults to Brightspace; no booking flags required. |
+| `usc auth status [brightspace\|handshake\|libcal]` | Check the saved session; LibCal checks shared USC SSO without staging a room. |
 | `usc auth marshall [EMAIL]` | Save Marshall EMS credentials; the password defaults to the saved USC password. |
 | `usc auth logout` | Delete the saved USC session. |
 | `usc browser sync [--cdp TARGET]` | Copy the saved USC session into Chrome over CDP. Never prints cookie values. |
@@ -257,8 +365,8 @@ usc handshake career-fair 65867
 | `usc libcal categories` | List Leavey room and pod categories. |
 | `usc libcal spaces [rooms\|pods\|all\|lvl1\|lvl2\|lvl3]` | List Leavey spaces. |
 | `usc libcal room SPACE_ID` | Show a Leavey space's details. |
-| `usc libcal availability [FILTERS]` | Find availability by date, time, duration, category, and capacity. |
-| `usc libcal book [FILTERS]` | Book a matching room; use `--space ID --start HH:MM` to select an exact availability result. |
+| `usc libcal schedule [FILTERS]` | Return server intervals and actual capacities; alias: `availability`. |
+| `usc libcal book --space ID --start TIMESTAMP --end TIMESTAMP` | Book only the explicit selection; requires `--accept-terms`. |
 | `usc libcal reservations [--all]` | List upcoming or all reservations confirmed by this CLI. |
 | `usc libcal release` | Release unfinished CLI checkout state; never cancels confirmed reservations. |
 | `usc classes TERM_CODE COURSE_CODE` | Show a public Schedule of Classes course and all of its sections. |

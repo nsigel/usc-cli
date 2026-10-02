@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nsigel/usc-cli/internal/auth"
+	"github.com/nsigel/usc-cli/auth"
 	http "github.com/saucesteals/fhttp"
 )
 

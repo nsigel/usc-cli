@@ -10,12 +10,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/nsigel/usc-cli/internal/auth"
-	"github.com/nsigel/usc-cli/internal/brightspace"
-	"github.com/nsigel/usc-cli/internal/config"
-	"github.com/nsigel/usc-cli/internal/handshake"
-	"github.com/nsigel/usc-cli/internal/site"
-	libcalclient "github.com/nsigel/usc-cli/libcal"
+	usc "github.com/nsigel/usc-cli"
+	"github.com/nsigel/usc-cli/auth"
+	"github.com/nsigel/usc-cli/config"
+	"github.com/nsigel/usc-cli/site"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -152,9 +150,6 @@ func authenticationTarget(args []string) (string, error) {
 }
 
 func loginTarget(ctx context.Context, target, sessionFile string, credentials auth.Credentials, fresh bool) error {
-	if target == site.LibCalLoginURL {
-		return libcalclient.Authenticate(ctx, sessionFile, credentials, fresh)
-	}
 	login := auth.Login
 	if fresh {
 		login = auth.LoginFresh
@@ -375,29 +370,13 @@ func first(values ...string) string {
 	return ""
 }
 
-type errorPayload struct {
-	Error  string `json:"error"`
-	Code   string `json:"code,omitempty"`
-	Action string `json:"action,omitempty"`
-}
+type errorPayload = usc.ErrorInfo
 
 // ErrorPayload returns the stable JSON representation of a command error.
 func ErrorPayload(err error) errorPayload {
-	payload := errorPayload{Error: err.Error()}
-	var coded interface{ ErrorCode() string }
-	if errors.As(err, &coded) {
-		payload.Code = coded.ErrorCode()
-	}
+	payload := usc.DescribeError(err, "")
 	if action := errorAction(err); action != "" {
 		payload.Action = action
-	} else if errors.Is(err, handshake.ErrSessionInvalid) {
-		payload.Action = "usc auth login handshake"
-	} else if errors.Is(err, libcalclient.ErrAuthenticationRequired) {
-		payload.Action = "usc auth login libcal"
-	} else if errors.Is(err, auth.ErrBypassRejected) ||
-		errors.Is(err, auth.ErrCredentialsRequired) ||
-		errors.Is(err, brightspace.ErrSessionInvalid) {
-		payload.Action = "usc auth login"
 	}
 	return payload
 }

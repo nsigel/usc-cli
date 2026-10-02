@@ -2,13 +2,16 @@
 
 ```text
 cmd/usc/              executable entrypoint
-internal/auth/        USC SSO, Microsoft, Duo, and session-cookie engine
-internal/browser/     Chrome DevTools Protocol cookie sync
-internal/brightspace/ Brightspace API client
-internal/classes/     public Schedule of Classes client
+auth/                public USC SSO, Microsoft, Duo, and session-cookie engine
+browser/             public Chrome DevTools Protocol cookie sync
+brightspace/         public Brightspace API client
+classes/             public Schedule of Classes client
+handshake/           public Handshake API client
+libcal/              public library availability and booking client
+config/              shared configuration paths
 internal/cli/         Cobra commands and JSON formatting
-internal/site/        supported USC site catalog
-internal/skill/       embedded agent skill definition
+site/                supported USC site catalog
+skill/               embedded agent skill definition
 ```
 
 ## Conventions
@@ -24,7 +27,7 @@ internal/skill/       embedded agent skill definition
 ## Verify
 
 ```bash
-gofmt -w cmd internal
+gofmt -w cmd internal auth browser brightspace classes handshake libcal config site skill
 go test ./...
 go vet ./...
 go build ./cmd/usc

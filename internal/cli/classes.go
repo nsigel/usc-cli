@@ -1,7 +1,7 @@
 package cli
 
 import (
-	"github.com/nsigel/usc-cli/internal/classes"
+	"github.com/nsigel/usc-cli/classes"
 	"github.com/spf13/cobra"
 )
 
