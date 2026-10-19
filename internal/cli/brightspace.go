@@ -20,6 +20,7 @@ func brightspaceCommand() *cobra.Command {
 		gradesCommand(),
 		announcementsCommand(),
 		assignmentsCommand(),
+		submissionsCommand(),
 		downloadCommand(),
 	)
 	return cmd
@@ -188,6 +189,61 @@ func assignmentsCommand() *cobra.Command {
 			return writeJSON(cmd, map[string]any{"assignments": assignments})
 		},
 	}
+}
+
+func submissionsCommand() *cobra.Command {
+	var download bool
+	var output string
+	cmd := &cobra.Command{
+		Use: "submissions COURSE_ID FOLDER_ID", Short: "List or download your submissions to an assignment folder", Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			course, err := courseID(args[0])
+			if err != nil {
+				return err
+			}
+			folderID, err := courseID(args[1])
+			if err != nil {
+				return fmt.Errorf("FOLDER_ID must be a positive integer")
+			}
+			client, err := openBrightspace(cmd.Context())
+			if err != nil {
+				return err
+			}
+			submissions, err := client.Submissions(cmd.Context(), course, folderID)
+			if err != nil {
+				return err
+			}
+			if !download {
+				return writeJSON(cmd, map[string]any{"course_id": course, "folder_id": folderID, "submissions": submissions})
+			}
+			files := make([]map[string]any, 0)
+			names := map[string]bool{}
+			for _, submission := range submissions {
+				for _, file := range submission.Files {
+					name := safeFileName(file.Name)
+					// Resubmissions often reuse a file name; keep every version.
+					if names[name] {
+						name = fmt.Sprintf("%d_%s", submission.ID, name)
+					}
+					names[name] = true
+					body, err := client.DownloadSubmissionFile(cmd.Context(), course, folderID, submission.ID, file.ID)
+					if err != nil {
+						return err
+					}
+					path, err := saveDownload(output, name, body)
+					body.Close()
+					if err != nil {
+						return err
+					}
+					files = append(files, map[string]any{"submission_id": submission.ID, "file_id": file.ID, "date": submission.Date, "path": path})
+				}
+			}
+			return writeJSON(cmd, map[string]any{"course_id": course, "folder_id": folderID, "files": files})
+		},
+	}
+	cmd.Flags().BoolVar(&download, "download", false, "download every submitted file")
+	cmd.Flags().StringVarP(&output, "output", "o", ".", "directory for downloaded files")
+	return cmd
 }
 
 func openBrightspace(ctx context.Context) (*brightspace.Client, error) {

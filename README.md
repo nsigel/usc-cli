@@ -108,6 +108,7 @@ go run ./examples/brightspace  # enrollments using saved SSO or explicit env cre
 | Grades |
 | Announcements |
 | Assignments |
+| Assignment submissions and submitted-file downloads |
 | Content downloads |
 | PDF-to-Markdown conversion with optional OCR |
 
@@ -356,6 +357,7 @@ usc handshake career-fair 65867
 | `usc brightspace grades COURSE_ID [--graded-only]` | Show grades for a course. |
 | `usc brightspace announcements [COURSE_ID] [--since TIME]` | Show announcements for one course or all courses. |
 | `usc brightspace assignments COURSE_ID` | List assignment folders for a course. Alias: `dropbox`. |
+| `usc brightspace submissions COURSE_ID FOLDER_ID [--download] [--output DIR]` | List your submissions to an assignment folder, or download every submitted file. |
 | `usc brightspace download COURSE_ID TOPIC_ID [--output DIR] [--markdown] [--ocr]` | Download a content item, optionally converting a PDF to Markdown. Markdown conversion requires [Docling](https://docling-project.github.io/docling/) (`pip install docling`); `--ocr` requires `--markdown`. |
 | `usc handshake categories` | List live event category IDs, names, and CLI slugs. |
 | `usc handshake events [FILTERS]` | Search events. Filters: `--category`, `--organizer`, `--keyword`, `--medium`, `--date`, `--posted-by-school`, `--sort`, `--limit`, and `--after`. |
