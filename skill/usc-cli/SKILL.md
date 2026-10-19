@@ -29,10 +29,12 @@ usc brightspace content COURSE_ID [--flat]
 usc brightspace grades COURSE_ID [--graded-only]
 usc brightspace announcements [COURSE_ID] [--since RFC3339_TIMESTAMP]
 usc brightspace assignments COURSE_ID
+usc brightspace submissions COURSE_ID FOLDER_ID [--download] [--output DIRECTORY]
 usc brightspace download COURSE_ID TOPIC_ID [--output DIRECTORY] [--markdown] [--ocr]
 ```
 
 - Use `content --flat` to locate a file's topic ID; download it by that ID.
+- Use an `assignments` folder ID with `submissions`; `--download` saves every submitted file, prefixing repeated names with the submission ID.
 - Downloads default to the current working directory. Pass `--output` when a different noncredential directory is required.
 - `--markdown` requires Docling; `--ocr` additionally requires `--markdown`.
 - Course data is live; the CLI has no content cache.
