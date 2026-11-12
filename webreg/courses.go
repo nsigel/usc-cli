@@ -1,50 +1,55 @@
 package webreg
 
 import (
-	"github.com/nsigel/usc-cli/internal/dom"
+	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/nsigel/usc-cli/classes"
+	"github.com/nsigel/usc-cli/internal/dom"
 	"golang.org/x/net/html"
 )
 
 // Course is a WebReg course and the sections shown for it on one page.
 type Course struct {
-	Code          string    `json:"code"`
-	Title         string    `json:"title"`
-	Description   string    `json:"description,omitempty"`
-	Prerequisites []string  `json:"prerequisites,omitempty"`
-	Sections      []Section `json:"sections"`
+	Code          classes.CourseCode `json:"code"`
+	Title         string             `json:"title"`
+	Description   string             `json:"description,omitempty"`
+	Prerequisites []string           `json:"prerequisites,omitempty"`
+	Sections      []Section          `json:"sections"`
 }
 
-// Section is one WebReg section row. Fields that only one page shows are
-// omitted elsewhere: InCourseBin comes from catalog pages, CourseBin and
-// GradeOption from the course bin.
+// Section is one WebReg section row. It names what it shares with
+// classes.Section the same way, so the two can be compared field by field.
+// Fields that only one page shows are omitted elsewhere: InCourseBin comes
+// from catalog pages, CourseBin and GradeOption from the course bin.
 type Section struct {
-	ID int `json:"id"`
-	// Clearance is WebReg's letter beside the section ID: "R" sections are
-	// open to registration and "D" sections need department clearance.
-	Clearance   string       `json:"clearance,omitempty"`
-	Session     string       `json:"session,omitempty"`
-	Type        string       `json:"type,omitempty"`
-	Units       string       `json:"units,omitempty"`
-	Seats       Seats        `json:"seats"`
-	Times       []string     `json:"times,omitempty"`
-	Days        []string     `json:"days,omitempty"`
-	Instructors []string     `json:"instructors,omitempty"`
-	Locations   []string     `json:"locations,omitempty"`
-	Notes       []string     `json:"notes,omitempty"`
+	// ID is USC's five-digit section number: "30009".
+	ID          string `json:"id"`
+	Type        string `json:"type,omitempty"`
+	SessionCode string `json:"session_code,omitempty"`
+	// Units is the section's units as WebReg prints them: "4.0".
+	Units string `json:"units,omitempty"`
+
+	// RequiresDepartmentClearance is true for "D" sections; "R" sections
+	// are open to registration.
+	RequiresDepartmentClearance bool `json:"requires_department_clearance"`
+	// IsClosed is true when WebReg shows "Closed" in place of seat counts;
+	// SeatCapacity and RegisteredSeatCount are then zero.
+	IsClosed            bool `json:"is_closed"`
+	SeatCapacity        int  `json:"seat_capacity"`
+	RegisteredSeatCount int  `json:"registered_seat_count"`
+
+	// Meetings carry each meeting's Location, which the public Schedule of
+	// Classes does not publish.
+	Meetings    []classes.Meeting    `json:"meetings"`
+	Instructors []classes.Instructor `json:"instructors"`
+	Notes       []string             `json:"notes,omitempty"`
+
 	InCourseBin *bool        `json:"in_course_bin,omitempty"`
 	CourseBin   *BinState    `json:"course_bin,omitempty"`
 	GradeOption *GradeOption `json:"grade_option,omitempty"`
-}
-
-// Seats is the section's registration count as WebReg displays it.
-type Seats struct {
-	Registered int    `json:"registered"`
-	Capacity   int    `json:"capacity"`
-	Closed     bool   `json:"closed"`
-	Text       string `json:"text"`
 }
 
 // BinState is a course-bin section's schedule and registration state.
@@ -74,25 +79,33 @@ type GradeChoice struct {
 	Name string `json:"name"`
 }
 
-func parseCourses(document *html.Node) []Course {
+func parseCourses(document *html.Node) ([]Course, error) {
 	courses := []Course{}
 	for _, header := range dom.FindAll(document, dom.Class("div", "course-header")) {
-		if course, ok := parseCourse(header); ok {
-			courses = append(courses, course)
+		course, err := parseCourse(header)
+		if err != nil {
+			return nil, err
 		}
+		courses = append(courses, course)
 	}
-	return courses
+	return courses, nil
 }
 
 // parseCourse reads one course header and the body that follows it. The body
 // is the header's next element rather than a lookup by ID: checkout lists a
 // course once per action, with the same ID each time.
-func parseCourse(header *html.Node) (Course, bool) {
-	code := courseCode(header)
-	if code == "" {
-		return Course{}, false
+func parseCourse(header *html.Node) (Course, error) {
+	// WebReg prints the code with its catalog suffix and a colon: "BUAD-200 x:".
+	printedCode := strings.TrimSuffix(text(dom.FindFirst(header, dom.Class("span", "crsID"))), ":")
+	code, err := classes.ParseCourseCode(printedCode)
+	if err != nil {
+		return Course{}, fmt.Errorf("WebReg course header: %w", err)
 	}
-	course := Course{Code: code, Title: text(dom.FindFirst(header, dom.Class("span", "crsTitl"))), Sections: []Section{}}
+	course := Course{
+		Code:     code,
+		Title:    text(dom.FindFirst(header, dom.Class("span", "crsTitl"))),
+		Sections: []Section{},
+	}
 	body := header.NextSibling
 	for body != nil && body.Type != html.ElementNode {
 		body = body.NextSibling
@@ -104,58 +117,61 @@ func parseCourse(header *html.Node) (Course, bool) {
 		course.Prerequisites = append(course.Prerequisites, text(requirement))
 	}
 	for _, row := range dom.FindAll(body, dom.Class("div", "section")) {
-		if section, ok := parseSection(row); ok {
-			course.Sections = append(course.Sections, section)
+		section, err := parseSection(row)
+		if err != nil {
+			return Course{}, fmt.Errorf("WebReg course %s: %w", code, err)
 		}
+		course.Sections = append(course.Sections, section)
 	}
-	return course, true
+	return course, nil
 }
 
-// courseCode reads a header's code, joining suffixes such as "BUAD-200 x".
-func courseCode(header *html.Node) string {
-	code := text(dom.FindFirst(header, dom.Class("span", "crsID")))
-	return strings.ReplaceAll(strings.TrimSuffix(code, ":"), " ", "")
-}
-
-func parseSection(row *html.Node) (Section, bool) {
-	id, err := strconv.Atoi(strings.TrimPrefix(dom.Attr(row, "id"), "section_"))
+func parseSection(row *html.Node) (Section, error) {
+	sectionID, err := classes.ParseSectionID(strings.TrimPrefix(dom.Attr(row, "id"), "section_"))
 	if err != nil {
-		return Section{}, false
+		return Section{}, err
 	}
-	section := Section{ID: id}
+	section := Section{ID: sectionID, Instructors: []classes.Instructor{}}
+	var times, days, locations []string
 	for _, column := range dom.FindAll(row, dom.Class("span", "section_row")) {
 		label := dom.FindFirst(column, dom.Class("span", "table-headers-xsmall"))
 		if label == nil {
 			continue
 		}
-		name := strings.TrimSuffix(text(label), ":")
-		switch name {
+		switch strings.TrimSuffix(text(label), ":") {
 		case "Section":
-			fields := strings.Fields(text(dom.FindFirst(column, dom.Tag("b"))))
-			if len(fields) > 1 {
-				section.Clearance = fields[1]
-			}
+			// The section number is followed by its clearance letter: "30009 D".
+			printed := strings.Fields(text(dom.FindFirst(column, dom.Tag("b"))))
+			section.RequiresDepartmentClearance = len(printed) > 1 && printed[1] == "D"
 		case "Session":
-			section.Session = columnText(column, label)
+			section.SessionCode = columnText(column, label)
 		case "Type":
 			section.Type = columnText(column, label)
 		case "Units":
 			section.Units = columnText(column, label)
 		case "Registered":
-			section.Seats = parseSeats(columnText(column, label))
+			if err := section.parseSeats(columnText(column, label)); err != nil {
+				return Section{}, fmt.Errorf("section %s: %w", sectionID, err)
+			}
 		case "Time":
-			section.Times = columnValues(column, label)
+			times = columnValues(column, label)
 		case "Days":
-			section.Days = columnValues(column, label)
-		case "Instructor":
-			section.Instructors = columnValues(column, label)
+			days = columnValues(column, label)
 		case "Location":
-			section.Locations = columnValues(column, label)
+			locations = columnValues(column, label)
+		case "Instructor":
+			for _, printedName := range columnValues(column, label) {
+				section.Instructors = append(section.Instructors, parseInstructor(printedName))
+			}
 		case "Action":
-			section.CourseBin = parseBinState(column, id)
+			section.CourseBin = parseBinState(column, sectionID)
 		case "Grade Option":
 			section.GradeOption = parseGradeOption(column, label)
 		}
+	}
+	section.Meetings, err = parseMeetings(times, days, locations)
+	if err != nil {
+		return Section{}, fmt.Errorf("section %s: %w", sectionID, err)
 	}
 	if form := dom.FindFirst(row, dom.Class("div", "btnAddToMyCourseBin")); form != nil {
 		inBin := dom.FindFirst(form, dom.Class("label", "alrdyinmycb")) != nil
@@ -170,7 +186,95 @@ func parseSection(row *html.Node) (Section, bool) {
 			}
 		}
 	}
-	return section, true
+	return section, nil
+}
+
+func parseInstructor(printedName string) classes.Instructor {
+	lastName, firstName, _ := strings.Cut(printedName, ",")
+	return classes.Instructor{
+		FirstName: strings.TrimSpace(firstName),
+		LastName:  strings.TrimSpace(lastName),
+	}
+}
+
+// weekdaysByAbbreviation is how WebReg's Days column writes each day. It
+// runs them together, as in "MW" and "TTh".
+var weekdaysByAbbreviation = map[string]classes.Weekday{
+	"M":  classes.Weekday(time.Monday),
+	"T":  classes.Weekday(time.Tuesday),
+	"W":  classes.Weekday(time.Wednesday),
+	"Th": classes.Weekday(time.Thursday),
+	"H":  classes.Weekday(time.Thursday),
+	"F":  classes.Weekday(time.Friday),
+	"Sa": classes.Weekday(time.Saturday),
+	"S":  classes.Weekday(time.Saturday),
+	"Su": classes.Weekday(time.Sunday),
+	"U":  classes.Weekday(time.Sunday),
+}
+
+func parseWeekdays(printedDays string) ([]classes.Weekday, error) {
+	weekdays := []classes.Weekday{}
+	remaining := printedDays
+	for remaining != "" {
+		weekday, abbreviationLength, known := longestWeekdayAbbreviation(remaining)
+		if !known {
+			return nil, fmt.Errorf("unreadable meeting days %q", printedDays)
+		}
+		weekdays = append(weekdays, weekday)
+		remaining = remaining[abbreviationLength:]
+	}
+	return weekdays, nil
+}
+
+func longestWeekdayAbbreviation(printedDays string) (weekday classes.Weekday, length int, known bool) {
+	for length = min(2, len(printedDays)); length > 0; length-- {
+		if weekday, known = weekdaysByAbbreviation[printedDays[:length]]; known {
+			return weekday, length, true
+		}
+	}
+	return 0, 0, false
+}
+
+// parseMeetings joins WebReg's Time, Days, and Location columns, which list
+// one line per meeting in the same order. A section whose time is to be
+// announced prints "TBA" and has no meetings.
+func parseMeetings(times, days, locations []string) ([]classes.Meeting, error) {
+	meetings := []classes.Meeting{}
+	for index, printedTime := range times {
+		if strings.EqualFold(printedTime, "TBA") {
+			continue
+		}
+		start, end, found := strings.Cut(printedTime, "-")
+		if !found {
+			return nil, fmt.Errorf("unreadable meeting time %q", printedTime)
+		}
+		meeting := classes.Meeting{Weekdays: []classes.Weekday{}}
+		var err error
+		if meeting.StartTime, err = clockTime(start); err != nil {
+			return nil, err
+		}
+		if meeting.EndTime, err = clockTime(end); err != nil {
+			return nil, err
+		}
+		if index < len(days) {
+			if meeting.Weekdays, err = parseWeekdays(days[index]); err != nil {
+				return nil, err
+			}
+		}
+		if index < len(locations) {
+			meeting.Location = locations[index]
+		}
+		meetings = append(meetings, meeting)
+	}
+	return meetings, nil
+}
+
+func clockTime(printed string) (string, error) {
+	parsed, err := time.Parse("03:04pm", strings.TrimSpace(printed))
+	if err != nil {
+		return "", fmt.Errorf("unreadable meeting time %q", printed)
+	}
+	return parsed.Format("15:04"), nil
 }
 
 func columnText(column, label *html.Node) string {
@@ -194,27 +298,39 @@ func columnValues(column, label *html.Node) []string {
 	return values
 }
 
-func parseSeats(text string) Seats {
-	seats := Seats{Text: text, Closed: strings.EqualFold(text, "closed")}
-	if registered, capacity, ok := strings.Cut(text, " of "); ok {
-		seats.Registered, _ = strconv.Atoi(strings.TrimSpace(registered))
-		seats.Capacity, _ = strconv.Atoi(strings.TrimSpace(capacity))
+func (section *Section) parseSeats(printed string) error {
+	if strings.EqualFold(printed, "closed") {
+		section.IsClosed = true
+		return nil
 	}
-	return seats
+	registered, capacity, found := strings.Cut(printed, " of ")
+	if !found {
+		return fmt.Errorf("unreadable seat count %q", printed)
+	}
+	var err error
+	if section.RegisteredSeatCount, err = strconv.Atoi(strings.TrimSpace(registered)); err != nil {
+		return fmt.Errorf("unreadable seat count %q", printed)
+	}
+	if section.SeatCapacity, err = strconv.Atoi(strings.TrimSpace(capacity)); err != nil {
+		return fmt.Errorf("unreadable seat count %q", printed)
+	}
+	return nil
 }
 
-func parseBinState(column *html.Node, id int) *BinState {
-	suffix := "_" + strconv.Itoa(id)
+// parseBinState finds which of the four pre-rendered action bars WebReg is
+// showing for the section.
+func parseBinState(column *html.Node, sectionID string) *BinState {
 	for _, candidate := range []struct {
-		prefix string
-		state  BinState
+		barIDPrefix string
+		state       BinState
 	}{
 		{"schedY_regN", BinState{Scheduled: true}},
 		{"schedN_regN", BinState{}},
 		{"schedY_regY", BinState{Scheduled: true, Registered: true}},
 		{"schedN_regY", BinState{Registered: true}},
 	} {
-		if bar := dom.FindFirst(column, dom.ID(candidate.prefix+suffix)); bar != nil && !hidden(bar) {
+		bar := dom.FindFirst(column, dom.ID(candidate.barIDPrefix+"_"+sectionID))
+		if bar != nil && !hidden(bar) {
 			state := candidate.state
 			return &state
 		}

@@ -33,7 +33,11 @@ func (c *Client) CourseBin(ctx context.Context, term string) (*CourseBin, error)
 		return nil, err
 	}
 	document := dom.Parse(data)
-	bin := &CourseBin{Term: term, Courses: parseCourses(document)}
+	courses, err := parseCourses(document)
+	if err != nil {
+		return nil, err
+	}
+	bin := &CourseBin{Term: term, Courses: courses}
 	if status := dom.FindFirst(document, dom.Class("span", "mycbstat")); status != nil {
 		counts := dom.FindAll(status, dom.Class("span", "courseBinStat"))
 		if len(counts) == 2 {
@@ -49,7 +53,7 @@ func (c *Client) CourseBin(ctx context.Context, term string) (*CourseBin, error)
 
 // Section returns the course-bin section with id, or an error if it is not
 // in the bin.
-func (b *CourseBin) Section(id int) (*Section, error) {
+func (b *CourseBin) Section(id string) (*Section, error) {
 	for courseIndex := range b.Courses {
 		for sectionIndex := range b.Courses[courseIndex].Sections {
 			if section := &b.Courses[courseIndex].Sections[sectionIndex]; section.ID == id {
@@ -57,12 +61,12 @@ func (b *CourseBin) Section(id int) (*Section, error) {
 			}
 		}
 	}
-	return nil, fmt.Errorf("section %d is not in the %s course bin", id, b.Term)
+	return nil, fmt.Errorf("section %s is not in the %s course bin", id, b.Term)
 }
 
 // Add places a section in the course bin. It does not register; schedule the
 // section and submit checkout to register.
-func (c *Client) Add(ctx context.Context, term string, sectionID int) error {
+func (c *Client) Add(ctx context.Context, term string, sectionID string) error {
 	if err := c.SelectTerm(ctx, term); err != nil {
 		return err
 	}
@@ -77,22 +81,22 @@ func (c *Client) Add(ctx context.Context, term string, sectionID int) error {
 
 // Schedule marks a course-bin section to be registered at checkout, or keeps
 // a registered section from being dropped.
-func (c *Client) Schedule(ctx context.Context, term string, sectionID int) error {
+func (c *Client) Schedule(ctx context.Context, term string, sectionID string) error {
 	return c.sectionAction(ctx, term, sectionID, "schedule")
 }
 
 // Unschedule removes a section from the planned schedule. A registered
 // section that is unscheduled is dropped when checkout is submitted.
-func (c *Client) Unschedule(ctx context.Context, term string, sectionID int) error {
+func (c *Client) Unschedule(ctx context.Context, term string, sectionID string) error {
 	return c.sectionAction(ctx, term, sectionID, "un-schedule")
 }
 
 // Remove deletes an unscheduled, unregistered section from the course bin.
-func (c *Client) Remove(ctx context.Context, term string, sectionID int) error {
+func (c *Client) Remove(ctx context.Context, term string, sectionID string) error {
 	return c.sectionAction(ctx, term, sectionID, "remove")
 }
 
-func (c *Client) sectionAction(ctx context.Context, term string, sectionID int, action string) error {
+func (c *Client) sectionAction(ctx context.Context, term string, sectionID string, action string) error {
 	if err := c.SelectTerm(ctx, term); err != nil {
 		return err
 	}
@@ -100,8 +104,8 @@ func (c *Client) sectionAction(ctx context.Context, term string, sectionID int, 
 	return err
 }
 
-func sectionPath(term string, sectionID int, action string) string {
-	return "/api/section/" + url.PathEscape(term) + "/" + strconv.Itoa(sectionID) + "/" + action
+func sectionPath(term string, sectionID string, action string) string {
+	return "/api/section/" + url.PathEscape(term) + "/" + url.PathEscape(sectionID) + "/" + action
 }
 
 // SetGradeOption changes a course-bin section's grade option to code, one of
@@ -109,7 +113,7 @@ func sectionPath(term string, sectionID int, action string) string {
 // sections change immediately; registered sections submit a change request
 // that takes effect when checkout is submitted. It returns WebReg's response,
 // such as "Updated-PN".
-func (c *Client) SetGradeOption(ctx context.Context, term string, sectionID int, code string) (string, error) {
+func (c *Client) SetGradeOption(ctx context.Context, term string, sectionID string, code string) (string, error) {
 	bin, err := c.CourseBin(ctx, term)
 	if err != nil {
 		return "", err
@@ -120,7 +124,7 @@ func (c *Client) SetGradeOption(ctx context.Context, term string, sectionID int,
 	}
 	option := section.GradeOption
 	if option == nil || option.path == "" || option.field == "" {
-		return "", fmt.Errorf("section %d has no changeable grade option", sectionID)
+		return "", fmt.Errorf("section %s has no changeable grade option", sectionID)
 	}
 	valid := false
 	for _, choice := range option.Choices {
@@ -130,7 +134,7 @@ func (c *Client) SetGradeOption(ctx context.Context, term string, sectionID int,
 		}
 	}
 	if !valid {
-		return "", fmt.Errorf("grade option %q is not offered for section %d", code, sectionID)
+		return "", fmt.Errorf("grade option %q is not offered for section %s", code, sectionID)
 	}
 	form := url.Values{option.field: {code}, tokenField: {option.token}, "X-Requested-With": {"XMLHttpRequest"}}
 	data, err := c.postAJAX(ctx, option.path, form, "/CourseBin")

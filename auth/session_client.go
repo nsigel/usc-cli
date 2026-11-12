@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/url"
+	"slices"
 
 	http "github.com/saucesteals/fhttp"
 )
@@ -26,9 +27,15 @@ type CookiePolicy struct {
 	PreserveCookies []string // Cookie names within ResetDomains to leave untouched on disk.
 }
 
-// OpenSession restores the cookies in options.SessionFile, if any. Nothing
+// OpenSession restores cookies from SessionStore or SessionFile, if set. Nothing
 // is written until Authenticate succeeds.
 func OpenSession(options Options, policy CookiePolicy) (*Session, error) {
+	if options.SessionStore != nil && options.SessionFile != "" {
+		return nil, errors.New("set either SessionStore or SessionFile, not both")
+	}
+	if options.SessionFile != "" {
+		options.SessionStore = FileSessionStore{Path: options.SessionFile}
+	}
 	credentials, err := options.ResolveCredentials()
 	if err != nil {
 		return nil, err
@@ -37,8 +44,8 @@ func OpenSession(options Options, policy CookiePolicy) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	if options.SessionFile != "" {
-		if err := loadSession(options.SessionFile, authenticator.jar, policy.ResetDomains); err != nil {
+	if options.SessionStore != nil {
+		if err := loadStoredSession(options.SessionStore, authenticator.jar, policy.ResetDomains); err != nil {
 			return nil, err
 		}
 	}
@@ -77,11 +84,25 @@ func (s *Session) Authenticate(ctx context.Context, target, referer string) (*ht
 }
 
 func (s *Session) save() error {
-	switch {
-	case s.options.SessionFile == "":
+	store := s.options.SessionStore
+	if store == nil {
 		return nil
-	case len(s.policy.ResetDomains) > 0:
-		return saveSessionReplacingDomains(s.options.SessionFile, s.authenticator.jar, s.policy.ResetDomains, s.policy.PreserveCookies)
 	}
-	return saveSession(s.options.SessionFile, s.authenticator.jar)
+	cookies := s.authenticator.jar.snapshot()
+	if len(s.policy.PreserveCookies) > 0 {
+		previous, err := store.Load()
+		if err != nil && !errors.Is(err, ErrSessionNotFound) {
+			return err
+		}
+		preserved := func(entry StoredCookie) bool {
+			return cookieMatchesDomains(entry, s.policy.ResetDomains) && slices.Contains(s.policy.PreserveCookies, entry.Cookie.Name)
+		}
+		cookies = slices.DeleteFunc(cookies, preserved)
+		for _, entry := range previous {
+			if preserved(entry) {
+				cookies = append(cookies, entry)
+			}
+		}
+	}
+	return store.Save(cookies)
 }

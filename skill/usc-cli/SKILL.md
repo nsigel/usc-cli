@@ -48,7 +48,7 @@ usc webreg calendar --term TERM
 usc webreg add|schedule|unschedule|remove SECTION_ID --term TERM
 usc webreg grade-option SECTION_ID CODE --term TERM
 usc webreg checkout --term TERM
-usc webreg submit --term TERM --confirm
+usc webreg submit --preview FILE --confirm
 ```
 
 - `TERM` is a `code` from `terms`; `SECTION_ID` is a section `id` from `courses` or `bin`.
@@ -74,7 +74,11 @@ usc libcal book --space 31391 --start 2026-10-02T15:00:00-07:00 --end 2026-10-02
 ## Schedule of Classes
 
 ```sh
-usc classes TERM_CODE COURSE_CODE
+usc classes terms
+usc classes schools TERM_CODE
+usc classes program TERM_CODE SCHOOL_PREFIX PROGRAM_PREFIX
+usc classes course TERM_CODE COURSE_CODE
+usc classes search TERM_CODE TEXT
 ```
 
-Public section times, seats, instructors, and syllabus links, for example `usc classes 20271 BUAD-306`.
+Public, no sign-in: section meetings, seats, instructors, link codes, prerequisites, restrictions, and syllabus links, for example `usc classes course 20271 BUAD-306`. `program` needs the school the program is listed under, from `schools`. Meeting locations are only in `usc webreg courses`.

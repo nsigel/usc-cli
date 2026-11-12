@@ -24,7 +24,7 @@ go get github.com/nsigel/usc-cli
 | `handshake` | `Open(ctx, auth.Options)` for events and career fairs |
 | `webreg` | `Open(ctx, auth.Options)` for Web Registration catalog, course bin, and checkout |
 | `libcal` | `NewPublic()` for availability; `Open(auth.Options)` for booking |
-| `classes` | `New()` for public course and section data |
+| `classes` | `New()` for the public Schedule of Classes: terms, schools, programs, courses, sections, search |
 | `auth` | `Options` for signing in; `Open(ctx, site.Name, Options)` for a raw SSO session; `SiteError` |
 | `browser` | `SyncCookies(ctx, sessionFile, target)` for Chrome CDP sync |
 | `site` | Site names used by `auth.Open` and `auth.SiteError` |
@@ -56,6 +56,33 @@ runs then need credentials only when that session has expired:
 ```go
 options.SessionFile = "/var/lib/myapp/usc-session.json"
 ```
+
+A program that keeps sessions somewhere other than a file, such as one
+encrypted row per user in a database, sets `SessionStore` instead:
+
+```go
+type SessionStore interface {
+    Load() ([]auth.StoredCookie, error) // auth.ErrSessionNotFound when nothing is stored
+    Save([]auth.StoredCookie) error
+}
+```
+
+One store holds one user's session. Sessions for different users are
+independent and can be opened and used concurrently.
+
+`classes` and `webreg` describe a section the same way (`ID`, `Type`,
+`SessionCode`, `Meetings`, `Instructors`, seat counts), and both use
+`classes.CourseCode`, whose `String()` is the canonical `CSCI-102` or
+`CSCI-794A`. A term and a course code identify a course; a term and a
+five-digit section ID identify a section. A cross-listed course is returned
+under every program that lists it, always with the code it is scheduled
+under in `Code`.
+
+`webreg.Client.Checkout` returns a preview of the pending changes, and
+`Submit` takes that preview: it re-reads checkout and returns
+`webreg.ErrCheckoutChanged`, submitting nothing, unless the sections to
+register and drop are exactly the previewed ones. WebReg's response wording
+is not a dependable success signal; read `CourseBin` afterwards.
 
 Do not use the `usc` command's `session.json` as a `SessionFile`, and give each
 concurrently running program its own file: a client is sequential and the
@@ -99,7 +126,9 @@ go run ./examples/webreg       # the newest term's course bin, same credentials
 
 | Feature |
 | --- |
-| Public course details and section availability |
+| Terms, schools, and programs |
+| Every course and section of a program, one course, and search |
+| Section meetings, instructors, seats, clearance, link codes, prerequisites, and restrictions |
 
 ### Handshake
 
@@ -225,15 +254,17 @@ Registration is a two-step flow, as in the browser. Course-bin commands only
 plan changes: `add` places a section in myCourseBin already scheduled,
 `schedule` marks it for registration, and `unschedule` on a registered section
 marks it to be dropped. `checkout` previews exactly what would be submitted.
-`submit --confirm` sends it; WebReg does not process partial registrations, so a
-failure such as a closed section changes nothing and is reported in `messages`.
+`submit --preview checkout.json --confirm` re-reads checkout and submits only if
+it still lists exactly the previewed sections. Read `usc webreg bin` afterwards
+to see what was registered
+an unknown outcome.
 
 ```sh
 usc webreg terms
 usc webreg courses --term 20271 --course BUAD-306
 usc webreg add 14790 --term 20271
-usc webreg checkout --term 20271
-usc webreg submit --term 20271 --confirm
+usc webreg checkout --term 20271 > checkout.json
+usc webreg submit --preview checkout.json --confirm
 ```
 
 `grade-option SECTION_ID CODE` accepts a code from the section's
@@ -274,8 +305,10 @@ API at `brightspace.usc.edu`. Downloads are fetched from the authenticated
 content URL returned by Brightspace; those URLs do not work without the saved
 session. The CLI does not maintain a separate local cache of course data.
 
-`usc classes` reads public course and section data from `classes.usc.edu`. It
-does not use or require the saved USC session.
+`usc classes` reads the public Schedule of Classes at `classes.usc.edu`. It
+does not use or require the saved USC session. A program's courses are read
+with the school it is listed under, both from `usc classes schools`. The
+public data has no meeting locations; `usc webreg courses` does.
 
 Handshake commands use the same operations as the student events experience at
 `usc.joinhandshake.com`.
@@ -332,8 +365,12 @@ usc handshake career-fair 65867
 | `usc webreg add\|schedule\|unschedule\|remove SECTION_ID --term TERM` | Change a course-bin section. These plan changes; only `submit` registers or drops. |
 | `usc webreg grade-option SECTION_ID CODE --term TERM` | Change a course-bin section's grade option. |
 | `usc webreg checkout --term TERM` | Preview pending registrations and drops without submitting. |
-| `usc webreg submit --term TERM --confirm` | Submit checkout; changes enrollment. |
-| `usc classes TERM_CODE COURSE_CODE` | Show a public Schedule of Classes course and all of its sections. |
+| `usc webreg submit --preview FILE --confirm` | Submit checkout; changes enrollment. |
+| `usc classes terms` | List the terms the Schedule of Classes publishes. |
+| `usc classes schools TERM_CODE` | List a term's schools with their programs. |
+| `usc classes program TERM_CODE SCHOOL_PREFIX PROGRAM_PREFIX` | List every course and section a program offers. |
+| `usc classes course TERM_CODE COURSE_CODE` | Show one course and all of its sections. |
+| `usc classes search TERM_CODE TEXT` | Search courses by code, title, description, or instructor. |
 | `usc skill` | Print the bundled `SKILL.md` for use with agent skill systems. |
 | `usc version` | Print the module version and commit this binary was built from. |
 
