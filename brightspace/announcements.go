@@ -75,7 +75,7 @@ type CourseError struct {
 // AllAnnouncements returns the announcements of every course offering the
 // user is enrolled in, each labeled with its course code.
 func (c *Client) AllAnnouncements(ctx context.Context, since string) (AnnouncementFeed, error) {
-	courses, err := c.Courses(ctx, false)
+	courses, err := c.Courses(ctx)
 	if err != nil {
 		return AnnouncementFeed{}, err
 	}

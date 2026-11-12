@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 	"errors"
-	"strings"
 
 	"github.com/nsigel/usc-cli/webreg"
 	"github.com/spf13/cobra"
@@ -38,7 +37,7 @@ func webregTermsCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return writeJSON(cmd, map[string]any{"terms": terms})
+			return writeJSON(cmd, terms)
 		},
 	}
 }
@@ -56,7 +55,7 @@ func webregProgramsCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return writeJSON(cmd, map[string]any{"term": term, "schools": schools})
+			return writeJSON(cmd, schools)
 		},
 	}
 	addTermFlag(cmd, &term)
@@ -77,7 +76,7 @@ func webregCoursesCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return writeJSON(cmd, map[string]any{"term": term, "courses": courses})
+			return writeJSON(cmd, courses)
 		},
 	}
 	addTermFlag(cmd, &term)
@@ -121,7 +120,7 @@ func webregCalendarCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return writeJSON(cmd, map[string]any{"term": term, "events": events})
+			return writeJSON(cmd, events)
 		},
 	}
 	addTermFlag(cmd, &term)
@@ -144,7 +143,7 @@ func webregSectionCommand(use, short string, action func(*webreg.Client, context
 			if err := action(client, cmd.Context(), term, id); err != nil {
 				return err
 			}
-			return writeJSON(cmd, map[string]any{"term": term, "section": id, "action": use, "ok": true})
+			return writeJSON(cmd, map[string]bool{"ok": true})
 		},
 	}
 	addTermFlag(cmd, &term)
@@ -168,7 +167,7 @@ func webregGradeOptionCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return writeJSON(cmd, map[string]any{"term": term, "section": id, "grade_option": strings.ToUpper(args[1]), "response": response})
+			return writeJSON(cmd, map[string]string{"response": response})
 		},
 	}
 	addTermFlag(cmd, &term)

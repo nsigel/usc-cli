@@ -2,42 +2,49 @@ package brightspace
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 )
 
 // Assignment is a Brightspace dropbox folder.
 type Assignment struct {
-	ID           int             `json:"id"`
-	Name         string          `json:"name"`
-	DueDate      *string         `json:"due_date"`
-	Availability json.RawMessage `json:"availability"`
-	GradingType  json.RawMessage `json:"grading_type"`
-	Score        json.RawMessage `json:"score"`
+	ID             int      `json:"id"`
+	Name           string   `json:"name"`
+	DueDate        *string  `json:"due_date"`
+	AvailableFrom  *string  `json:"available_from"`
+	AvailableUntil *string  `json:"available_until"`
+	Points         *float64 `json:"points"`
 }
 
 // Assignments returns Brightspace dropbox folders for courseID.
 func (c *Client) Assignments(ctx context.Context, courseID int) ([]Assignment, error) {
-	var folders []assignment
+	var folders []dropboxFolder
 	path := fmt.Sprintf("/d2l/api/le/%s/%d/dropbox/folders/", leVersion, courseID)
 	if err := c.get(ctx, path, nil, fmt.Sprintf("dropbox(%d)", courseID), &folders); err != nil {
 		return nil, err
 	}
-	result := make([]Assignment, len(folders))
+	assignments := make([]Assignment, len(folders))
 	for index, folder := range folders {
-		result[index] = Assignment(folder)
+		assignments[index] = Assignment{ID: folder.ID, Name: folder.Name, DueDate: folder.DueDate, Points: folder.Assessment.ScoreDenominator}
+		if folder.Availability != nil {
+			assignments[index].AvailableFrom = folder.Availability.StartDate
+			assignments[index].AvailableUntil = folder.Availability.EndDate
+		}
 	}
-	return result, nil
+	return assignments, nil
 }
 
-type assignment struct {
-	ID           int             `json:"Id"`
-	Name         string          `json:"Name"`
-	DueDate      *string         `json:"DueDate"`
-	Availability json.RawMessage `json:"Availability"`
-	GradingType  json.RawMessage `json:"GradingType"`
-	Score        json.RawMessage `json:"Score"`
+type dropboxFolder struct {
+	ID           int     `json:"Id"`
+	Name         string  `json:"Name"`
+	DueDate      *string `json:"DueDate"`
+	Availability *struct {
+		StartDate *string `json:"StartDate"`
+		EndDate   *string `json:"EndDate"`
+	} `json:"Availability"`
+	Assessment struct {
+		ScoreDenominator *float64 `json:"ScoreDenominator"`
+	} `json:"Assessment"`
 }
 
 // Submission is one of the current user's submissions to a dropbox folder.

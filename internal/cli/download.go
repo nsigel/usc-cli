@@ -45,7 +45,7 @@ func downloadCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return writeJSON(cmd, map[string]any{"course_id": courseID, "topic_id": topicID, "path": path})
+			return writeJSON(cmd, map[string]string{"path": path})
 		},
 	}
 	cmd.Flags().StringVarP(&output, "output", "o", ".", "directory for the downloaded file")

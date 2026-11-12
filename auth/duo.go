@@ -12,66 +12,102 @@ import (
 	http "github.com/saucesteals/fhttp"
 )
 
-func (a *authenticator) duo(ctx context.Context, prompt *page, bypassCode string) (*page, error) {
-	authKey := prompt.URL.Query().Get("authkey")
-	traceGroup := prompt.URL.Query().Get("req_trace_group")
-	if authKey == "" || traceGroup == "" {
+// duoPrompt is the state Duo's prompt page hands to its browser client.
+type duoPrompt struct {
+	page       *page
+	base       string
+	authKey    string
+	traceGroup string // correlates the requests below; protocol state, not telemetry
+}
+
+// duo completes Duo's prompt with a bypass code and returns the page Duo
+// sends the browser back to.
+func (a *authenticator) duo(ctx context.Context, current *page, bypassCode string) (*page, error) {
+	prompt := duoPrompt{
+		page:       current,
+		base:       "https://" + current.URL.Host + current.URL.Path,
+		authKey:    current.URL.Query().Get("authkey"),
+		traceGroup: current.URL.Query().Get("req_trace_group"),
+	}
+	if prompt.authKey == "" || prompt.traceGroup == "" {
 		return nil, errors.New("duo prompt is missing authkey or req_trace_group")
 	}
-
-	// Duo exposes the bypass factor only after the same capability and policy
-	// preflight its browser client performs. Skipping either request is rejected.
-	baseURL := "https://" + prompt.URL.Host + prompt.URL.Path
-	features, hints, err := duoClientDetails(a.duoClientHintUA)
+	if err := a.duoPreflight(ctx, prompt); err != nil {
+		return nil, err
+	}
+	oidcCode, err := a.duoSubmitBypass(ctx, prompt, bypassCode)
 	if err != nil {
 		return nil, err
 	}
-	payloadURL := baseURL + "/auth/payload?" + encodeFields([]field{
-		{Name: "authkey", Value: authKey},
+	return a.duoFinalize(ctx, prompt, oidcCode)
+}
+
+// duoPreflight makes the capability and policy requests Duo's browser client
+// makes. Duo only accepts a bypass code after both.
+func (a *authenticator) duoPreflight(ctx context.Context, prompt duoPrompt) error {
+	features, hints, err := duoClientDetails(a.duoClientHintUA)
+	if err != nil {
+		return err
+	}
+	payload, err := a.get(ctx, prompt.base+"/auth/payload?"+encodeFields([]field{
+		{Name: "authkey", Value: prompt.authKey},
 		{Name: "browser_features", Value: features},
 		{Name: "is_ipad", Value: "false"},
 		{Name: "client_hints", Value: hints},
-	})
-	payload, err := a.do(ctx, http.MethodGet, payloadURL, nil, "", prompt.URL, "")
+	}), prompt.page.URL)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if payload.Status != http.StatusOK {
-		return nil, fmt.Errorf("duo auth/payload returned %d", payload.Status)
+		return fmt.Errorf("duo auth/payload returned %d", payload.Status)
 	}
-
-	evaluationURL := baseURL + "/pre_authn/evaluation?" + encodeFields([]field{
-		{Name: "authkey", Value: authKey},
-		{Name: "browser_features", Value: features},
-		{Name: "local_trust_choice", Value: "trusted"},
+	evaluation, err := a.do(ctx, navigation{
+		url: prompt.base + "/pre_authn/evaluation?" + encodeFields([]field{
+			{Name: "authkey", Value: prompt.authKey},
+			{Name: "browser_features", Value: features},
+			{Name: "local_trust_choice", Value: "trusted"},
+		}),
+		referer: prompt.page.URL, duoTraceGroup: prompt.traceGroup,
 	})
-	// Duo correlates policy evaluation, factor use, and finalization with this
-	// trace group; it is protocol state rather than observability metadata.
-	evaluation, err := a.do(ctx, http.MethodGet, evaluationURL, nil, "", prompt.URL, traceGroup)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if evaluation.Status != http.StatusOK {
-		return nil, fmt.Errorf("duo pre_authn/evaluation returned %d", evaluation.Status)
+		return fmt.Errorf("duo pre_authn/evaluation returned %d", evaluation.Status)
 	}
+	return nil
+}
 
-	body, err := json.Marshal(map[string]string{"authkey": authKey, "bypass_code": bypassCode})
+// duoSubmitBypass is the only place the bypass code is sent. It returns the
+// OIDC code Duo issues for some integrations, or "".
+func (a *authenticator) duoSubmitBypass(ctx context.Context, prompt duoPrompt, bypassCode string) (string, error) {
+	body, err := json.Marshal(map[string]string{"authkey": prompt.authKey, "bypass_code": bypassCode})
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	factor, err := a.do(ctx, http.MethodPost, baseURL+"/auth/factors/bypass_code", body, "application/json", prompt.URL, traceGroup)
+	factor, err := a.do(ctx, navigation{
+		method: http.MethodPost, url: prompt.base + "/auth/factors/bypass_code",
+		body: body, contentType: "application/json",
+		referer: prompt.page.URL, duoTraceGroup: prompt.traceGroup,
+	})
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	if err := validateDuoFactor(factor.Status, factor.Body); err != nil {
-		return nil, err
+		return "", err
 	}
+	return jsonStrings(factor.Body)["oidc_code"], nil
+}
 
-	parameters := []field{{Name: "authkey", Value: authKey}}
-	if oidcCode := jsonStrings(factor.Body)["oidc_code"]; oidcCode != "" {
+func (a *authenticator) duoFinalize(ctx context.Context, prompt duoPrompt, oidcCode string) (*page, error) {
+	parameters := []field{{Name: "authkey", Value: prompt.authKey}}
+	if oidcCode != "" {
 		parameters = append(parameters, field{Name: "oidc_code", Value: oidcCode})
 	}
-	final, err := a.do(ctx, http.MethodGet, baseURL+"/auth/finalize_auth?"+encodeFields(parameters), nil, "", prompt.URL, traceGroup)
+	final, err := a.do(ctx, navigation{
+		url:     prompt.base + "/auth/finalize_auth?" + encodeFields(parameters),
+		referer: prompt.page.URL, duoTraceGroup: prompt.traceGroup,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -82,7 +118,7 @@ func (a *authenticator) duo(ctx context.Context, prompt *page, bypassCode string
 	if exitURL == "" {
 		return nil, errors.New("duo finalization did not return an exit URL")
 	}
-	return a.do(ctx, http.MethodGet, exitURL, nil, "", prompt.URL, "")
+	return a.get(ctx, exitURL, prompt.page.URL)
 }
 
 var clientHintBrandPattern = regexp.MustCompile(`"([^"\\]+)";v="([^"\\]+)"`)

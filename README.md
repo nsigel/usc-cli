@@ -46,7 +46,7 @@ file, err := config.CredentialsPath() // the usc command's file; any path works
 options := auth.Options{CredentialsFile: file}
 
 client, err := brightspace.Open(ctx, options)
-courses, err := client.Courses(ctx, false)
+courses, err := client.Courses(ctx)
 ```
 
 By default the session's cookies live in memory, so each run signs in again.
@@ -306,7 +306,7 @@ usc handshake career-fair 65867
 | `usc auth logout` | Delete the saved USC session and credentials. |
 | `usc browser sync [--cdp TARGET]` | Copy the saved USC session into Chrome over CDP. Never prints cookie values. |
 | `usc brightspace whoami` | Show the authenticated Brightspace user. |
-| `usc brightspace courses [--all]` | List course enrollments. |
+| `usc brightspace courses [--all]` | List enrolled classes; `--all` adds departments, semesters, and groups. |
 | `usc brightspace content COURSE_ID [--flat]` | Show a course's content table of contents. |
 | `usc brightspace grades COURSE_ID [--graded-only]` | Show grades for a course. |
 | `usc brightspace announcements [COURSE_ID] [--since TIME]` | Show announcements for one course or all courses. |
@@ -339,7 +339,8 @@ usc handshake career-fair 65867
 
 ## Output format
 
-Every command except `usc skill` writes JSON to stdout. `usc skill` writes its
+Every command except `usc skill` writes JSON to stdout: exactly the value the
+corresponding library call returns, so a list prints as a JSON array. `usc skill` writes its
 raw Markdown so it can be piped directly into an agent skill system. JSON output
 is pretty-printed when stdout is an interactive terminal and compact when it is
 piped or redirected. Pass `--compact` to force single-line JSON or `--pretty` to

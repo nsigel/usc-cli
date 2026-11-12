@@ -23,7 +23,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	courses, err := client.Courses(ctx, false)
+	courses, err := client.Courses(ctx)
 	if err != nil {
 		log.Fatal(err)
 	}

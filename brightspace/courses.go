@@ -6,15 +6,24 @@ import (
 	"regexp"
 )
 
-// User is Brightspace's current-user response. Brightspace fields vary by
-// tenant, so this response is deliberately passed through unchanged.
-type User map[string]any
+// User is the signed-in Brightspace user.
+type User struct {
+	ID         string `json:"id"`
+	FirstName  string `json:"first_name"`
+	LastName   string `json:"last_name"`
+	UniqueName string `json:"unique_name"`
+}
 
 // WhoAmI returns the authenticated Brightspace user.
 func (c *Client) WhoAmI(ctx context.Context) (User, error) {
-	var user User
-	err := c.get(ctx, "/d2l/api/lp/"+lpVersion+"/users/whoami", nil, "whoami", &user)
-	return user, err
+	var wire struct {
+		Identifier string `json:"Identifier"`
+		FirstName  string `json:"FirstName"`
+		LastName   string `json:"LastName"`
+		UniqueName string `json:"UniqueName"`
+	}
+	err := c.get(ctx, "/d2l/api/lp/"+lpVersion+"/users/whoami", nil, "whoami", &wire)
+	return User{ID: wire.Identifier, FirstName: wire.FirstName, LastName: wire.LastName, UniqueName: wire.UniqueName}, err
 }
 
 // Course is a normalized Brightspace enrollment.
@@ -28,24 +37,41 @@ type Course struct {
 	RawName string  `json:"raw_name"`
 }
 
-// Courses returns course offerings, or all enrollment types when includeAll is true.
-func (c *Client) Courses(ctx context.Context, includeAll bool) ([]Course, error) {
+// courseOffering is Brightspace's org-unit type for a class, as opposed to
+// the departments, semesters, and groups a student is also enrolled in.
+const courseOffering = "Course Offering"
+
+// Courses returns the classes the user is enrolled in.
+func (c *Client) Courses(ctx context.Context) ([]Course, error) {
+	enrollments, err := c.Enrollments(ctx)
+	if err != nil {
+		return nil, err
+	}
+	courses := []Course{}
+	for _, enrollment := range enrollments {
+		if enrollment.Type == courseOffering {
+			courses = append(courses, enrollment)
+		}
+	}
+	return courses, nil
+}
+
+// Enrollments returns every org unit the user is enrolled in: classes and
+// also departments, semesters, and groups. Type tells them apart.
+func (c *Client) Enrollments(ctx context.Context) ([]Course, error) {
 	path := "/d2l/api/lp/" + lpVersion + "/enrollments/myenrollments/"
 	query := url.Values{"pageSize": {"100"}}
-	var courses []Course
+	enrollments := []Course{}
 	for {
 		var page enrollmentPage
 		if err := c.get(ctx, path, query, "enrollments", &page); err != nil {
 			return nil, err
 		}
 		for _, enrollment := range page.Items {
-			course := normalizeCourse(enrollment)
-			if includeAll || course.Type == "Course Offering" {
-				courses = append(courses, course)
-			}
+			enrollments = append(enrollments, normalizeCourse(enrollment))
 		}
 		if !page.PagingInfo.HasMoreItems || page.PagingInfo.Bookmark == "" {
-			return courses, nil
+			return enrollments, nil
 		}
 		query = url.Values{"bookmark": {page.PagingInfo.Bookmark}}
 	}
@@ -67,9 +93,9 @@ type enrollment struct {
 			Name string `json:"Name"`
 		} `json:"Type"`
 	} `json:"OrgUnit"`
-	Role struct {
-		Name string `json:"Name"`
-	} `json:"Role"`
+	Access struct {
+		ClasslistRoleName string `json:"ClasslistRoleName"`
+	} `json:"Access"`
 }
 
 // courseName splits names such as "20263_14721 BUAD-304: Organizational Behavior".
@@ -80,7 +106,7 @@ func normalizeCourse(enrollment enrollment) Course {
 		ID:      enrollment.OrgUnit.ID,
 		Title:   enrollment.OrgUnit.Name,
 		Type:    enrollment.OrgUnit.Type.Name,
-		Role:    enrollment.Role.Name,
+		Role:    enrollment.Access.ClasslistRoleName,
 		RawName: enrollment.OrgUnit.Name,
 	}
 	if matches := courseName.FindStringSubmatch(course.RawName); matches != nil {

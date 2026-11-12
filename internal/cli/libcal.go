@@ -21,7 +21,7 @@ func libcalCategoriesCommand() *cobra.Command {
 	return &cobra.Command{
 		Use: "categories", Short: "List Leavey room categories", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return writeJSON(cmd, map[string]any{"categories": libcal.Categories()})
+			return writeJSON(cmd, libcal.Categories())
 		},
 	}
 }
@@ -38,7 +38,7 @@ func libcalSpacesCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return writeJSON(cmd, map[string]any{"spaces": spaces})
+			return writeJSON(cmd, spaces)
 		},
 	}
 }

@@ -2,6 +2,7 @@ package auth
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -24,7 +25,7 @@ func (a *authenticator) continueMicrosoft(ctx context.Context, current *page) (*
 	if current.URL.Path == "/login.srf" {
 		// Microsoft's login.srf branch does not expose a usable continuation until
 		// login.live.com initializes its account state.
-		bootstrap, err := a.do(ctx, http.MethodGet, "https://login.live.com/Me.htm", nil, "", current.URL, "")
+		bootstrap, err := a.get(ctx, "https://login.live.com/Me.htm", current.URL)
 		if err != nil {
 			return nil, err
 		}
@@ -42,7 +43,7 @@ func (a *authenticator) continueMicrosoft(ctx context.Context, current *page) (*
 		return a.submit(ctx, current, form)
 	}
 	if destination, ok := staticRedirect(current); ok {
-		return a.do(ctx, http.MethodGet, destination.String(), nil, "", current.URL, "")
+		return a.get(ctx, destination.String(), current.URL)
 	}
 	return nil, noContinuation(current)
 }
@@ -57,71 +58,61 @@ func (a *authenticator) rememberMicrosoft(body []byte) {
 
 func microsoftForm(page *page, remembered map[string]string) (form, bool, error) {
 	thisPage := microsoftValues(page.Body)
-	known := maps.Clone(remembered)
+	action := firstValue(thisPage, "urlPost", "urlPostMsa")
+	destination, err := page.URL.Parse(action)
+	if action == "" || err != nil || destination.Path != "/appverify" && destination.Path != "/kmsi" {
+		return form{}, false, nil
+	}
+	state, err := microsoftState(page, thisPage, remembered)
+	if err != nil {
+		return form{}, false, err
+	}
+	fields := []field{{Name: "LoginOptions", Value: "1"}, {Name: "type", Value: "28"}}
+	if destination.Path == "/appverify" {
+		fields = []field{{Name: "ContinueAuth", Value: "true"}}
+	}
+	fields = append(fields, state.ctx, state.requestID, state.flowToken)
+	if destination.Path == "/appverify" {
+		fields = append(fields, field{Name: "iscsrfspeedbump", Value: "true"})
+	}
+	fields = append(fields, state.canary, state.pageTime)
+	return form{Method: http.MethodPost, Action: action, Fields: fields}, true, nil
+}
+
+// microsoftSSOState is the continuation state every Microsoft form posts back.
+type microsoftSSOState struct {
+	ctx, requestID, flowToken, canary, pageTime field
+}
+
+// microsoftState collects the state from this page, falling back to values
+// remembered from earlier pages, which later pages often omit.
+func microsoftState(page *page, thisPage, remembered map[string]string) (microsoftSSOState, error) {
+	known := make(map[string]string, len(remembered))
+	maps.Copy(known, remembered)
 	for key, value := range thisPage {
 		if value != "" {
 			known[key] = value
 		}
 	}
-
-	action := firstValue(thisPage, "urlPost", "urlPostMsa")
-	if action == "" {
-		return form{}, false, nil
+	state := microsoftSSOState{
+		ctx:       field{Name: "ctx", Value: firstValue(known, "sCtx", "ctx")},
+		requestID: field{Name: "hpgrequestid", Value: firstValue(known, "sessionId", "hpgrequestid")},
+		flowToken: field{Name: "flowToken", Value: firstValue(known, "sFT", "flowToken")},
+		canary:    field{Name: "canary", Value: known["canary"]},
+		// Microsoft uses i19 for client-side timing telemetry, not SSO state.
+		pageTime: field{Name: "i19", Value: cmp.Or(known["i19"], "0")},
 	}
-	destination, err := page.URL.Parse(action)
-	if err != nil {
-		return form{}, false, nil
-	}
-	if destination.Path != "/appverify" && destination.Path != "/kmsi" {
-		return form{}, false, nil
-	}
-
-	ctxValue := firstValue(known, "sCtx", "ctx")
-	requestID := firstValue(known, "sessionId", "hpgrequestid")
-	flowToken := firstValue(known, "sFT", "flowToken")
-	canary := known["canary"]
-	required := map[string]string{
-		"ctx":          ctxValue,
-		"flowToken":    flowToken,
-		"canary":       canary,
-		"hpgrequestid": requestID,
-	}
-	missing := make([]string, 0, len(required))
-	for name, value := range required {
-		if value == "" {
-			missing = append(missing, name)
+	var missing []string
+	for _, required := range []field{state.ctx, state.requestID, state.flowToken, state.canary} {
+		if required.Value == "" {
+			missing = append(missing, required.Name)
 		}
 	}
 	if len(missing) > 0 {
 		sort.Strings(missing)
-		return form{}, false, fmt.Errorf("microsoft %s did not expose required SSO state: %s", page.URL.Path, strings.Join(missing, ","))
+		return microsoftSSOState{}, fmt.Errorf("microsoft %s did not expose required SSO state: %s", page.URL.Path, strings.Join(missing, ","))
 	}
-
-	pageTime := known["i19"]
-	if pageTime == "" {
-		// Microsoft uses i19 for client-side timing telemetry, not SSO state.
-		pageTime = "0"
-	}
-	common := []field{
-		{Name: "ctx", Value: ctxValue},
-		{Name: "hpgrequestid", Value: requestID},
-		{Name: "flowToken", Value: flowToken},
-		{Name: "canary", Value: canary},
-		{Name: "i19", Value: pageTime},
-	}
-	if destination.Path == "/appverify" {
-		return form{Method: http.MethodPost, Action: action, Fields: []field{
-			{Name: "ContinueAuth", Value: "true"},
-			common[0], common[1], common[2],
-			{Name: "iscsrfspeedbump", Value: "true"},
-			common[3], common[4],
-		}}, true, nil
-	}
-	return form{Method: http.MethodPost, Action: action, Fields: []field{
-		{Name: "LoginOptions", Value: "1"},
-		{Name: "type", Value: "28"},
-		common[0], common[1], common[2], common[3], common[4],
-	}}, true, nil
+	return state, nil
 }
 
 func microsoftRedirectForm(page *page) (form, bool) {

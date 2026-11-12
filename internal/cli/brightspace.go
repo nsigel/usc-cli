@@ -46,14 +46,18 @@ func coursesCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			courses, err := client.Courses(cmd.Context(), includeAll)
+			list := client.Courses
+			if includeAll {
+				list = client.Enrollments
+			}
+			courses, err := list(cmd.Context())
 			if err != nil {
 				return err
 			}
-			return writeJSON(cmd, map[string]any{"courses": courses})
+			return writeJSON(cmd, courses)
 		},
 	}
-	cmd.Flags().BoolVar(&includeAll, "all", false, "include non-course enrollments")
+	cmd.Flags().BoolVar(&includeAll, "all", false, "also list departments, semesters, and groups")
 	return cmd
 }
 
@@ -75,7 +79,7 @@ func contentCommand() *cobra.Command {
 				return err
 			}
 			if flat {
-				return writeJSON(cmd, map[string]any{"course_id": courseID, "topics": toc.Flatten()})
+				return writeJSON(cmd, toc.Flatten())
 			}
 			return writeJSON(cmd, toc)
 		},
@@ -158,7 +162,7 @@ func assignmentsCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return writeJSON(cmd, map[string]any{"assignments": assignments})
+			return writeJSON(cmd, assignments)
 		},
 	}
 }
@@ -185,16 +189,14 @@ func submissionsCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			result := map[string]any{"course_id": courseID, "folder_id": folderID}
 			if !download {
-				result["submissions"] = submissions
-				return writeJSON(cmd, result)
+				return writeJSON(cmd, submissions)
 			}
-			result["files"], err = downloadSubmissions(cmd, client, courseID, folderID, submissions, output)
+			files, err := downloadSubmissions(cmd, client, courseID, folderID, submissions, output)
 			if err != nil {
 				return err
 			}
-			return writeJSON(cmd, result)
+			return writeJSON(cmd, files)
 		},
 	}
 	cmd.Flags().BoolVar(&download, "download", false, "download every submitted file")

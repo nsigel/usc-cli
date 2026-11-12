@@ -20,7 +20,9 @@ examples/            runnable library examples
 ## Conventions
 
 - Every feature is a library call first. A command only parses flags, calls
-  the package, and prints the result; logic never lives in `internal/cli`.
+  the package, and prints exactly what it returns; neither logic nor output
+  shapes live in `internal/cli`. Commands with nothing to return print a
+  one-field acknowledgement.
 - The library holds no ambient state. A program signs in with `auth.Options`
   (explicit credentials or a credentials file) and owns its session,
   which stays in memory unless it names a `SessionFile`. Only `internal/cli`

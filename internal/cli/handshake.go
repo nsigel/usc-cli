@@ -27,7 +27,7 @@ func handshakeCategoriesCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return writeJSON(cmd, map[string]any{"categories": categories})
+			return writeJSON(cmd, categories)
 		},
 	}
 }
