@@ -163,7 +163,7 @@ const calendarDataMarker = `"data":{"Data":`
 type CalendarEvent struct {
 	ID        string    `json:"id"`
 	Title     string    `json:"title"`
-	SectionID string    `json:"section_id,omitempty"`
+	SectionID int       `json:"section_id,omitempty"`
 	Status    string    `json:"status"`
 	Start     time.Time `json:"start"`
 	End       time.Time `json:"end"`
@@ -200,9 +200,11 @@ func (c *Client) Calendar(ctx context.Context, term string) ([]CalendarEvent, er
 	events := make([]CalendarEvent, 0, len(wire.Data))
 	for _, event := range wire.Data {
 		events = append(events, CalendarEvent{
-			ID: event.ID, Title: event.Title, SectionID: event.SectionID,
+			ID: event.ID, Title: event.Title, SectionID: numericSectionID(event.SectionID),
 			Status: event.Status, Start: event.Start, End: event.End,
 		})
 	}
 	return events, nil
 }
+
+func numericSectionID(value string) int { id, _ := strconv.Atoi(value); return id }

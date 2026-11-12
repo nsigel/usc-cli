@@ -24,6 +24,8 @@ type Options struct {
 	CredentialsFile string
 	// SessionFile stores the session's cookies. Empty keeps them in memory.
 	SessionFile string
+	// SessionStore owns persistence for one user. Mutually exclusive with SessionFile.
+	SessionStore SessionStore
 }
 
 // ResolveCredentials returns the credentials a login would submit: the

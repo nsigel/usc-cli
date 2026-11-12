@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -28,19 +29,42 @@ func New() *Client {
 
 // Course is a course and all of its scheduled sections for one term.
 type Course struct {
-	Code           string    `json:"code"`
-	Title          string    `json:"title"`
-	Description    string    `json:"description"`
-	TermCode       int       `json:"term_code"`
-	Units          []float64 `json:"units"`
-	RemainingSeats int       `json:"remaining_seats"`
-	SeatCount      int       `json:"seat_count"`
-	Sections       []Section `json:"sections"`
+	SchoolRestrictions      []Restriction       `json:"school_restrictions"`
+	MajorRestrictions       []Restriction       `json:"major_restrictions"`
+	CourseRestrictions      []Restriction       `json:"course_restrictions"`
+	CorequisiteCourseCodes  []CourseRequirement `json:"corequisite_course_codes"`
+	PrerequisiteCourseCodes []CourseRequirement `json:"prerequisite_course_codes"`
+	GECode                  string              `json:"ge_code"`
+	RecommendedPrep         string              `json:"recommended_prep"`
+	DuplicateCredit         string              `json:"duplicate_credit"`
+	TermNotes               string              `json:"term_notes"`
+	CourseNotes             string              `json:"course_notes"`
+	MaxUnits                *string             `json:"max_units"`
+	IsCrossListed           bool                `json:"is_cross_listed"`
+	Sequence                string              `json:"sequence"`
+	Suffix                  string              `json:"suffix"`
+	PublishedCourseCode     CourseCode          `json:"published_course_code"`
+	ScheduledCourseCode     CourseCode          `json:"scheduled_course_code"`
+	Code                    string              `json:"code"`
+	Title                   string              `json:"title"`
+	Description             string              `json:"description"`
+	TermCode                string              `json:"term_code"`
+	Units                   []float64           `json:"units"`
+	RemainingSeats          int                 `json:"remaining_seats"`
+	SeatCount               int                 `json:"seat_count"`
+	Sections                []Section           `json:"sections"`
 }
 
 // Section is one scheduled lecture, lab, quiz, or other class section.
 type Section struct {
-	ID              string       `json:"id"`
+	SessionCode     string       `json:"session_code"`
+	Clearance       string       `json:"clearance"`
+	RNRModeCode     string       `json:"rnr_mode_code"`
+	Description     string       `json:"description"`
+	Notes           string       `json:"notes"`
+	Name            string       `json:"name"`
+	LinkCode        string       `json:"link_code"`
+	ID              int          `json:"id"`
 	Type            string       `json:"type"`
 	Cancelled       bool         `json:"cancelled"`
 	DClearance      bool         `json:"d_clearance"`
@@ -57,10 +81,11 @@ type Section struct {
 
 // Meeting is one recurring meeting time for a section.
 type Meeting struct {
-	DayCode   string   `json:"day_code"`
-	Days      []string `json:"days"`
-	StartTime string   `json:"start_time"`
-	EndTime   string   `json:"end_time"`
+	SectionLocationSequenceNumber int      `json:"section_location_sequence_number"`
+	DayCode                       string   `json:"day_code"`
+	Days                          []string `json:"days"`
+	StartTime                     string   `json:"start_time"`
+	EndTime                       string   `json:"end_time"`
 }
 
 // Instructor is a section instructor.
@@ -70,17 +95,41 @@ type Instructor struct {
 }
 
 type courseResponse struct {
-	FullCourseName        string            `json:"fullCourseName"`
-	Name                  string            `json:"name"`
-	Description           string            `json:"description"`
-	TermCode              int               `json:"termCode"`
-	CourseUnits           []float64         `json:"courseUnits"`
-	RemainingSectionSeats int               `json:"remainingSectionSeats"`
-	SectionSeatCount      int               `json:"sectionSeatCount"`
-	Sections              []sectionResponse `json:"sections"`
+	SchoolRestrictions      []restrictionResponse       `json:"schoolRestrictions"`
+	MajorRestrictions       []restrictionResponse       `json:"majorRestrictions"`
+	CourseRestrictions      []restrictionResponse       `json:"courseRestrictions"`
+	CorequisiteCourseCodes  []courseRequirementResponse `json:"corequisiteCourseCodes"`
+	PrerequisiteCourseCodes []courseRequirementResponse `json:"prerequisiteCourseCodes"`
+	GECode                  string                      `json:"geCode"`
+	RecommendedPrep         string                      `json:"recommendedPrep"`
+	DuplicateCredit         string                      `json:"duplicateCredit"`
+	TermNotes               string                      `json:"termNotes"`
+	CourseNotes             string                      `json:"courseNotes"`
+	MaxUnits                *string                     `json:"maxUnits"`
+	IsCrossListed           bool                        `json:"isCrossListed"`
+	Sequence                string                      `json:"sequence"`
+	Suffix                  string                      `json:"suffix"`
+	PublishedCourseCode     courseCodeResponse          `json:"publishedCourseCode"`
+	ScheduledCourseCode     courseCodeResponse          `json:"scheduledCourseCode"`
+	FullCourseName          string                      `json:"fullCourseName"`
+	Name                    string                      `json:"name"`
+	Description             string                      `json:"description"`
+	TermCode                int                         `json:"termCode"`
+	CourseUnits             []float64                   `json:"courseUnits"`
+	RemainingSectionSeats   int                         `json:"remainingSectionSeats"`
+	SectionSeatCount        int                         `json:"sectionSeatCount"`
+	Sections                []sectionResponse           `json:"sections"`
 }
 
 type sectionResponse struct {
+	Session struct {
+		RNRSessionCode string `json:"rnrSessionCode"`
+	} `json:"session"`
+	RNRModeCode     string               `json:"rnrModeCode"`
+	Description     string               `json:"description"`
+	Notes           string               `json:"notes"`
+	Name            string               `json:"name"`
+	LinkCode        string               `json:"linkCode"`
 	SISSectionID    string               `json:"sisSectionId"`
 	RNRMode         string               `json:"rnrMode"`
 	IsCancelled     bool                 `json:"isCancelled"`
@@ -96,10 +145,11 @@ type sectionResponse struct {
 }
 
 type meetingResponse struct {
-	DayCode   string   `json:"dayCode"`
-	Days      []string `json:"days"`
-	StartTime string   `json:"startTime"`
-	EndTime   string   `json:"endTime"`
+	SectionLocationSequenceNumber int      `json:"sectionLocationSqNumber"`
+	DayCode                       string   `json:"dayCode"`
+	Days                          []string `json:"days"`
+	StartTime                     string   `json:"startTime"`
+	EndTime                       string   `json:"endTime"`
 }
 
 type instructorResponse struct {
@@ -149,18 +199,41 @@ func (c *Client) Course(ctx context.Context, termCode, courseCode string) (Cours
 
 func normalizeCourse(wire courseResponse) Course {
 	course := Course{
-		Code:           wire.FullCourseName,
-		Title:          wire.Name,
-		Description:    wire.Description,
-		TermCode:       wire.TermCode,
-		Units:          append([]float64(nil), wire.CourseUnits...),
-		RemainingSeats: wire.RemainingSectionSeats,
-		SeatCount:      wire.SectionSeatCount,
-		Sections:       make([]Section, len(wire.Sections)),
+		SchoolRestrictions:      normalizeRestrictions(wire.SchoolRestrictions),
+		MajorRestrictions:       normalizeRestrictions(wire.MajorRestrictions),
+		CourseRestrictions:      normalizeRestrictions(wire.CourseRestrictions),
+		CorequisiteCourseCodes:  normalizeRequirements(wire.CorequisiteCourseCodes),
+		PrerequisiteCourseCodes: normalizeRequirements(wire.PrerequisiteCourseCodes),
+		GECode:                  wire.GECode,
+		RecommendedPrep:         wire.RecommendedPrep,
+		DuplicateCredit:         wire.DuplicateCredit,
+		TermNotes:               wire.TermNotes,
+		CourseNotes:             wire.CourseNotes,
+		MaxUnits:                wire.MaxUnits,
+		IsCrossListed:           wire.IsCrossListed,
+		Sequence:                wire.Sequence,
+		Suffix:                  wire.Suffix,
+		PublishedCourseCode:     CourseCode(wire.PublishedCourseCode),
+		ScheduledCourseCode:     CourseCode(wire.ScheduledCourseCode),
+		Code:                    wire.ScheduledCourseCode.CourseHyphen,
+		Title:                   wire.Name,
+		Description:             wire.Description,
+		TermCode:                strconv.Itoa(wire.TermCode),
+		Units:                   append([]float64(nil), wire.CourseUnits...),
+		RemainingSeats:          wire.RemainingSectionSeats,
+		SeatCount:               wire.SectionSeatCount,
+		Sections:                make([]Section, len(wire.Sections)),
 	}
 	for index, wireSection := range wire.Sections {
 		section := Section{
-			ID:              firstField(wireSection.SISSectionID),
+			SessionCode:     wireSection.Session.RNRSessionCode,
+			Clearance:       "R",
+			RNRModeCode:     wireSection.RNRModeCode,
+			Description:     wireSection.Description,
+			Notes:           wireSection.Notes,
+			Name:            wireSection.Name,
+			LinkCode:        wireSection.LinkCode,
+			ID:              sectionID(wireSection.SISSectionID),
 			Type:            wireSection.RNRMode,
 			Cancelled:       wireSection.IsCancelled,
 			DClearance:      wireSection.HasDClearance,
@@ -174,12 +247,16 @@ func normalizeCourse(wire courseResponse) Course {
 			Instructors:     make([]Instructor, len(wireSection.Instructors)),
 			Syllabus:        wireSection.Syllabus,
 		}
+		if section.DClearance {
+			section.Clearance = "D"
+		}
 		for meetingIndex, wireMeeting := range wireSection.Schedule {
 			section.Schedule[meetingIndex] = Meeting{
-				DayCode:   wireMeeting.DayCode,
-				Days:      append([]string(nil), wireMeeting.Days...),
-				StartTime: wireMeeting.StartTime,
-				EndTime:   wireMeeting.EndTime,
+				SectionLocationSequenceNumber: wireMeeting.SectionLocationSequenceNumber,
+				DayCode:                       wireMeeting.DayCode,
+				Days:                          append([]string(nil), wireMeeting.Days...),
+				StartTime:                     wireMeeting.StartTime,
+				EndTime:                       wireMeeting.EndTime,
 			}
 		}
 		for instructorIndex, wireInstructor := range wireSection.Instructors {
@@ -196,4 +273,72 @@ func firstField(value string) string {
 		return ""
 	}
 	return fields[0]
+}
+
+type CourseCode struct {
+	Prefix       string `json:"prefix"`
+	Number       string `json:"number"`
+	Suffix       string `json:"suffix"`
+	CourseHyphen string `json:"course_hyphen"`
+}
+type courseCodeResponse struct {
+	Prefix       string
+	Number       string
+	Suffix       string
+	CourseHyphen string
+}
+
+func sectionID(value string) int { id, _ := strconv.Atoi(firstField(value)); return id }
+
+type Restriction struct {
+	GroupCode        string `json:"group_code"`
+	GroupDescription string `json:"group_description"`
+	RestrictionCode  string `json:"restriction_code"`
+	Restriction      string `json:"restriction"`
+}
+type restrictionResponse struct {
+	GroupCode        string
+	GroupDescription string
+	RestrictionCode  string
+	Restriction      string
+}
+type CourseRequirement struct {
+	Order           int            `json:"order"`
+	RequiredCourses int            `json:"required_courses"`
+	CourseOptions   []CourseOption `json:"course_options"`
+}
+type CourseOption struct {
+	CourseCode
+	Ands []CourseOption `json:"ands"`
+}
+type courseRequirementResponse struct {
+	Order           int
+	RequiredCourses int
+	CourseOptions   []courseOptionResponse
+}
+type courseOptionResponse struct {
+	courseCodeResponse
+	Ands []courseOptionResponse
+}
+
+func normalizeRestrictions(w []restrictionResponse) []Restriction {
+	r := make([]Restriction, len(w))
+	for i, v := range w {
+		r[i] = Restriction(v)
+	}
+	return r
+}
+func normalizeOptions(w []courseOptionResponse) []CourseOption {
+	r := make([]CourseOption, len(w))
+	for i, v := range w {
+		r[i] = CourseOption{CourseCode(v.courseCodeResponse), normalizeOptions(v.Ands)}
+	}
+	return r
+}
+func normalizeRequirements(w []courseRequirementResponse) []CourseRequirement {
+	r := make([]CourseRequirement, len(w))
+	for i, v := range w {
+		r[i] = CourseRequirement{v.Order, v.RequiredCourses, normalizeOptions(v.CourseOptions)}
+	}
+	return r
 }

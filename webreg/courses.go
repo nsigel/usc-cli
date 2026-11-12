@@ -1,9 +1,11 @@
 package webreg
 
 import (
+	"github.com/nsigel/usc-cli/classes"
 	"github.com/nsigel/usc-cli/internal/dom"
 	"strconv"
 	"strings"
+	"time"
 
 	"golang.org/x/net/html"
 )
@@ -21,11 +23,12 @@ type Course struct {
 // omitted elsewhere: InCourseBin comes from catalog pages, CourseBin and
 // GradeOption from the course bin.
 type Section struct {
-	ID int `json:"id"`
+	Schedule []classes.Meeting `json:"schedule"`
+	ID       int               `json:"id"`
 	// Clearance is WebReg's letter beside the section ID: "R" sections are
 	// open to registration and "D" sections need department clearance.
 	Clearance   string       `json:"clearance,omitempty"`
-	Session     string       `json:"session,omitempty"`
+	SessionCode string       `json:"session_code,omitempty"`
 	Type        string       `json:"type,omitempty"`
 	Units       string       `json:"units,omitempty"`
 	Seats       Seats        `json:"seats"`
@@ -114,7 +117,8 @@ func parseCourse(header *html.Node) (Course, bool) {
 // courseCode reads a header's code, joining suffixes such as "BUAD-200 x".
 func courseCode(header *html.Node) string {
 	code := text(dom.FindFirst(header, dom.Class("span", "crsID")))
-	return strings.ReplaceAll(strings.TrimSuffix(code, ":"), " ", "")
+	code = strings.ReplaceAll(strings.TrimSuffix(code, ":"), " ", "")
+	return strings.ToUpper(strings.TrimRight(code, "Lgmwphx"))
 }
 
 func parseSection(row *html.Node) (Section, bool) {
@@ -136,7 +140,7 @@ func parseSection(row *html.Node) (Section, bool) {
 				section.Clearance = fields[1]
 			}
 		case "Session":
-			section.Session = columnText(column, label)
+			section.SessionCode = columnText(column, label)
 		case "Type":
 			section.Type = columnText(column, label)
 		case "Units":
@@ -169,6 +173,29 @@ func parseSection(row *html.Node) (Section, bool) {
 				section.Notes = append(section.Notes, content)
 			}
 		}
+	}
+
+	section.Schedule = make([]classes.Meeting, 0, len(section.Times))
+	for i, value := range section.Times {
+		meeting := classes.Meeting{Days: []string{}}
+		if i < len(section.Days) {
+			days := strings.ReplaceAll(section.Days[i], "Th", "H")
+			meeting.DayCode = days
+			for _, day := range days {
+				if name := map[rune]string{'M': "Mon", 'T': "Tue", 'W': "Wed", 'H': "Thu", 'F': "Fri", 'S': "Sat", 'U': "Sun"}[day]; name != "" {
+					meeting.Days = append(meeting.Days, name)
+				}
+			}
+		}
+		if start, end, ok := strings.Cut(value, "-"); ok {
+			if t, err := time.Parse("03:04pm", strings.TrimSpace(start)); err == nil {
+				meeting.StartTime = t.Format("15:04")
+			}
+			if t, err := time.Parse("03:04pm", strings.TrimSpace(end)); err == nil {
+				meeting.EndTime = t.Format("15:04")
+			}
+		}
+		section.Schedule = append(section.Schedule, meeting)
 	}
 	return section, true
 }

@@ -2,9 +2,12 @@ package webreg
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"github.com/nsigel/usc-cli/internal/dom"
 	"net/url"
+	"reflect"
 	"strings"
 
 	"golang.org/x/net/html"
@@ -14,26 +17,27 @@ import (
 // scheduled, unregistered sections to add and unscheduled, registered
 // sections to drop, grouped as WebReg presents them.
 type Checkout struct {
-	Term    string          `json:"term"`
-	Ready   bool            `json:"ready"`
-	Message string          `json:"message,omitempty"`
-	Groups  []CheckoutGroup `json:"groups"`
+	FormFingerprint string          `json:"form_fingerprint"`
+	Term            string          `json:"term"`
+	Ready           bool            `json:"ready"`
+	Message         string          `json:"message,omitempty"`
+	Groups          []CheckoutGroup `json:"groups"`
 }
 
 // CheckoutGroup is one checkout heading, e.g. Action "REGISTER", and its courses.
 type CheckoutGroup struct {
-	Action  string   `json:"action"`
-	Heading string   `json:"heading"`
-	Courses []Course `json:"courses"`
+	Action  CheckoutAction `json:"action"`
+	Heading string         `json:"heading"`
+	Courses []Course       `json:"courses"`
 }
 
-// CheckoutResult is WebReg's registration response. WebReg does not process
-// partial registrations: on failure nothing was changed.
+// CheckoutResult preserves the response without inferring enrollment from prose.
+// Outcome remains unknown until the result can be verified against enrollment.
 type CheckoutResult struct {
-	Term      string   `json:"term"`
-	Succeeded bool     `json:"succeeded"`
-	Status    string   `json:"status"`
-	Messages  []string `json:"messages,omitempty"`
+	Term     string          `json:"term"`
+	Outcome  CheckoutOutcome `json:"outcome"`
+	Status   string          `json:"status"`
+	Messages []string        `json:"messages,omitempty"`
 }
 
 // Checkout previews the changes Submit would send. It changes nothing.
@@ -64,18 +68,41 @@ func (c *Client) checkout(ctx context.Context, term string) (*Checkout, url.Valu
 	}) {
 		if node.Data == "h5" {
 			heading := text(node)
+			if checkoutAction(heading) == "" {
+				return nil, nil, errors.New("WebReg checkout contains an unknown action")
+			}
 			checkout.Groups = append(checkout.Groups, CheckoutGroup{Action: checkoutAction(heading), Heading: heading, Courses: []Course{}})
 			continue
 		}
 		course, ok := parseCourse(node)
 		if !ok {
-			continue
+			return nil, nil, errors.New("WebReg checkout contains an unreadable course")
 		}
 		if len(checkout.Groups) == 0 {
-			checkout.Groups = append(checkout.Groups, CheckoutGroup{Courses: []Course{}})
+			return nil, nil, errors.New("WebReg checkout course has no action")
 		}
 		group := &checkout.Groups[len(checkout.Groups)-1]
 		group.Courses = append(group.Courses, course)
+	}
+
+	parsedSections := 0
+	seen := map[int]bool{}
+	for _, group := range checkout.Groups {
+		for _, course := range group.Courses {
+			if len(course.Sections) == 0 {
+				return nil, nil, errors.New("WebReg checkout course has no readable sections")
+			}
+			for _, section := range course.Sections {
+				if section.ID <= 0 || seen[section.ID] {
+					return nil, nil, errors.New("WebReg checkout contains an invalid or duplicate section")
+				}
+				seen[section.ID] = true
+				parsedSections++
+			}
+		}
+	}
+	if parsedSections != len(dom.FindAll(wrapper, dom.Class("div", "section"))) {
+		return nil, nil, errors.New("WebReg checkout contains unreadable sections")
 	}
 
 	form := dom.FindFirst(wrapper, func(node *html.Node) bool { return node.Data == "form" && dom.Attr(node, "id") == "MainForm" })
@@ -88,29 +115,62 @@ func (c *Client) checkout(ctx context.Context, term string) (*Checkout, url.Valu
 			values.Set(name, value)
 		}
 	}
-	checkout.Ready = values.Get(tokenField) != "" && len(checkout.Groups) > 0
+	comparison := url.Values{}
+	for key, value := range values {
+		if key != tokenField {
+			comparison[key] = value
+		}
+	}
+	digest := sha256.Sum256([]byte(comparison.Encode()))
+	checkout.FormFingerprint = hex.EncodeToString(digest[:])
+	checkout.Ready = values.Get(tokenField) != "" && parsedSections > 0
 	return checkout, values, nil
 }
 
-// checkoutAction extracts the uppercase verb from headings such as
-// "You are about to REGISTER for the following sections:".
-func checkoutAction(heading string) string {
-	for _, word := range strings.Fields(heading) {
-		word = strings.Trim(word, ":,.")
-		if len(word) > 1 && word == strings.ToUpper(word) && strings.ToLower(word) != word {
-			return word
-		}
+type CheckoutAction string
+
+const (
+	Register CheckoutAction = "register"
+	Drop     CheckoutAction = "drop"
+)
+
+type CheckoutOutcome string
+
+const CheckoutUnknown CheckoutOutcome = "unknown"
+
+func checkoutAction(heading string) CheckoutAction {
+	switch strings.TrimSpace(heading) {
+	case "You are about to REGISTER for the following sections:":
+		return Register
+	case "You are about to DROP the following sections:":
+		return Drop
+	default:
+		return ""
 	}
-	return ""
 }
 
 // Submit registers and drops the sections Checkout lists. This is the same
 // irreversible action as WebReg's Submit button. Callers should show the
 // preview from Checkout and obtain the student's confirmation first.
-func (c *Client) Submit(ctx context.Context, term string) (*CheckoutResult, error) {
+// The server has no conditional-submit primitive: another client can still
+// change the bin between the final read and POST. Use exclusive session ownership.
+func (c *Client) Submit(ctx context.Context, expected Checkout) (*CheckoutResult, error) {
+	term := expected.Term
+	if !expected.Ready {
+		return nil, errors.New("checkout preview is not ready")
+	}
+	for _, group := range expected.Groups {
+		if group.Action != Register && group.Action != Drop {
+			return nil, errors.New("unknown checkout action")
+		}
+	}
+
 	checkout, form, err := c.checkout(ctx, term)
 	if err != nil {
 		return nil, err
+	}
+	if !reflect.DeepEqual(*checkout, expected) {
+		return nil, errors.New("WebReg pending changes differ from the approved checkout preview")
 	}
 	if !checkout.Ready {
 		message := "WebReg has no pending registration changes for term " + term
@@ -135,7 +195,7 @@ func parseCheckoutResult(term string, data []byte) (*CheckoutResult, error) {
 	if wrapper == nil {
 		return nil, errors.New("WebReg returned an unexpected checkout response; check myCourseBin before retrying")
 	}
-	result := &CheckoutResult{Term: term}
+	result := &CheckoutResult{Term: term, Outcome: CheckoutUnknown}
 	if status := dom.FindFirst(wrapper, dom.Tag("b")); status != nil {
 		result.Status = text(status)
 	}
@@ -154,7 +214,5 @@ func parseCheckoutResult(term string, data []byte) (*CheckoutResult, error) {
 		}
 	}
 	walk(wrapper)
-	lower := strings.ToLower(result.Status)
-	result.Succeeded = result.Status != "" && !strings.Contains(lower, "fail") && !strings.Contains(lower, "error") && !strings.Contains(lower, "not ")
 	return result, nil
 }

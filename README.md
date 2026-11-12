@@ -99,7 +99,7 @@ go run ./examples/webreg       # the newest term's course bin, same credentials
 
 | Feature |
 | --- |
-| Public course details and section availability |
+| Active terms, schools and programs, program catalogs, search, course details and section availability |
 
 ### Handshake
 
@@ -225,15 +225,15 @@ Registration is a two-step flow, as in the browser. Course-bin commands only
 plan changes: `add` places a section in myCourseBin already scheduled,
 `schedule` marks it for registration, and `unschedule` on a registered section
 marks it to be dropped. `checkout` previews exactly what would be submitted.
-`submit --confirm` sends it; WebReg does not process partial registrations, so a
-failure such as a closed section changes nothing and is reported in `messages`.
+`submit --preview checkout.json --confirm` re-reads checkout, refuses differences, and sends it. The result preserves server messages; verify enrollment before retrying
+an unknown outcome.
 
 ```sh
 usc webreg terms
 usc webreg courses --term 20271 --course BUAD-306
 usc webreg add 14790 --term 20271
-usc webreg checkout --term 20271
-usc webreg submit --term 20271 --confirm
+usc webreg checkout --term 20271 > checkout.json
+usc webreg submit --preview checkout.json --confirm
 ```
 
 `grade-option SECTION_ID CODE` accepts a code from the section's
@@ -332,7 +332,11 @@ usc handshake career-fair 65867
 | `usc webreg add\|schedule\|unschedule\|remove SECTION_ID --term TERM` | Change a course-bin section. These plan changes; only `submit` registers or drops. |
 | `usc webreg grade-option SECTION_ID CODE --term TERM` | Change a course-bin section's grade option. |
 | `usc webreg checkout --term TERM` | Preview pending registrations and drops without submitting. |
-| `usc webreg submit --term TERM --confirm` | Submit checkout; changes enrollment. |
+| `usc webreg submit --preview FILE --confirm` | Submit checkout; changes enrollment. |
+| `usc classes terms` | List active public terms. |
+| `usc classes schools TERM_CODE` | List schools with their programs. |
+| `usc classes courses TERM_CODE SCHOOL_PREFIX PROGRAM_PREFIX` | List a program’s courses and sections. |
+| `usc classes search TERM_CODE SEARCH_TERM` | Search public courses and programs. |
 | `usc classes TERM_CODE COURSE_CODE` | Show a public Schedule of Classes course and all of its sections. |
 | `usc skill` | Print the bundled `SKILL.md` for use with agent skill systems. |
 | `usc version` | Print the module version and commit this binary was built from. |
@@ -358,3 +362,74 @@ Only `usc auth login` prompts for input.
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+
+### Public catalog and caller-owned sessions
+
+```sh
+usc classes terms
+usc classes schools 20271
+usc classes courses 20271 ENGV CSCI
+usc classes search 20271 algorithms
+usc classes 20271 CSCI-104
+usc webreg checkout --term 20271 > checkout.json
+# Only after reviewing every action and section in that file:
+usc webreg submit --preview checkout.json --confirm
+```
+
+`classes.Client` exposes `Terms(ctx) ([]Term, error)`,
+`Schools(ctx, termCode) ([]School, error)`,
+`Courses(ctx, termCode, schoolPrefix, programPrefix) ([]Course, error)`,
+`Search(ctx, termCode, searchTerm) (SearchResult, error)`, and
+`Course(ctx, termCode, courseCode) (Course, error)`. All arguments after ctx
+are strings. School is required: omitting it returned no CSCI courses live.
+
+Catalog course identity is `(term_code, scheduled_course_code.course_hyphen)`;
+`code` uses that same hyphenated form, including USC's sequence suffix when
+present, excluding decorative suffixes such as `Lg`. Published course codes
+preserve each cross-listing's name; do not deduplicate by published code.
+Term codes are strings, section IDs are integers in both packages. Section
+identity is `(term_code, id)`. Meeting times use 24-hour `HH:MM`, days use
+`Mon` through `Sun`, and clearance uses `R` or `D`. WebReg's raw times and days
+remain available alongside its structured `schedule`. Public location data
+only exposes `section_location_sequence_number`, not a building or room.
+Restrictions and prerequisite/corequisite option groups preserve USC's logic.
+`max_units` is USC's nullable decimal text; section units retain its decimal
+text rather than introducing display formatting.
+
+`webreg.Client.Submit(ctx, expected Checkout) (*CheckoutResult, error)` accepts
+an approved preview. It compares the fresh preview, including a fingerprint
+of non-CSRF form fields, before posting. Unknown actions are rejected.
+`CheckoutAction` has `Register` and `Drop` values. Consumers allowing only
+registration must reject every group whose action is not `Register` and
+compare every section against their requested IDs. Comparison is conservative:
+even a changed displayed seat count requires a fresh approval. USC has no
+verified conditional-submit primitive, so another writer can race the final
+read and POST. Own the session exclusively. Never retry an uncertain POST
+without checking enrollment. `CheckoutResult.Outcome` is `CheckoutUnknown`;
+status prose is preserved but is not evidence of success or atomic failure.
+No submission was made during development.
+
+`auth.Options.SessionStore` accepts:
+
+```go
+type SessionStore interface {
+    Load() ([]auth.StoredCookie, error)
+    Save([]auth.StoredCookie) error
+}
+```
+
+Load returns `auth.ErrSessionNotFound` for an absent session. Implementations
+own encryption and storage, must not log cookies, and must coordinate writers.
+Use a distinct store for each user. `auth.FileSessionStore{Path: path}` provides
+the CLI's versioned private file format. `SessionFile` remains supported;
+setting both options is an error. Cookies are saved after successful
+Authenticate; ordinary Do calls do not persist automatically. Auth owns its
+HTTP client, cookie jar, and credentials per Session; compiled patterns and
+error sentinels are the only shared package values. Each Session is sequential;
+independent sessions can run concurrently. Shared credentials files still
+need caller coordination when rejected secrets are removed.
+
+Examples: `go run ./examples/classes` lists active-term schools;
+`go run -race ./examples/session-store` opens two independent memory-backed
+sessions from saved cookies without printing or rewriting those cookies.

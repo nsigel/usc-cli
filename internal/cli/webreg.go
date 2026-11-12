@@ -2,7 +2,9 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
 
 	"github.com/nsigel/usc-cli/webreg"
 	"github.com/spf13/cobra"
@@ -195,7 +197,7 @@ func webregCheckoutCommand() *cobra.Command {
 }
 
 func webregSubmitCommand() *cobra.Command {
-	var term string
+	var previewFile string
 	var confirm bool
 	cmd := &cobra.Command{
 		Use: "submit", Short: "Submit checkout: register and drop the sections checkout lists", Args: cobra.NoArgs,
@@ -207,14 +209,23 @@ func webregSubmitCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			result, err := client.Submit(cmd.Context(), term)
+			data, err := os.ReadFile(previewFile)
+			if err != nil {
+				return err
+			}
+			var preview webreg.Checkout
+			if err := json.Unmarshal(data, &preview); err != nil {
+				return err
+			}
+			result, err := client.Submit(cmd.Context(), preview)
 			if err != nil {
 				return err
 			}
 			return writeJSON(cmd, result)
 		},
 	}
-	addTermFlag(cmd, &term)
+	cmd.Flags().StringVar(&previewFile, "preview", "", "JSON checkout preview to submit")
+	_ = cmd.MarkFlagRequired("preview")
 	cmd.Flags().BoolVar(&confirm, "confirm", false, "confirm the enrollment change shown by usc webreg checkout")
 	return cmd
 }

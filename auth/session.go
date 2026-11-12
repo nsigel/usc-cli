@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -147,55 +146,6 @@ func cloneCookie(cookie *http.Cookie) http.Cookie {
 	return clone
 }
 
-func loadSession(name string, jar *sessionJar, ignoredDomains []string) error {
-	session, err := readSession(name)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	for _, entry := range session.Cookies {
-		if cookieMatchesDomains(entry, ignoredDomains) {
-			continue
-		}
-		source, err := url.ParseRequestURI(entry.SetBy)
-		if err != nil || source.Scheme != "https" || source.Host == "" {
-			return errors.New("invalid cookie source in session")
-		}
-		jar.SetCookies(source, []*http.Cookie{&entry.Cookie})
-	}
-	return nil
-}
-
-func saveSessionReplacingDomains(name string, jar *sessionJar, domains, preserve []string) error {
-	onDisk, err := newSessionJar()
-	if err != nil {
-		return err
-	}
-	if err := loadSession(name, onDisk, nil); err != nil {
-		return err
-	}
-	preserved := func(entry StoredCookie) bool {
-		return cookieMatchesDomains(entry, domains) && slices.Contains(preserve, entry.Cookie.Name)
-	}
-	merged, err := newSessionJar()
-	if err != nil {
-		return err
-	}
-	for key, entry := range onDisk.entries {
-		if preserved(entry) {
-			merged.entries[key] = entry
-		}
-	}
-	for key, entry := range jar.entries {
-		if !preserved(entry) {
-			merged.entries[key] = entry
-		}
-	}
-	return saveSession(name, merged)
-}
-
 func cookieMatchesDomains(entry StoredCookie, domains []string) bool {
 	if len(domains) == 0 {
 		return false
@@ -218,10 +168,44 @@ func hostMatchesDomains(host string, domains []string) bool {
 	return false
 }
 
-func saveSession(name string, jar *sessionJar) error {
-	data, err := json.MarshalIndent(savedSession{Version: sessionVersion, Cookies: jar.snapshot()}, "", "  ")
+// SessionStore persists one user's cookies. Load returns ErrSessionNotFound
+// when no session exists. Implementations must not log cookie values.
+// Separate users must have separate stores; concurrent writers need external coordination.
+type SessionStore interface {
+	Load() ([]StoredCookie, error)
+	Save([]StoredCookie) error
+}
+
+// FileSessionStore uses the same private, versioned file as SessionFile.
+type FileSessionStore struct{ Path string }
+
+func (s FileSessionStore) Load() ([]StoredCookie, error) { return LoadStoredCookies(s.Path) }
+func (s FileSessionStore) Save(cookies []StoredCookie) error {
+	data, err := json.MarshalIndent(savedSession{Version: sessionVersion, Cookies: cookies}, "", "  ")
 	if err != nil {
 		return err
 	}
-	return writePrivateFile(name, append(data, '\n'))
+	return writePrivateFile(s.Path, append(data, '\n'))
+}
+
+func loadStoredSession(store SessionStore, jar *sessionJar, ignoredDomains []string) error {
+	cookies, err := store.Load()
+	if errors.Is(err, ErrSessionNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, entry := range cookies {
+		if cookieMatchesDomains(entry, ignoredDomains) {
+			continue
+		}
+		source, err := url.ParseRequestURI(entry.SetBy)
+		if err != nil || source.Scheme != "https" || source.Host == "" {
+			return errors.New("invalid cookie source in session")
+		}
+		cookie := cloneCookie(&entry.Cookie)
+		jar.SetCookies(source, []*http.Cookie{&cookie})
+	}
+	return nil
 }
