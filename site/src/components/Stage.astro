@@ -1,0 +1,735 @@
+---
+import Sprite from "./Sprite.astro";
+import { scenarios } from "../scenarios";
+
+const first = scenarios[0];
+---
+
+<div class="stage" data-stage aria-label="An agent answering a question while the website is still loading" role="img">
+  <div class="browser">
+    <div class="bar">
+      <span class="dots"><i></i><i></i><i></i></span>
+      <span class="url" data-url>{first.site.host}</span>
+      <span class="clock" data-clock>0:00</span>
+    </div>
+    <div class="viewport" data-viewport data-screen="login">
+      <div class="screen login">
+        <div class="login-card">
+          <div class="login-title">USC NetID</div>
+          <div class="field">ttrojan</div>
+          <div class="field">••••••••••</div>
+          <div class="button" data-target="login">Sign in</div>
+        </div>
+      </div>
+
+      <div class="screen duo">
+        <div class="phone">
+          <div class="phone-screen">
+            <div class="push">Push sent</div>
+            <div class="buzz"><i></i><i></i><i></i></div>
+          </div>
+        </div>
+        <div class="duo-text">Check your phone…</div>
+      </div>
+
+      <div class="screen home">
+        <div class="site-head">
+          <span class="site-name" data-site-name>{first.site.name}</span>
+          <span class="tabs" data-tabs>{first.site.tabs.map((tab) => <span>{tab}</span>)}</span>
+        </div>
+        <div class="cards" data-cards>
+          {
+            first.site.cards.map((card, index) => (
+              <div class={`card c${index}`}>
+                <div class="banner" />
+                <span>{card}</span>
+              </div>
+            ))
+          }
+        </div>
+      </div>
+
+      <div class="screen loading">
+        <div class="skeleton">
+          <i style="width: 70%"></i><i style="width: 45%"></i><i style="width: 85%"></i><i style="width: 60%"></i><i
+            style="width: 75%"></i>
+        </div>
+        <div class="loader">
+          <Sprite name="hourglass" scale={4} class="spin" />
+          <div class="progress"><i data-progress></i></div>
+          <div class="loading-text">Loading…</div>
+        </div>
+      </div>
+
+      <div class="cursor" data-cursor>
+        <Sprite name="pointer" scale={2} class="arrow" />
+        <Sprite name="hourglass" scale={2} class="wait" />
+      </div>
+    </div>
+  </div>
+
+  <div class="chat" data-chat data-agent="claude">
+    <div class="chat-bar">
+      <Sprite name="claude" scale={2} class="icon-claude" />
+      <Sprite name="codex" scale={2} class="icon-codex" />
+      <Sprite name="grok" scale={2} class="icon-grok" />
+      <span class="agent" data-agent-name>Claude Code</span>
+    </div>
+    <div class="log" data-log></div>
+    <div class="composer"><span data-typed></span><span class="caret"></span></div>
+  </div>
+</div>
+
+<script>
+  import { scenarios } from "../scenarios";
+
+  const stage = document.querySelector<HTMLElement>("[data-stage]")!;
+  const viewport = stage.querySelector<HTMLElement>("[data-viewport]")!;
+  const cursor = stage.querySelector<HTMLElement>("[data-cursor]")!;
+  const clock = stage.querySelector<HTMLElement>("[data-clock]")!;
+  const progress = stage.querySelector<HTMLElement>("[data-progress]")!;
+  const chat = stage.querySelector<HTMLElement>("[data-chat]")!;
+  const log = stage.querySelector<HTMLElement>("[data-log]")!;
+  const typed = stage.querySelector<HTMLElement>("[data-typed]")!;
+  const agents = [
+    { id: "claude", name: "Claude Code" },
+    { id: "codex", name: "Codex" },
+    { id: "grok", name: "Grok" },
+  ];
+
+  let run = 0;
+  let timers: number[] = [];
+  let clockTimer = 0;
+
+  const at = (ms: number, fn: () => void) => timers.push(window.setTimeout(fn, ms));
+  const el = (tag: string, className: string, text = "") => {
+    const node = document.createElement(tag);
+    node.className = className;
+    node.textContent = text;
+    return node;
+  };
+
+  // Points at a spot inside target, or just past its right edge with beside.
+  function moveCursor(target: Element | null, wait = false, beside = false) {
+    cursor.classList.toggle("waiting", wait);
+    if (!target) return;
+    const box = target.getBoundingClientRect();
+    const frame = viewport.getBoundingClientRect();
+    const x = box.left - frame.left + (beside ? box.width + 16 : box.width * 0.6);
+    const y = box.top - frame.top + box.height * 0.55;
+    cursor.style.transform = `translate(${x}px, ${y}px)`;
+  }
+
+  function click() {
+    cursor.classList.remove("click");
+    void cursor.offsetWidth;
+    cursor.classList.add("click");
+  }
+
+  function setSite(index: number) {
+    const site = scenarios[index].site;
+    stage.querySelector("[data-url]")!.textContent = site.host;
+    stage.querySelector("[data-site-name]")!.textContent = site.name;
+    stage.querySelector("[data-tabs]")!.replaceChildren(...site.tabs.map((tab) => el("span", "", tab)));
+    const cards = stage.querySelectorAll("[data-cards] .card span");
+    cards.forEach((card, i) => (card.textContent = site.cards[i]));
+    viewport.dataset.site = site.name.toLowerCase();
+  }
+
+  function play(index: number) {
+    timers.forEach(clearTimeout);
+    timers = [];
+    clearInterval(clockTimer);
+    const scenario = scenarios[index];
+    const agent = agents[run++ % agents.length];
+    document.dispatchEvent(new CustomEvent("scenario", { detail: index }));
+
+    setSite(index);
+    chat.dataset.agent = agent.id;
+    stage.querySelector("[data-agent-name]")!.textContent = agent.name;
+    log.replaceChildren();
+    typed.textContent = "";
+    progress.style.width = "0%";
+    viewport.dataset.screen = "login";
+    moveCursor(viewport.querySelector(".login-card .field"));
+
+    // The website: sign in, wait for Duo, pick the course, wait some more.
+    let seconds = 0;
+    clock.textContent = "0:00";
+    clockTimer = window.setInterval(() => {
+      seconds++;
+      clock.textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+    }, 90);
+    at(500, () => moveCursor(viewport.querySelector("[data-target=login]")));
+    at(1200, click);
+    at(1400, () => {
+      viewport.dataset.screen = "duo";
+      moveCursor(viewport.querySelector(".phone"), true, true);
+    });
+    at(3900, () => {
+      viewport.dataset.screen = "home";
+      moveCursor(viewport.querySelector(".site-name"));
+    });
+    at(4500, () => moveCursor(viewport.querySelectorAll(".card")[scenario.site.target]));
+    at(5200, click);
+    at(5400, () => {
+      viewport.dataset.screen = "loading";
+      moveCursor(viewport.querySelector(".progress"), true);
+      progress.style.width = "34%";
+    });
+
+    // The agent: type the question, run usc, answer.
+    let t = 300;
+    for (let i = 1; i <= scenario.question.length; i++) {
+      at(t, () => (typed.textContent = scenario.question.slice(0, i)));
+      t += 38;
+    }
+    t += 250;
+    at(t, () => {
+      typed.textContent = "";
+      log.append(el("div", "msg user", scenario.question));
+    });
+    t += 450;
+    for (const call of scenario.calls) {
+      const line = el("div", "call running");
+      line.append(el("span", "status"), el("code", "", call));
+      at(t, () => {
+        log.append(line);
+        log.scrollTop = log.scrollHeight;
+      });
+      t += 700;
+      at(t, () => line.classList.replace("running", "done"));
+      t += 150;
+    }
+    t += 200;
+    const answer = el("div", "msg agent");
+    at(t, () => log.append(answer));
+    const words = scenario.answer.split(" ");
+    words.forEach((_, i) => {
+      at(t, () => {
+        answer.textContent = words.slice(0, i + 1).join(" ");
+        log.scrollTop = log.scrollHeight;
+      });
+      t += 45;
+    });
+    at(t + 4200, () => play((index + 1) % scenarios.length));
+  }
+
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    const scenario = scenarios[0];
+    viewport.dataset.screen = "loading";
+    progress.style.width = "34%";
+    log.append(el("div", "msg user", scenario.question));
+    for (const call of scenario.calls) {
+      const line = el("div", "call done");
+      line.append(el("span", "status"), el("code", "", call));
+      log.append(line);
+    }
+    log.append(el("div", "msg agent", scenario.answer));
+  } else {
+    play(0);
+  }
+
+  document.addEventListener("play-scenario", (event) => play((event as CustomEvent<number>).detail));
+</script>
+
+<style>
+  .stage {
+    position: relative;
+    height: 640px;
+  }
+
+  .browser,
+  .chat {
+    position: absolute;
+    background: var(--panel);
+    border: 1.5px solid var(--ink);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+
+  .browser {
+    top: 0;
+    right: 0;
+    width: min(560px, 100%);
+    height: 400px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 12px;
+    border-bottom: 1.5px solid var(--ink);
+    background: var(--bg);
+    font-size: 12px;
+  }
+
+  .dots {
+    display: flex;
+    gap: 5px;
+  }
+
+  .dots i {
+    width: 9px;
+    height: 9px;
+    border: 1.5px solid var(--ink);
+  }
+
+  .dots i:first-child {
+    background: var(--cardinal);
+  }
+
+  .dots i:nth-child(2) {
+    background: var(--gold);
+  }
+
+  .url {
+    flex: 1;
+    padding: 2px 8px;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .clock {
+    font-variant-numeric: tabular-nums;
+    color: var(--cardinal);
+    font-weight: 600;
+  }
+
+  .viewport {
+    position: relative;
+    flex: 1;
+    overflow: hidden;
+    --accent: var(--cardinal);
+  }
+
+  .viewport[data-site="libcal"] {
+    --accent: #2f5d8a;
+  }
+
+  .viewport[data-site="webreg"] {
+    --accent: #5b3f8c;
+  }
+
+  .viewport[data-site="handshake"] {
+    --accent: #2f7a4b;
+  }
+
+  .screen {
+    position: absolute;
+    inset: 0;
+    display: none;
+  }
+
+  .viewport[data-screen="login"] .login,
+  .viewport[data-screen="duo"] .duo,
+  .viewport[data-screen="home"] .home,
+  .viewport[data-screen="loading"] .loading {
+    display: flex;
+  }
+
+  .login {
+    align-items: center;
+    justify-content: center;
+    background: repeating-linear-gradient(45deg, #f3eee4 0 10px, #efe8db 10px 20px);
+  }
+
+  .login-card {
+    width: 240px;
+    padding: 20px;
+    background: var(--panel);
+    border: 1.5px solid var(--ink);
+    box-shadow: 3px 3px 0 var(--ink);
+    display: grid;
+    gap: 10px;
+  }
+
+  .login-title {
+    font-family: var(--pixel);
+    font-size: 16px;
+    color: var(--cardinal);
+  }
+
+  .field {
+    border: 1.5px solid var(--ink);
+    padding: 5px 8px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+
+  .button {
+    background: var(--cardinal);
+    color: white;
+    text-align: center;
+    padding: 6px;
+    font-weight: 600;
+    font-size: 13px;
+    border: 1.5px solid var(--ink);
+  }
+
+  .duo {
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    background: #eef3ee;
+  }
+
+  .phone {
+    width: 92px;
+    height: 160px;
+    border: 3px solid var(--ink);
+    background: var(--ink);
+    padding: 12px 6px;
+    animation: wobble 0.5s steps(2) infinite;
+  }
+
+  .phone-screen {
+    height: 100%;
+    background: #dfeee3;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+  }
+
+  .push {
+    font-family: var(--pixel);
+    font-size: 10px;
+    color: var(--green);
+  }
+
+  .buzz {
+    display: flex;
+    gap: 4px;
+  }
+
+  .buzz i {
+    width: 8px;
+    height: 8px;
+    background: var(--green);
+    animation: blink 0.9s steps(1) infinite;
+  }
+
+  .buzz i:nth-child(2) {
+    animation-delay: 0.3s;
+  }
+
+  .buzz i:nth-child(3) {
+    animation-delay: 0.6s;
+  }
+
+  .duo-text {
+    font-size: 13px;
+    color: var(--muted);
+  }
+
+  .home {
+    flex-direction: column;
+  }
+
+  .site-head {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    padding: 10px 14px;
+    background: var(--accent);
+    color: white;
+    border-bottom: 1.5px solid var(--ink);
+  }
+
+  .site-name {
+    font-family: var(--pixel);
+    font-size: 15px;
+  }
+
+  .tabs {
+    display: flex;
+    gap: 12px;
+    font-size: 12px;
+    opacity: 0.85;
+  }
+
+  .cards {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    padding: 14px;
+    background: #f3eee4;
+  }
+
+  .card {
+    border: 1.5px solid var(--ink);
+    background: var(--panel);
+    box-shadow: 2px 2px 0 var(--ink);
+    display: flex;
+    flex-direction: column;
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .card span {
+    padding: 6px 8px;
+  }
+
+  .banner {
+    flex: 1;
+    border-bottom: 1.5px solid var(--ink);
+    background-size: 12px 12px;
+  }
+
+  .c0 .banner {
+    background-color: var(--gold);
+    background-image: linear-gradient(45deg, #e8b800 25%, transparent 25% 75%, #e8b800 75%);
+  }
+
+  .c1 .banner {
+    background-color: #e8833a;
+    background-image: radial-gradient(#b85f22 2px, transparent 2.5px);
+  }
+
+  .c2 .banner {
+    background-color: #7fb0d9;
+    background-image: linear-gradient(90deg, #5b8fbd 50%, transparent 50%);
+  }
+
+  .c3 .banner {
+    background-color: #9cc9a2;
+    background-image: linear-gradient(#6fa678 50%, transparent 50%);
+  }
+
+  .loading {
+    flex-direction: column;
+    background: var(--panel);
+  }
+
+  .skeleton {
+    padding: 18px;
+    display: grid;
+    gap: 12px;
+    opacity: 0.6;
+  }
+
+  .skeleton i {
+    height: 14px;
+    background: linear-gradient(90deg, #eee8dc 0 40%, #f8f4ec 50%, #eee8dc 60%) 0 0 / 300% 100%;
+    animation: shimmer 1.4s linear infinite;
+  }
+
+  .loader {
+    position: absolute;
+    inset: 0 0 60px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+  }
+
+  .loader :global(.spin) {
+    animation: flip 1.6s steps(1) infinite;
+  }
+
+  .progress {
+    width: 200px;
+    height: 14px;
+    border: 1.5px solid var(--ink);
+    background: var(--panel);
+    padding: 2px;
+  }
+
+  .progress i {
+    display: block;
+    height: 100%;
+    width: 0;
+    background: repeating-linear-gradient(90deg, var(--accent) 0 8px, transparent 8px 10px);
+    transition: width 12s steps(12);
+  }
+
+  .loading-text {
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  .cursor {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 5;
+    transition: transform 0.55s cubic-bezier(0.5, 0, 0.2, 1);
+    pointer-events: none;
+  }
+
+  .cursor :global(.wait),
+  .cursor.waiting :global(.arrow) {
+    display: none;
+  }
+
+  .cursor.waiting :global(.wait) {
+    display: inline-block;
+    animation: flip 1.6s steps(1) infinite;
+  }
+
+  .cursor.click :global(.arrow) {
+    animation: press 0.25s;
+  }
+
+  .chat {
+    left: 0;
+    bottom: 0;
+    width: min(390px, 92%);
+    height: 320px;
+    display: flex;
+    flex-direction: column;
+    z-index: 2;
+  }
+
+  .chat-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 12px;
+    border-bottom: 1.5px solid var(--ink);
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .chat:not([data-agent="claude"]) :global(.icon-claude),
+  .chat:not([data-agent="codex"]) :global(.icon-codex),
+  .chat:not([data-agent="grok"]) :global(.icon-grok) {
+    display: none;
+  }
+
+  .chat[data-agent="codex"] .chat-bar {
+    background: var(--ink);
+    color: var(--bg);
+  }
+
+  .log {
+    flex: 1;
+    overflow: hidden;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  .log :global(.msg.user) {
+    align-self: flex-end;
+    max-width: 85%;
+    padding: 6px 10px;
+    background: var(--gold);
+    border: 1.5px solid var(--ink);
+  }
+
+  .chat[data-agent="codex"] .log :global(.msg.user) {
+    background: #e9e5dc;
+  }
+
+  .log :global(.call) {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  .log :global(.call code) {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .log :global(.status) {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    transform: translateY(-1px);
+    background: var(--line);
+  }
+
+  .log :global(.running .status) {
+    background: var(--gold);
+    animation: blink 0.5s steps(1) infinite;
+  }
+
+  .log :global(.done .status) {
+    background: var(--green);
+  }
+
+  .log :global(.msg.agent) {
+    color: var(--ink);
+  }
+
+  .composer {
+    margin: 0 12px 12px;
+    padding: 8px 10px;
+    border: 1.5px solid var(--ink);
+    font-size: 13px;
+    min-height: 38px;
+  }
+
+  .caret {
+    display: inline-block;
+    width: 7px;
+    height: 14px;
+    margin-left: 1px;
+    vertical-align: -2px;
+    background: var(--ink);
+    animation: blink 1s steps(1) infinite;
+  }
+
+  @keyframes blink {
+    50% {
+      opacity: 0;
+    }
+  }
+
+  @keyframes wobble {
+    50% {
+      transform: rotate(-4deg);
+    }
+  }
+
+  @keyframes shimmer {
+    to {
+      background-position: -300% 0;
+    }
+  }
+
+  @keyframes flip {
+    50% {
+      transform: rotate(180deg);
+    }
+  }
+
+  @keyframes press {
+    50% {
+      transform: scale(0.8);
+    }
+  }
+
+  @media (max-width: 640px) {
+    .stage {
+      height: 680px;
+    }
+    .browser {
+      height: 340px;
+    }
+    .chat {
+      width: 100%;
+      height: 320px;
+    }
+  }
+</style>

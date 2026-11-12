@@ -1,0 +1,21 @@
+---
+import { spriteSVG, type SpriteName } from "../sprites";
+
+interface Props {
+  name: SpriteName;
+  scale?: number;
+  label?: string;
+  class?: string;
+}
+
+const { name, scale = 4, label = "", class: className } = Astro.props;
+---
+
+<span class:list={["sprite", className]} set:html={spriteSVG(name, scale, label)} />
+
+<style>
+  .sprite {
+    display: inline-block;
+    line-height: 0;
+  }
+</style>

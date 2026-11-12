@@ -1,0 +1,366 @@
+---
+import Base from "../layouts/Base.astro";
+import Sprite from "../components/Sprite.astro";
+import Stage from "../components/Stage.astro";
+import CopyCode from "../components/CopyCode.astro";
+import { scenarios } from "../scenarios";
+import type { SpriteName } from "../sprites";
+
+const prompt = "Set up the USC CLI for me: https://usc.sh/install.md";
+
+const sites: { sprite: SpriteName; name: string; does: string; docs: string }[] = [
+  {
+    sprite: "brightspace",
+    name: "Brightspace",
+    does: "Courses, content, grades, announcements, assignments, and file downloads.",
+    docs: "/docs/brightspace/",
+  },
+  {
+    sprite: "webreg",
+    name: "WebReg",
+    does: "Section seats, your course bin and calendar, and checkout.",
+    docs: "/docs/webreg/",
+  },
+  {
+    sprite: "handshake",
+    name: "Handshake",
+    does: "Events and career fairs, filtered by category, host, date, or format.",
+    docs: "/docs/handshake/",
+  },
+  {
+    sprite: "libcal",
+    name: "Leavey Library",
+    does: "Study room availability by capacity, and booking.",
+    docs: "/docs/libcal/",
+  },
+  {
+    sprite: "classes",
+    name: "Schedule of Classes",
+    does: "Public sections, times, seats, and instructors. No sign-in.",
+    docs: "/docs/classes/",
+  },
+];
+---
+
+<Base
+  title="usc.sh: USC for your agent"
+  description="A command-line client for Brightspace, WebReg, Handshake, and Leavey Library rooms that Claude Code, Codex, Grok, or any agent with a terminal can use."
+>
+  <main>
+    <section class="wrap hero">
+      <div class="pitch">
+        <h1>Ask your agent instead of opening Brightspace.</h1>
+        <p class="lede">
+          A command-line client for Brightspace, WebReg, Handshake, and Leavey Library rooms that any agent with a
+          terminal can use.
+        </p>
+
+        <div class="cta">
+          <Sprite name="trojan" scale={3} class="mascot" />
+          <div class="cta-label"><Sprite name="claude" scale={2} />Ask your favorite agent:</div>
+          <div class="prompt">
+            <code>{prompt}</code>
+            <button class="copy-button" data-copy={prompt}>Copy</button>
+          </div>
+        </div>
+
+        <div class="asks">
+          <div class="asks-label">Then ask</div>
+          {
+            scenarios.map((scenario, index) => (
+              <button class="ask" data-ask={index}>
+                {scenario.question}
+              </button>
+            ))
+          }
+        </div>
+
+        <p class="alt">Or install it yourself: <a href="#setup">three commands</a></p>
+      </div>
+      <Stage />
+    </section>
+
+    <section class="wrap sites">
+      {
+        sites.map((site) => (
+          <a class="site" href={site.docs}>
+            <Sprite name={site.sprite} scale={4} />
+            <h2>{site.name}</h2>
+            <p>{site.does}</p>
+          </a>
+        ))
+      }
+    </section>
+
+    <section class="wrap setup" id="setup">
+      <h2>Set it up yourself</h2>
+      <ol>
+        <li>
+          <span class="step">Install</span>
+          <CopyCode code="curl -fsSL https://usc.sh/install | sh" />
+          <span class="note">macOS and Linux. With Go: <code>go install github.com/nsigel/usc-cli/cmd/usc@latest</code></span>
+        </li>
+        <li>
+          <span class="step">Sign in</span>
+          <CopyCode code="usc auth login" />
+          <span class="note"
+            >Asks for your NetID, password, and a <a href="https://account.usc.edu/2fa/duo-bypass-code"
+              >Duo bypass code</a
+            >. Stored only on your machine.</span
+          >
+        </li>
+        <li>
+          <span class="step">Add the skill</span>
+          <CopyCode code="Add the usc skill: save the output of `usc skill` as a skill named usc-cli." />
+          <span class="note">Paste this into your agent so it knows every command.</span>
+        </li>
+      </ol>
+      <p class="more"><a href="/docs/">Read the docs</a> · <a href="/docs/library/">Use it as a Go library</a></p>
+    </section>
+  </main>
+</Base>
+
+<script>
+  const asks = document.querySelectorAll<HTMLButtonElement>("[data-ask]");
+  asks.forEach((button) =>
+    button.addEventListener("click", () =>
+      document.dispatchEvent(new CustomEvent("play-scenario", { detail: Number(button.dataset.ask) })),
+    ),
+  );
+  document.addEventListener("scenario", (event) => {
+    const index = (event as CustomEvent<number>).detail;
+    asks.forEach((button) => button.classList.toggle("active", Number(button.dataset.ask) === index));
+  });
+</script>
+
+<style>
+  .hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+    gap: 56px;
+    align-items: center;
+    padding-top: 40px;
+    padding-bottom: 72px;
+  }
+
+  h1 {
+    font-size: clamp(32px, 4.4vw, 50px);
+    line-height: 1.08;
+    letter-spacing: -0.035em;
+    font-weight: 600;
+    margin: 0 0 20px;
+  }
+
+  .lede {
+    color: var(--muted);
+    margin: 0 0 32px;
+    max-width: 46ch;
+  }
+
+  .cta {
+    position: relative;
+    border: 1.5px solid var(--ink);
+    background: var(--ink);
+    color: var(--bg);
+    box-shadow: 4px 4px 0 var(--gold);
+  }
+
+  .cta :global(.mascot) {
+    position: absolute;
+    right: 18px;
+    bottom: 100%;
+    margin-bottom: 1.5px;
+    animation: hop 2.4s steps(1) infinite;
+  }
+
+  @keyframes hop {
+    90% {
+      transform: translateY(-4px);
+    }
+  }
+
+  .cta-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 18px;
+    border-bottom: 1px solid #3a3833;
+    font-size: 12px;
+    color: #b8b2a7;
+  }
+
+  .prompt {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 20px 18px;
+  }
+
+  .prompt code {
+    flex: 1;
+    font-size: 16px;
+    font-weight: 500;
+    overflow-wrap: anywhere;
+  }
+
+  .prompt code::before {
+    content: "> ";
+    color: var(--gold);
+  }
+
+  .prompt .copy-button {
+    padding: 9px 18px;
+    font-size: 14px;
+    color: var(--ink);
+    box-shadow: 2px 2px 0 var(--bg);
+  }
+
+  .prompt .copy-button.copied {
+    background: var(--bg);
+  }
+
+  .asks {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 36px;
+  }
+
+  .asks-label {
+    flex-basis: 100%;
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 2px;
+  }
+
+  .ask {
+    border: 1px solid var(--line);
+    background: var(--bg);
+    padding: 3px 8px;
+    font-size: 12px;
+    text-align: left;
+  }
+
+  .ask:hover {
+    border-color: var(--ink);
+  }
+
+  .ask.active {
+    border-color: var(--ink);
+    background: var(--gold);
+  }
+
+  .alt {
+    font-size: 13px;
+    color: var(--muted);
+    margin: 18px 0 0;
+  }
+
+  .sites {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 16px;
+    padding-bottom: 88px;
+  }
+
+  .site {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 18px;
+    border: 1.5px solid var(--ink);
+    background: var(--panel);
+    text-decoration: none;
+    transition: transform 0.1s, box-shadow 0.1s;
+  }
+
+  .site:hover {
+    color: inherit;
+    transform: translate(-2px, -2px);
+    box-shadow: var(--shadow);
+  }
+
+  .site h2 {
+    font-size: 15px;
+    margin: 6px 0 0;
+  }
+
+  .site p {
+    margin: 0;
+    font-size: 13px;
+    color: var(--muted);
+    flex: 1;
+  }
+
+  .setup h2 {
+    font-size: 24px;
+    letter-spacing: -0.02em;
+    margin: 0 0 24px;
+  }
+
+  .setup ol {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 20px;
+    counter-reset: step;
+  }
+
+  .setup li {
+    display: grid;
+    grid-template-columns: 150px minmax(0, 1fr);
+    gap: 6px 20px;
+    align-items: center;
+    counter-increment: step;
+  }
+
+  .step {
+    font-weight: 600;
+  }
+
+  .step::before {
+    content: counter(step) ". ";
+    color: var(--cardinal);
+  }
+
+  .note {
+    grid-column: 2;
+    font-size: 13px;
+    color: var(--muted);
+  }
+
+  .more {
+    margin: 32px 0 0;
+    font-size: 14px;
+  }
+
+  @media (max-width: 1080px) {
+    .sites {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+  }
+
+  @media (max-width: 900px) {
+    .hero {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 48px;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .sites {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .setup li {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .note {
+      grid-column: 1;
+    }
+    .prompt {
+      flex-direction: column;
+      align-items: stretch;
+    }
+  }
+</style>

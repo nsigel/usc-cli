@@ -1,0 +1,91 @@
+---
+import "../styles/global.css";
+import Sprite from "../components/Sprite.astro";
+import { spriteSVG } from "../sprites";
+
+interface Props {
+  title: string;
+  description: string;
+}
+
+const { title, description } = Astro.props;
+const favicon = `data:image/svg+xml,${encodeURIComponent(spriteSVG("trojan", 1))}`;
+const path = Astro.url.pathname;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={new URL(path, "https://usc.sh")} />
+    <link rel="icon" href={favicon} />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600;700&family=Silkscreen&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <header class="wrap nav">
+      <a class="brand" href="/"><Sprite name="trojan" scale={2} />usc.sh</a>
+      <nav class="nav-links">
+        <a href="/docs/" aria-current={path.startsWith("/docs") ? "page" : undefined}>docs</a>
+        <a href="https://github.com/nsigel/usc-cli">github</a>
+      </nav>
+    </header>
+    <slot />
+    <footer class="wrap footer">
+      <a class="author" href="https://github.com/nsigel">
+        <Sprite name="sc" scale={1.5} label="SC" />
+        <span>made by <u>@nsigel</u></span>
+      </a>
+      <span class="fine">MIT licensed. Not affiliated with USC.</span>
+    </footer>
+  </body>
+</html>
+
+<script>
+  document.querySelectorAll<HTMLButtonElement>("[data-copy]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await navigator.clipboard.writeText(button.dataset.copy!);
+      button.textContent = "Copied";
+      button.classList.add("copied");
+      setTimeout(() => {
+        button.textContent = "Copy";
+        button.classList.remove("copied");
+      }, 1600);
+    });
+  });
+</script>
+
+<style>
+  .footer {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    padding-top: 48px;
+    padding-bottom: 40px;
+    font-size: 13px;
+  }
+  .author {
+    display: flex;
+    align-items: flex-end;
+    gap: 12px;
+    text-decoration: none;
+  }
+  .author u {
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
+  }
+  .fine {
+    color: var(--muted);
+  }
+</style>

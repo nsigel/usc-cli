@@ -1,0 +1,47 @@
+#!/bin/sh
+# Installs the latest usc release: curl -fsSL https://usc.sh/install | sh
+set -eu
+
+repo=nsigel/usc-cli
+dir=${USC_INSTALL_DIR:-$HOME/.local/bin}
+
+case $(uname -s) in
+Darwin) os=darwin ;;
+Linux) os=linux ;;
+*)
+	echo "usc: no prebuilt binary for $(uname -s); use: go install github.com/$repo/cmd/usc@latest" >&2
+	exit 1
+	;;
+esac
+
+case $(uname -m) in
+x86_64 | amd64) arch=amd64 ;;
+arm64 | aarch64) arch=arm64 ;;
+*)
+	echo "usc: no prebuilt binary for $(uname -m); use: go install github.com/$repo/cmd/usc@latest" >&2
+	exit 1
+	;;
+esac
+
+latest=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/$repo/releases/latest")
+version=${latest##*/}
+case $version in
+v*) ;;
+*)
+	echo "usc: could not find the latest release" >&2
+	exit 1
+	;;
+esac
+
+mkdir -p "$dir"
+tmp=$(mktemp)
+trap 'rm -f "$tmp"' EXIT
+curl -fsSL "https://github.com/$repo/releases/download/$version/usc_${version}_${os}_${arch}" -o "$tmp"
+chmod 755 "$tmp"
+mv "$tmp" "$dir/usc"
+
+echo "Installed usc $version to $dir/usc"
+case ":$PATH:" in
+*":$dir:"*) ;;
+*) echo "Add $dir to your PATH to run usc." ;;
+esac

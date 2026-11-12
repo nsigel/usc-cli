@@ -1,0 +1,31 @@
+---
+import Base from "../layouts/Base.astro";
+import Sprite from "../components/Sprite.astro";
+---
+
+<Base title="Not found · usc.sh" description="This page doesn't exist.">
+  <main class="wrap missing">
+    <Sprite name="hourglass" scale={8} />
+    <h1>Still loading. Forever, probably.</h1>
+    <p>This page doesn't exist. Try <a href="/">the home page</a> or <a href="/docs/">the docs</a>.</p>
+  </main>
+</Base>
+
+<style>
+  .missing {
+    padding-top: 96px;
+    padding-bottom: 96px;
+    display: grid;
+    justify-items: start;
+    gap: 8px;
+  }
+  h1 {
+    font-size: 28px;
+    letter-spacing: -0.02em;
+    margin: 24px 0 0;
+  }
+  p {
+    color: var(--muted);
+    margin: 0;
+  }
+</style>

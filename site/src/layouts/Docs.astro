@@ -1,0 +1,255 @@
+---
+import Base from "./Base.astro";
+import Sprite from "../components/Sprite.astro";
+import type { SpriteName } from "../sprites";
+
+interface Props {
+  frontmatter: { title: string; description: string };
+}
+
+const { title, description } = Astro.props.frontmatter;
+const path = Astro.url.pathname;
+
+const groups: { name: string; pages: { href: string; title: string; sprite?: SpriteName }[] }[] = [
+  {
+    name: "Start",
+    pages: [
+      { href: "/docs/", title: "Install" },
+      { href: "/docs/auth/", title: "Signing in" },
+      { href: "/docs/output/", title: "Output and errors" },
+    ],
+  },
+  {
+    name: "Sites",
+    pages: [
+      { href: "/docs/brightspace/", title: "Brightspace", sprite: "brightspace" },
+      { href: "/docs/webreg/", title: "WebReg", sprite: "webreg" },
+      { href: "/docs/handshake/", title: "Handshake", sprite: "handshake" },
+      { href: "/docs/libcal/", title: "Leavey Library", sprite: "libcal" },
+      { href: "/docs/classes/", title: "Schedule of Classes", sprite: "classes" },
+    ],
+  },
+  {
+    name: "More",
+    pages: [
+      { href: "/docs/browser/", title: "Browser sync" },
+      { href: "/docs/library/", title: "Go library" },
+    ],
+  },
+];
+---
+
+<Base title={`${title} · usc.sh`} description={description}>
+  <div class="wrap docs">
+    <nav class="sidebar">
+      {
+        groups.map((group) => (
+          <div class="group">
+            <div class="group-name">{group.name}</div>
+            {group.pages.map((page) => (
+              <a href={page.href} aria-current={path === page.href ? "page" : undefined}>
+                {page.sprite ? <Sprite name={page.sprite} scale={1} /> : <span class="bullet" />}
+                {page.title}
+              </a>
+            ))}
+          </div>
+        ))
+      }
+    </nav>
+    <article class="prose">
+      <h1>{title}</h1>
+      <slot />
+    </article>
+  </div>
+</Base>
+
+<script>
+  document.querySelectorAll<HTMLPreElement>(".prose pre").forEach((pre) => {
+    const button = document.createElement("button");
+    button.className = "copy-button";
+    button.textContent = "Copy";
+    button.addEventListener("click", async () => {
+      await navigator.clipboard.writeText(pre.innerText.replace(/\n$/, ""));
+      button.textContent = "Copied";
+      button.classList.add("copied");
+      setTimeout(() => {
+        button.textContent = "Copy";
+        button.classList.remove("copied");
+      }, 1600);
+    });
+    const frame = document.createElement("div");
+    frame.className = "code-frame";
+    pre.replaceWith(frame);
+    frame.append(pre, button);
+  });
+</script>
+
+<style>
+  .docs {
+    display: grid;
+    grid-template-columns: 210px minmax(0, 1fr);
+    gap: 56px;
+    padding-top: 32px;
+  }
+
+  .sidebar {
+    position: sticky;
+    top: 24px;
+    align-self: start;
+    display: grid;
+    gap: 22px;
+    font-size: 14px;
+  }
+
+  .group {
+    display: grid;
+    gap: 2px;
+  }
+
+  .group-name {
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+
+  .sidebar a {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 8px;
+    margin-left: -8px;
+    text-decoration: none;
+    border: 1.5px solid transparent;
+  }
+
+  .sidebar a:hover {
+    border-color: var(--line);
+    color: inherit;
+  }
+
+  .sidebar a[aria-current="page"] {
+    border-color: var(--ink);
+    background: var(--panel);
+    box-shadow: 2px 2px 0 var(--ink);
+  }
+
+  .bullet {
+    width: 16px;
+    display: flex;
+    justify-content: center;
+  }
+
+  .bullet::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    background: var(--cardinal);
+  }
+
+  .prose {
+    max-width: 760px;
+    min-width: 0;
+  }
+
+  .prose h1 {
+    font-size: 34px;
+    letter-spacing: -0.03em;
+    line-height: 1.15;
+    margin: 0 0 20px;
+  }
+
+  .prose :global(h2) {
+    font-size: 20px;
+    letter-spacing: -0.02em;
+    margin: 44px 0 12px;
+  }
+
+  .prose :global(h3) {
+    font-size: 16px;
+    margin: 32px 0 8px;
+  }
+
+  .prose :global(p),
+  .prose :global(li) {
+    color: #3a3833;
+  }
+
+  .prose :global(ul),
+  .prose :global(ol) {
+    padding-left: 20px;
+  }
+
+  .prose :global(:not(pre) > code) {
+    font-size: 0.9em;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    padding: 1px 5px;
+  }
+
+  .prose :global(.code-frame) {
+    position: relative;
+    margin: 16px 0;
+  }
+
+  .prose :global(.code-frame .copy-button) {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    opacity: 0;
+  }
+
+  .prose :global(.code-frame:hover .copy-button),
+  .prose :global(.code-frame .copy-button:focus-visible) {
+    opacity: 1;
+  }
+
+  .prose :global(pre) {
+    margin: 0;
+    padding: 14px 16px;
+    border: 1.5px solid var(--ink);
+    background: var(--panel) !important;
+    font-size: 13px;
+    line-height: 1.6;
+    overflow-x: auto;
+  }
+
+  .prose :global(table) {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    margin: 16px 0;
+    display: block;
+    overflow-x: auto;
+  }
+
+  .prose :global(th),
+  .prose :global(td) {
+    text-align: left;
+    vertical-align: top;
+    padding: 8px 12px;
+    border: 1px solid var(--line);
+  }
+
+  .prose :global(td code) {
+    white-space: nowrap;
+  }
+
+  .prose :global(th) {
+    background: var(--panel);
+    font-weight: 600;
+  }
+
+  @media (max-width: 800px) {
+    .docs {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 24px;
+    }
+    .sidebar {
+      position: static;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 16px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--line);
+    }
+  }
+</style>
