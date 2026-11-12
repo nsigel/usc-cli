@@ -149,27 +149,28 @@ func (form bookingForm) submission(details ReservationDetails, slot availableSlo
 	return values, nil
 }
 
+// submit posts the reservation. The outcome is marked unknown before the
+// request leaves and cleared only by a definite answer, so a lost response
+// can never be retried blindly.
 func (c *Client) submit(ctx context.Context, form bookingForm, values url.Values, tx *checkout) error {
+	method, path, body, err := form.request(values)
+	if err != nil {
+		return err
+	}
 	tx.state.OutcomeUnknown = true
 	if err := tx.save(); err != nil {
 		tx.state.OutcomeUnknown = false
 		return err
 	}
-	response, err := c.sendForm(ctx, form, values)
-	var httpRejection *ResponseError
-	if errors.As(err, &httpRejection) && httpRejection.Status >= 400 && httpRejection.Status < 500 {
-		tx.state.OutcomeUnknown = false
-		return err
-	}
+	response, err := c.request(ctx, method, path, body, "application/json, text/html, */*;q=0.8", form.Referer)
 	if err == nil {
 		err = checkBookingResponse(response)
-		var rejection *Error
-		if errors.As(err, &rejection) {
+	}
+	if err != nil {
+		if definiteRejection(err) {
 			tx.state.OutcomeUnknown = false
 			return err
 		}
-	}
-	if err != nil {
 		return fmt.Errorf("%w: %v", ErrBookingUnknown, err)
 	}
 	tx.state = checkoutState{}
@@ -180,25 +181,37 @@ func (c *Client) submit(ctx context.Context, form bookingForm, values url.Values
 	return nil
 }
 
-func (c *Client) sendForm(ctx context.Context, form bookingForm, values url.Values) ([]byte, error) {
+// definiteRejection reports an answer that proves nothing was booked: a 4xx,
+// a redirect to sign-in, or LibCal's own error message.
+func definiteRejection(err error) bool {
+	var httpError *ResponseError
+	if errors.As(err, &httpError) {
+		return httpError.Status >= 400 && httpError.Status < 500
+	}
+	var rejection *Error
+	return errors.As(err, &rejection)
+}
+
+// request is the form's submission as a LibCal path and body. The form's
+// action must stay on LibCal.
+func (form bookingForm) request(values url.Values) (method, path string, body url.Values, err error) {
 	base, _ := url.Parse(baseURL)
 	target, err := base.Parse(form.Action)
 	if err != nil || target.Scheme != "https" || target.Host != base.Host {
-		return nil, errors.New("LibCal reservation form points to an unexpected host")
+		return "", "", nil, errors.New("LibCal reservation form points to an unexpected host")
 	}
-	const accept = "application/json, text/html, */*;q=0.8"
 	switch form.Method {
 	case http.MethodPost:
-		return c.request(ctx, http.MethodPost, target.RequestURI(), values, accept, form.Referer)
+		return http.MethodPost, target.RequestURI(), values, nil
 	case http.MethodGet:
 		query := target.Query()
 		for name, entries := range values {
 			query[name] = append(query[name], entries...)
 		}
 		target.RawQuery = query.Encode()
-		return c.request(ctx, http.MethodGet, target.RequestURI(), nil, accept, form.Referer)
+		return http.MethodGet, target.RequestURI(), nil, nil
 	}
-	return nil, errors.New("LibCal reservation form uses an unsupported method")
+	return "", "", nil, errors.New("LibCal reservation form uses an unsupported method")
 }
 
 func checkBookingResponse(data []byte) error {

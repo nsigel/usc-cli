@@ -91,8 +91,13 @@ func WriteError(cmd *cobra.Command, err error) error {
 		info.Code = coded.ErrorCode()
 	}
 	var siteErr *auth.SiteError
-	if errors.As(err, &siteErr) || errors.Is(err, auth.ErrSessionNotFound) {
+	switch {
+	case errors.As(err, &siteErr), errors.Is(err, auth.ErrSessionNotFound):
 		info.Action = "usc auth login"
+	case info.Code == "libcal_booking_unknown", info.Code == "libcal_cleanup_failed":
+		info.Action = "usc libcal release"
+	case info.Code == "libcal_invalid_details":
+		info.Action = "usc libcal book --field NAME=VALUE"
 	}
 	writer := cmd.ErrOrStderr()
 	return encodeJSON(writer, info, prettyOutput(cmd, writer))

@@ -77,30 +77,38 @@ type GradeChoice struct {
 func parseCourses(document *html.Node) []Course {
 	courses := []Course{}
 	for _, header := range dom.FindAll(document, dom.Class("div", "course-header")) {
-		code := courseCode(header)
-		if code == "" {
-			continue
+		if course, ok := parseCourse(header); ok {
+			courses = append(courses, course)
 		}
-		course := Course{Code: code, Title: text(dom.FindFirst(header, dom.Class("span", "crsTitl"))), Sections: []Section{}}
-		// The header's href names its body. It omits suffixes such as the x in
-		// BUAD-200x, so the displayed code cannot be used to find it.
-		body := dom.FindFirst(document, dom.ID(strings.TrimPrefix(dom.Attr(header, "href"), "#")))
-		if body != nil {
-			if description := dom.FindFirst(body, dom.Class("div", "bs-callout-default")); description != nil {
-				course.Description = text(description)
-			}
-			for _, requirement := range dom.FindAll(body, dom.Class("span", "prereqcoreq_val")) {
-				course.Prerequisites = append(course.Prerequisites, text(requirement))
-			}
-			for _, row := range dom.FindAll(body, dom.Class("div", "section")) {
-				if section, ok := parseSection(row); ok {
-					course.Sections = append(course.Sections, section)
-				}
-			}
-		}
-		courses = append(courses, course)
 	}
 	return courses
+}
+
+// parseCourse reads one course header and the body that follows it. The body
+// is the header's next element rather than a lookup by ID: checkout lists a
+// course once per action, with the same ID each time.
+func parseCourse(header *html.Node) (Course, bool) {
+	code := courseCode(header)
+	if code == "" {
+		return Course{}, false
+	}
+	course := Course{Code: code, Title: text(dom.FindFirst(header, dom.Class("span", "crsTitl"))), Sections: []Section{}}
+	body := header.NextSibling
+	for body != nil && body.Type != html.ElementNode {
+		body = body.NextSibling
+	}
+	if description := dom.FindFirst(body, dom.Class("div", "bs-callout-default")); description != nil {
+		course.Description = text(description)
+	}
+	for _, requirement := range dom.FindAll(body, dom.Class("span", "prereqcoreq_val")) {
+		course.Prerequisites = append(course.Prerequisites, text(requirement))
+	}
+	for _, row := range dom.FindAll(body, dom.Class("div", "section")) {
+		if section, ok := parseSection(row); ok {
+			course.Sections = append(course.Sections, section)
+		}
+	}
+	return course, true
 }
 
 // courseCode reads a header's code, joining suffixes such as "BUAD-200 x".
@@ -232,7 +240,7 @@ func parseGradeOption(column, label *html.Node) *GradeOption {
 			}
 			name := text(choice)
 			option.Choices = append(option.Choices, GradeChoice{Code: code, Name: name})
-			if option.Current == "" && dom.Attr(choice, "selected") != "" {
+			if option.Current == "" && dom.HasAttr(choice, "selected") {
 				option.Current = name
 			}
 		}

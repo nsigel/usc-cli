@@ -200,7 +200,7 @@ func submissionsCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&download, "download", false, "download every submitted file")
-	cmd.Flags().StringVarP(&output, "output", "o", ".", "directory for downloaded files")
+	cmd.Flags().StringVar(&output, "output", ".", "directory for downloaded files")
 	return cmd
 }
 

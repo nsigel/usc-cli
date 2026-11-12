@@ -34,27 +34,24 @@ func loginCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			_, err = auth.Open(cmd.Context(), signInProbe, options)
-			if errors.Is(err, auth.ErrCredentialsRequired) {
-				if options.Credentials, err = options.ResolveCredentials(); err != nil {
-					return err
-				}
+			if options.Credentials, err = options.ResolveCredentials(); err != nil {
+				return err
+			}
+			if !options.Credentials.Complete() {
 				if err := promptForMissing(cmd, &options.Credentials); err != nil {
 					return err
 				}
-				_, err = auth.Open(cmd.Context(), signInProbe, options)
-			}
-			if err != nil {
-				return err
-			}
-			credentials, err := options.ResolveCredentials()
-			if err != nil {
-				return err
-			}
-			if credentials.Complete() {
-				if err := auth.SaveCredentials(options.CredentialsFile, credentials); err != nil {
+				// Only a real sign-in tests new credentials, and a session that is
+				// still live would skip it.
+				if err := os.Remove(options.SessionFile); err != nil && !errors.Is(err, os.ErrNotExist) {
 					return err
 				}
+			}
+			if _, err := auth.Open(cmd.Context(), signInProbe, options); err != nil {
+				return err
+			}
+			if err := auth.SaveCredentials(options.CredentialsFile, options.Credentials); err != nil {
+				return err
 			}
 			return writeJSON(cmd, map[string]bool{"authenticated": true})
 		},

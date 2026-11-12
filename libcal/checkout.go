@@ -18,7 +18,7 @@ import (
 )
 
 // ErrBookingUnknown means submission may have succeeded. Never retry blindly.
-var ErrBookingUnknown = &Error{Code: "libcal_booking_unknown", Message: "LibCal booking outcome is unknown; check your confirmation email before retrying; run usc libcal release only after checking"}
+var ErrBookingUnknown = &Error{Code: "libcal_booking_unknown", Message: "LibCal booking outcome is unknown; check the confirmation email, then release the checkout before booking again"}
 
 // checkoutState is the recovery record. Session names a server-side checkout
 // to release. OutcomeUnknown is set before a reservation is submitted and
@@ -95,7 +95,7 @@ func (c *Client) openCheckout() (*checkout, error) {
 func (tx *checkout) releaseEarlierAttempt(ctx context.Context) error {
 	if tx.state.Session != "" {
 		if err := tx.client.endCheckout(ctx, tx.state.Session); err != nil {
-			return &Error{Code: "libcal_cleanup_failed", Message: "could not release unfinished LibCal checkout; retry usc libcal release: " + err.Error(), Cause: err}
+			return &Error{Code: "libcal_cleanup_failed", Message: "could not release the unfinished LibCal checkout: " + err.Error(), Cause: err}
 		}
 	}
 	tx.state = checkoutState{}
@@ -149,7 +149,7 @@ func (tx *checkout) finish(resultErr *error) {
 		cleanupErr = tx.client.removeHold(ctx, tx.slot, *tx.pending)
 	}
 	if cleanupErr != nil {
-		*resultErr = errors.Join(*resultErr, &Error{Code: "libcal_cleanup_failed", Message: "could not release LibCal checkout; retry usc libcal release: " + cleanupErr.Error(), Cause: cleanupErr})
+		*resultErr = errors.Join(*resultErr, &Error{Code: "libcal_cleanup_failed", Message: "could not release the LibCal checkout: " + cleanupErr.Error(), Cause: cleanupErr})
 		return
 	}
 	tx.state = checkoutState{}

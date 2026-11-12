@@ -208,7 +208,7 @@ func (form bookingForm) fieldError(field bookingFormField, reason string) error 
 			choices = append(choices, fmt.Sprintf("%q (%s)", choice.Value, choice.Label))
 		}
 	}
-	message := fmt.Sprintf("LibCal field %s: %s; pass --field %s=VALUE", field.Name, reason, field.Name)
+	message := fmt.Sprintf("LibCal field %s: %s", field.Name, reason)
 	if len(choices) > 0 {
 		message += "; choices: " + strings.Join(choices, ", ")
 	}

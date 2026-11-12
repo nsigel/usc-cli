@@ -115,13 +115,13 @@ func handshakeCareerFairCommand() *cobra.Command {
 }
 
 func addHandshakeSearchFlags(cmd *cobra.Command, search *handshake.Search) {
-	cmd.Flags().StringSliceVarP(&search.Categories, "category", "c", nil, "category name, slug, or ID (repeatable)")
+	cmd.Flags().StringSliceVar(&search.Categories, "category", nil, "category name, slug, or ID (repeatable)")
 	cmd.Flags().StringVar(&search.Organizer, "organizer", "", "host, employer, or contact name or email")
-	cmd.Flags().StringVarP(&search.Keyword, "keyword", "q", "", "title or keyword search")
+	cmd.Flags().StringVar(&search.Keyword, "keyword", "", "title or keyword search")
 	cmd.Flags().StringVar(&search.Medium, "medium", "all", "all, virtual, or in-person")
 	cmd.Flags().StringVar(&search.Date, "date", "all", "all, today, next-10, next-30, or past-year")
 	cmd.Flags().StringVar(&search.Sort, "sort", "relevance", "relevance, date, or posted-desc")
 	cmd.Flags().BoolVar(&search.PostedBySchool, "posted-by-school", false, "only show events posted by USC")
-	cmd.Flags().IntVarP(&search.Limit, "limit", "n", 30, "results per page (1-100)")
+	cmd.Flags().IntVar(&search.Limit, "limit", 30, "results per page (1-100)")
 	cmd.Flags().StringVar(&search.After, "after", "", "next_cursor of the previous page")
 }

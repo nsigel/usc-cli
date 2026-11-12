@@ -59,12 +59,6 @@ func (c *Client) checkout(ctx context.Context, term string) (*Checkout, url.Valu
 	if message := dom.FindFirst(wrapper, dom.Tag("h6")); message != nil {
 		checkout.Message = text(message)
 	}
-
-	courses := parseCourses(wrapper)
-	byCode := make(map[string]Course, len(courses))
-	for _, course := range courses {
-		byCode[course.Code] = course
-	}
 	for _, node := range dom.FindAll(wrapper, func(node *html.Node) bool {
 		return node.Data == "h5" && dom.HasClass(node, "RegAdDrpTitl") || node.Data == "div" && dom.HasClass(node, "course-header")
 	}) {
@@ -73,11 +67,15 @@ func (c *Client) checkout(ctx context.Context, term string) (*Checkout, url.Valu
 			checkout.Groups = append(checkout.Groups, CheckoutGroup{Action: checkoutAction(heading), Heading: heading, Courses: []Course{}})
 			continue
 		}
+		course, ok := parseCourse(node)
+		if !ok {
+			continue
+		}
 		if len(checkout.Groups) == 0 {
 			checkout.Groups = append(checkout.Groups, CheckoutGroup{Courses: []Course{}})
 		}
 		group := &checkout.Groups[len(checkout.Groups)-1]
-		group.Courses = append(group.Courses, byCode[courseCode(node)])
+		group.Courses = append(group.Courses, course)
 	}
 
 	form := dom.FindFirst(wrapper, func(node *html.Node) bool { return node.Data == "form" && dom.Attr(node, "id") == "MainForm" })
