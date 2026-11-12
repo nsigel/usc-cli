@@ -181,7 +181,6 @@ export const sprites = {
     "kkkkkkkkkk",
   ],
   claude: [
-    "..........",
     "....cc....",
     ".c..cc..c.",
     "..c.cc.c..",
