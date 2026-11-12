@@ -192,67 +192,28 @@ automatically and are never accepted as command-line flags.
 
 ### LibCal reservations
 
-Leavey room discovery and schedules are public. The CLI exposes rooms and pods
-without choosing a room, start, duration, or form answer. Agents inspect the
-schedule, choose up to two hours of continuous availability, then book the exact
-selection. The client handles checkout using direct HTTP requests.
-
-`schedule` returns each category's `window_end` and
-each space's metadata plus `intervals`: `start`, `end`, `available`, and
-the original server `status`. Intervals retain the server's granularity;
-missing intervals do not imply availability. The default category is `all`.
-`--end-date` is exclusive and defaults to the next day; extend it when
-inspecting a schedule across midnight. `--min-capacity` and `--max-capacity`
-filter spaces by size.
-
-The CLI and package reject any selection longer than two hours locally with
-`libcal_duration_limit`, before making requests. This checks the selected
-reservation's duration, not cumulative usage across other reservations.
-
-Use full RFC3339 timestamps with UTC offsets, using the schedule's interval
-boundaries. The timestamps below are illustrative; choose current
-values from live responses.
+Leavey room discovery and schedules are public. `schedule` returns each space's
+`intervals` with `start`, `end`, `available`, and the server's `status`;
+`--end-date` is exclusive and defaults to the next day. `book` reserves exactly
+the space and span you name, up to two hours, and never substitutes another.
 
 ```sh
-usc libcal schedule --date 2026-10-02 --end-date 2026-10-04 --category rooms --min-capacity 6
-usc libcal book --space 31391 --start 2026-10-02T23:00:00-07:00 \
-  --end 2026-10-03T01:00:00-07:00 --accept-terms
+usc libcal schedule --date 2026-10-02 --category rooms --min-capacity 6
+usc libcal book --space 31391 --start 2026-10-02T15:00:00-07:00 \
+  --end 2026-10-02T17:00:00-07:00 --accept-terms
 ```
 
-`book` requires `--space`, `--start`, and `--end`; it never selects a
-replacement. Repeat `--field FIELD=VALUE` to supply explicit checkout answers.
-Required dropdowns without a server-selected answer must be supplied; the CLI
-never picks the first available option. Validation errors identify missing fields
-and list available choices so the agent can correct the request.
+Timestamps are RFC3339 with a UTC offset, as the schedule prints them. If
+LibCal's checkout form asks a question, the error names the field and its
+choices; answer with `--field NAME=VALUE`.
 
-LibCal only issues its SSO redirect once a booking is staged, so `book` signs
-in during checkout with the saved session or credentials. LibCal has no API that lists a patron's bookings, so the confirmation
-email is the record of a reservation; the CLI keeps no local history.
+LibCal has no API that lists a patron's bookings, so the confirmation email is
+the record of a reservation. A failed or interrupted booking releases its
+temporary hold. If a booking's outcome is unknown, further bookings are
+refused until `usc libcal release` acknowledges it.
 
 The Go package exposes `Client.Schedule(ctx, ScheduleOptions)` and
-`Client.Book(ctx, Selection, ReservationDetails)`; `Selection.Validate()` checks
-inputs without making requests.
-
-Checkout follows the form returned by SSO instead of staging the same booking
-again. Failed or interrupted commands release their temporary checkout using
-LibCal's session-end endpoint. The CLI saves unfinished checkout IDs privately
-and releases them before the next booking, with one checkout allowed at a time.
-`usc libcal release` explicitly releases unfinished CLI checkout state; it does
-not cancel confirmed reservations.
-
-Errors include an actionable `error` string and a stable `code`, including
-`libcal_slot_unavailable`, `libcal_stale_slot`, `libcal_checkout_expired`,
-`libcal_authentication_required`, `libcal_booking_limit`,
-`libcal_invalid_details`, `libcal_rate_limited`, `libcal_checkout_busy`,
-`libcal_cleanup_failed`, `libcal_selected_slot_unavailable`, and
-`libcal_booking_unknown`. If submission times out
-or the process dies during submission, check the confirmation email before
-retrying. Only then use `usc libcal release` to acknowledge the unknown result.
-Never automatically retry a submission with an unknown outcome.
-
-A hard kill or lost connection before LibCal returns a checkout ID cannot be
-recovered locally; LibCal's temporary hold expiry remains the fallback.
-
+`Client.Book(ctx, Selection, ReservationDetails)`.
 
 ### WebReg registration
 
