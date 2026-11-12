@@ -24,7 +24,7 @@ go get github.com/nsigel/usc-cli
 | `handshake` | `Open(ctx, auth.Options)` for events and career fairs |
 | `webreg` | `Open(ctx, auth.Options)` for Web Registration catalog, course bin, and checkout |
 | `libcal` | `NewPublic()` for availability; `Open(auth.Options)` for booking |
-| `classes` | `New()` for public course and section data |
+| `classes` | `New()` for the public Schedule of Classes: terms, schools, programs, courses, sections, search |
 | `auth` | `Options` for signing in; `Open(ctx, site.Name, Options)` for a raw SSO session; `SiteError` |
 | `browser` | `SyncCookies(ctx, sessionFile, target)` for Chrome CDP sync |
 | `site` | Site names used by `auth.Open` and `auth.SiteError` |
@@ -56,6 +56,33 @@ runs then need credentials only when that session has expired:
 ```go
 options.SessionFile = "/var/lib/myapp/usc-session.json"
 ```
+
+A program that keeps sessions somewhere other than a file, such as one
+encrypted row per user in a database, sets `SessionStore` instead:
+
+```go
+type SessionStore interface {
+    Load() ([]auth.StoredCookie, error) // auth.ErrSessionNotFound when nothing is stored
+    Save([]auth.StoredCookie) error
+}
+```
+
+One store holds one user's session. Sessions for different users are
+independent and can be opened and used concurrently.
+
+`classes` and `webreg` describe a section the same way (`ID`, `Type`,
+`SessionCode`, `Meetings`, `Instructors`, seat counts), and both use
+`classes.CourseCode`, whose `String()` is the canonical `CSCI-102` or
+`CSCI-794A`. A term and a course code identify a course; a term and a
+five-digit section ID identify a section. A cross-listed course is returned
+under every program that lists it, always with the code it is scheduled
+under in `Code`.
+
+`webreg.Client.Checkout` returns a preview of the pending changes, and
+`Submit` takes that preview: it re-reads checkout and returns
+`webreg.ErrCheckoutChanged`, submitting nothing, unless the sections to
+register and drop are exactly the previewed ones. WebReg's response wording
+is not a dependable success signal; read `CourseBin` afterwards.
 
 Do not use the `usc` command's `session.json` as a `SessionFile`, and give each
 concurrently running program its own file: a client is sequential and the
@@ -99,7 +126,9 @@ go run ./examples/webreg       # the newest term's course bin, same credentials
 
 | Feature |
 | --- |
-| Active terms, schools and programs, program catalogs, search, course details and section availability |
+| Terms, schools, and programs |
+| Every course and section of a program, one course, and search |
+| Section meetings, instructors, seats, clearance, link codes, prerequisites, and restrictions |
 
 ### Handshake
 
@@ -225,7 +254,9 @@ Registration is a two-step flow, as in the browser. Course-bin commands only
 plan changes: `add` places a section in myCourseBin already scheduled,
 `schedule` marks it for registration, and `unschedule` on a registered section
 marks it to be dropped. `checkout` previews exactly what would be submitted.
-`submit --preview checkout.json --confirm` re-reads checkout, refuses differences, and sends it. The result preserves server messages; verify enrollment before retrying
+`submit --preview checkout.json --confirm` re-reads checkout and submits only if
+it still lists exactly the previewed sections. Read `usc webreg bin` afterwards
+to see what was registered
 an unknown outcome.
 
 ```sh
@@ -274,8 +305,10 @@ API at `brightspace.usc.edu`. Downloads are fetched from the authenticated
 content URL returned by Brightspace; those URLs do not work without the saved
 session. The CLI does not maintain a separate local cache of course data.
 
-`usc classes` reads public course and section data from `classes.usc.edu`. It
-does not use or require the saved USC session.
+`usc classes` reads the public Schedule of Classes at `classes.usc.edu`. It
+does not use or require the saved USC session. A program's courses are read
+with the school it is listed under, both from `usc classes schools`. The
+public data has no meeting locations; `usc webreg courses` does.
 
 Handshake commands use the same operations as the student events experience at
 `usc.joinhandshake.com`.
@@ -333,11 +366,11 @@ usc handshake career-fair 65867
 | `usc webreg grade-option SECTION_ID CODE --term TERM` | Change a course-bin section's grade option. |
 | `usc webreg checkout --term TERM` | Preview pending registrations and drops without submitting. |
 | `usc webreg submit --preview FILE --confirm` | Submit checkout; changes enrollment. |
-| `usc classes terms` | List active public terms. |
-| `usc classes schools TERM_CODE` | List schools with their programs. |
-| `usc classes courses TERM_CODE SCHOOL_PREFIX PROGRAM_PREFIX` | List a program’s courses and sections. |
-| `usc classes search TERM_CODE SEARCH_TERM` | Search public courses and programs. |
-| `usc classes TERM_CODE COURSE_CODE` | Show a public Schedule of Classes course and all of its sections. |
+| `usc classes terms` | List the terms the Schedule of Classes publishes. |
+| `usc classes schools TERM_CODE` | List a term's schools with their programs. |
+| `usc classes program TERM_CODE SCHOOL_PREFIX PROGRAM_PREFIX` | List every course and section a program offers. |
+| `usc classes course TERM_CODE COURSE_CODE` | Show one course and all of its sections. |
+| `usc classes search TERM_CODE TEXT` | Search courses by code, title, description, or instructor. |
 | `usc skill` | Print the bundled `SKILL.md` for use with agent skill systems. |
 | `usc version` | Print the module version and commit this binary was built from. |
 
@@ -362,76 +395,3 @@ Only `usc auth login` prompts for input.
 ## License
 
 MIT. See [LICENSE](LICENSE).
-
-
-### Public catalog and caller-owned sessions
-
-```sh
-usc classes terms
-usc classes schools 20271
-usc classes courses 20271 ENGV CSCI
-usc classes search 20271 algorithms
-usc classes 20271 CSCI-104
-usc webreg checkout --term 20271 > checkout.json
-# Only after reviewing every action and section in that file:
-usc webreg submit --preview checkout.json --confirm
-```
-
-`classes.Client` exposes `Terms(ctx) ([]Term, error)`,
-`Schools(ctx, termCode) ([]School, error)`,
-`Courses(ctx, termCode, schoolPrefix, programPrefix) ([]Course, error)`,
-`Search(ctx, termCode, searchTerm) (SearchResult, error)`, and
-`Course(ctx, termCode, courseCode) (Course, error)`. All arguments after ctx
-are strings. School is required: omitting it returned no CSCI courses live.
-
-Catalog course identity is `(term_code, scheduled_course_code.course_hyphen)`;
-`code` uses that same hyphenated form, including USC's sequence suffix when
-present, excluding decorative suffixes such as `Lg`. Published course codes
-preserve each cross-listing's name; do not deduplicate by published code.
-Term codes are strings, section IDs are integers in both packages. Section
-identity is `(term_code, id)`. Meeting times use 24-hour `HH:MM`, days use
-`Mon` through `Sun`, and clearance uses `R` or `D`. WebReg's raw times and days
-remain available alongside its structured `schedule`. Public location data
-only exposes `section_location_sequence_number`, not a building or room.
-Restrictions and prerequisite/corequisite option groups preserve USC's logic.
-`max_units` is USC's nullable decimal text; section units retain its decimal
-text rather than introducing display formatting.
-
-`webreg.Client.Submit(ctx, expected Checkout) (*CheckoutResult, error)` accepts
-an approved preview. It compares the fresh preview, including a fingerprint
-of non-CSRF form fields, before posting. Unknown actions are rejected.
-`CheckoutAction` has `Register` and `Drop` values. Consumers allowing only
-registration must reject every group whose action is not `Register` and
-compare every section against their requested IDs. Comparison uses the set of
-(action, section ID) pairs and non-token form fields; changes to live seat
-counts or display text do not invalidate approval. Differences return
-`webreg.ErrCheckoutChanged`. USC has no
-verified conditional-submit primitive, so another writer can race the final
-read and POST. Own the session exclusively. Never retry an uncertain POST
-without checking enrollment. `CheckoutResult.Outcome` is `CheckoutUnknown`;
-status prose is preserved but is not evidence of success or atomic failure.
-No submission was made during development.
-
-`auth.Options.SessionStore` accepts:
-
-```go
-type SessionStore interface {
-    Load() ([]auth.StoredCookie, error)
-    Save([]auth.StoredCookie) error
-}
-```
-
-Load returns `auth.ErrSessionNotFound` for an absent session. Implementations
-own encryption and storage, must not log cookies, and must coordinate writers.
-Use a distinct store for each user. `auth.FileSessionStore{Path: path}` provides
-the CLI's versioned private file format. `SessionFile` remains supported;
-setting both options is an error. Cookies are saved after successful
-Authenticate; ordinary Do calls do not persist automatically. Auth owns its
-HTTP client, cookie jar, and credentials per Session; compiled patterns and
-error sentinels are the only shared package values. Each Session is sequential;
-independent sessions can run concurrently. Shared credentials files still
-need caller coordination when rejected secrets are removed.
-
-Examples: `go run ./examples/classes` lists active-term schools;
-`go run -race ./examples/session-store` opens two independent memory-backed
-sessions from saved cookies without printing or rewriting those cookies.

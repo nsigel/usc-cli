@@ -3,25 +3,26 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"github.com/nsigel/usc-cli/classes"
+	"log"
 	"os"
+	"time"
+
+	"github.com/nsigel/usc-cli/classes"
 )
 
 func main() {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
 	client := classes.New()
 	terms, err := client.Terms(ctx)
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
-	if len(terms) == 0 {
-		return
-	}
-	schools, err := client.Schools(ctx, terms[0].TermCode)
+	schools, err := client.Schools(ctx, terms[0].Code)
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 	if err := json.NewEncoder(os.Stdout).Encode(schools); err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 }

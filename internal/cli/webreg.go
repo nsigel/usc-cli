@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 
+	"github.com/nsigel/usc-cli/classes"
 	"github.com/nsigel/usc-cli/webreg"
 	"github.com/spf13/cobra"
 )
@@ -65,8 +66,7 @@ func webregProgramsCommand() *cobra.Command {
 }
 
 func webregCoursesCommand() *cobra.Command {
-	var term string
-	var query webreg.CourseQuery
+	var term, programPrefix, courseCode string
 	cmd := &cobra.Command{
 		Use: "courses", Short: "List a program's courses or one course with sections", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -74,16 +74,27 @@ func webregCoursesCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			courses, err := client.Courses(cmd.Context(), term, query)
+			if programPrefix != "" {
+				courses, err := client.ProgramCourses(cmd.Context(), term, programPrefix)
+				if err != nil {
+					return err
+				}
+				return writeJSON(cmd, courses)
+			}
+			code, err := classes.ParseCourseCode(courseCode)
 			if err != nil {
 				return err
 			}
-			return writeJSON(cmd, courses)
+			course, err := client.Course(cmd.Context(), term, code)
+			if err != nil {
+				return err
+			}
+			return writeJSON(cmd, course)
 		},
 	}
 	addTermFlag(cmd, &term)
-	cmd.Flags().StringVar(&query.Program, "program", "", "program code, e.g. BUAD")
-	cmd.Flags().StringVar(&query.Course, "course", "", "course code, e.g. BUAD-302")
+	cmd.Flags().StringVar(&programPrefix, "program", "", "program prefix, e.g. BUAD")
+	cmd.Flags().StringVar(&courseCode, "course", "", "course code, e.g. BUAD-302")
 	cmd.MarkFlagsOneRequired("program", "course")
 	cmd.MarkFlagsMutuallyExclusive("program", "course")
 	return cmd
@@ -129,12 +140,12 @@ func webregCalendarCommand() *cobra.Command {
 	return cmd
 }
 
-func webregSectionCommand(use, short string, action func(*webreg.Client, context.Context, string, int) error) *cobra.Command {
+func webregSectionCommand(use, short string, action func(*webreg.Client, context.Context, string, string) error) *cobra.Command {
 	var term string
 	cmd := &cobra.Command{
 		Use: use + " SECTION_ID", Short: short, Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id, err := positiveID(args[0], "SECTION_ID")
+			sectionID, err := classes.ParseSectionID(args[0])
 			if err != nil {
 				return err
 			}
@@ -142,7 +153,7 @@ func webregSectionCommand(use, short string, action func(*webreg.Client, context
 			if err != nil {
 				return err
 			}
-			if err := action(client, cmd.Context(), term, id); err != nil {
+			if err := action(client, cmd.Context(), term, sectionID); err != nil {
 				return err
 			}
 			return writeJSON(cmd, map[string]bool{"ok": true})
@@ -157,7 +168,7 @@ func webregGradeOptionCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use: "grade-option SECTION_ID CODE", Short: "Change a course-bin section's grade option (codes from usc webreg bin)", Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id, err := positiveID(args[0], "SECTION_ID")
+			sectionID, err := classes.ParseSectionID(args[0])
 			if err != nil {
 				return err
 			}
@@ -165,7 +176,7 @@ func webregGradeOptionCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			response, err := client.SetGradeOption(cmd.Context(), term, id, args[1])
+			response, err := client.SetGradeOption(cmd.Context(), term, sectionID, args[1])
 			if err != nil {
 				return err
 			}
@@ -217,14 +228,14 @@ func webregSubmitCommand() *cobra.Command {
 			if err := json.Unmarshal(data, &preview); err != nil {
 				return err
 			}
-			result, err := client.Submit(cmd.Context(), preview)
+			result, err := client.Submit(cmd.Context(), &preview)
 			if err != nil {
 				return err
 			}
 			return writeJSON(cmd, result)
 		},
 	}
-	cmd.Flags().StringVar(&previewFile, "preview", "", "JSON checkout preview to submit")
+	cmd.Flags().StringVar(&previewFile, "preview", "", "file holding the output of usc webreg checkout that you reviewed")
 	_ = cmd.MarkFlagRequired("preview")
 	cmd.Flags().BoolVar(&confirm, "confirm", false, "confirm the enrollment change shown by usc webreg checkout")
 	return cmd

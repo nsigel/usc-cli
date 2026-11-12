@@ -52,3 +52,16 @@ gofmt -l .
 go vet ./...
 go build ./cmd/usc
 ```
+
+## Before opening a pull request
+
+Every time, in this order:
+
+1. Run the comment-sicko pass in `.claude/agents/comment-sicko.md` over the
+   diff against `main`: spawn it as a subagent where the harness supports
+   that, otherwise read the file and carry out its instructions yourself.
+   Delete what it condemns and fix every `MUST KILL` it flags.
+2. Verify the change live: run the checks under Verify, then exercise the
+   behaviour you changed for real and confirm it works.
+3. If the change is visual, capture screenshots of it and attach them to the
+   pull request with the `gh` CLI (it uploads attachments natively).

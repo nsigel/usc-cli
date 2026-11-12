@@ -3,10 +3,13 @@ package webreg
 import (
 	"context"
 	"errors"
-	"github.com/nsigel/usc-cli/internal/dom"
+	"fmt"
 	"net/url"
 	"strconv"
 	"strings"
+
+	"github.com/nsigel/usc-cli/classes"
+	"github.com/nsigel/usc-cli/internal/dom"
 
 	"golang.org/x/net/html"
 )
@@ -87,43 +90,53 @@ func (c *Client) Programs(ctx context.Context, term string) ([]School, error) {
 	return schools, nil
 }
 
-// CourseQuery selects WebReg catalog courses. Set exactly one field.
-type CourseQuery struct {
-	Program string // subject code, e.g. BUAD
-	Course  string // course code, e.g. BUAD-302
-}
-
 const maxCoursePages = 40
 
-// Courses lists a term's courses for a program or a single course code,
-// following WebReg's pagination. Each section reports whether it is already
-// in the course bin.
-func (c *Client) Courses(ctx context.Context, term string, query CourseQuery) ([]Course, error) {
-	values := url.Values{}
-	switch {
-	case query.Program != "" && query.Course != "":
-		return nil, errors.New("set either a program or a course, not both")
-	case query.Program != "":
-		values.Set("Program", strings.ToUpper(strings.TrimSpace(query.Program)))
-	case query.Course != "":
-		values.Set("Course", normalizeCourseCode(query.Course))
-	default:
-		return nil, errors.New("a program or course is required")
+// ProgramCourses lists the courses a program offers in a term, following
+// WebReg's pagination. Each section reports whether it is already in the
+// course bin.
+func (c *Client) ProgramCourses(ctx context.Context, term, programPrefix string) ([]Course, error) {
+	programPrefix = strings.ToUpper(strings.TrimSpace(programPrefix))
+	if programPrefix == "" {
+		return nil, errors.New("a program prefix is required")
 	}
+	return c.courses(ctx, term, url.Values{"Program": {programPrefix}})
+}
+
+// Course returns one course in a term with its sections, each reporting
+// whether it is already in the course bin.
+func (c *Client) Course(ctx context.Context, term string, code classes.CourseCode) (Course, error) {
+	courses, err := c.courses(ctx, term, url.Values{"Course": {code.String()}})
+	if err != nil {
+		return Course{}, err
+	}
+	for _, course := range courses {
+		if course.Code.String() == code.String() {
+			return course, nil
+		}
+	}
+	return Course{}, fmt.Errorf("WebReg lists no course %s in term %s", code, term)
+}
+
+func (c *Client) courses(ctx context.Context, term string, query url.Values) ([]Course, error) {
 	if err := c.SelectTerm(ctx, term); err != nil {
 		return nil, err
 	}
 	courses := []Course{}
 	for page := 1; page <= maxCoursePages; page++ {
 		if page > 1 {
-			values.Set("pageNumber", strconv.Itoa(page))
+			query.Set("pageNumber", strconv.Itoa(page))
 		}
-		data, err := c.page(ctx, "/Courses?"+values.Encode(), "/Departments")
+		data, err := c.page(ctx, "/Courses?"+query.Encode(), "/Departments")
 		if err != nil {
 			return nil, err
 		}
 		document := dom.Parse(data)
-		courses = append(courses, parseCourses(document)...)
+		pageCourses, err := parseCourses(document)
+		if err != nil {
+			return nil, err
+		}
+		courses = append(courses, pageCourses...)
 		next := dom.FindFirst(document, func(node *html.Node) bool {
 			return node.Data == "a" && dom.Attr(node, "rel") == "next" && dom.Attr(node, "href") != ""
 		})
@@ -131,13 +144,5 @@ func (c *Client) Courses(ctx context.Context, term string, query CourseQuery) ([
 			return courses, nil
 		}
 	}
-	return courses, nil
-}
-
-func normalizeCourseCode(code string) string {
-	code = strings.ToUpper(strings.TrimSpace(code))
-	if fields := strings.Fields(code); len(fields) == 2 {
-		return fields[0] + "-" + fields[1]
-	}
-	return code
+	return nil, fmt.Errorf("WebReg listed more than %d pages of courses", maxCoursePages)
 }

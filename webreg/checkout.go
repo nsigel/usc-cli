@@ -2,270 +2,228 @@ package webreg
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
-	"github.com/nsigel/usc-cli/internal/dom"
+	"fmt"
+	"maps"
 	"net/url"
 	"strings"
 
+	"github.com/nsigel/usc-cli/classes"
+	"github.com/nsigel/usc-cli/internal/dom"
 	"golang.org/x/net/html"
 )
 
-// Checkout is the pending registration WebReg will submit for a term:
-// scheduled, unregistered sections to add and unscheduled, registered
-// sections to drop, grouped as WebReg presents them.
-type Checkout struct {
-	FormFingerprint string          `json:"form_fingerprint"`
-	Term            string          `json:"term"`
-	Ready           bool            `json:"ready"`
-	Message         string          `json:"message,omitempty"`
-	Groups          []CheckoutGroup `json:"groups"`
-}
-
-// CheckoutGroup is one checkout heading, e.g. Action "REGISTER", and its courses.
-type CheckoutGroup struct {
-	Action  CheckoutAction `json:"action"`
-	Heading string         `json:"heading"`
-	Courses []Course       `json:"courses"`
-}
-
-// CheckoutResult preserves the response without inferring enrollment from prose.
-// WebReg wording is not a reliable success signal. Confirm registration by
-// reading CourseBin and checking each section's Registered state.
-type CheckoutResult struct {
-	Term     string          `json:"term"`
-	Outcome  CheckoutOutcome `json:"outcome"`
-	Status   string          `json:"status"`
-	Messages []string        `json:"messages,omitempty"`
-}
-
-// Checkout previews the changes Submit would send. It changes nothing.
-func (c *Client) Checkout(ctx context.Context, term string) (*Checkout, error) {
-	checkout, _, err := c.checkout(ctx, term)
-	return checkout, err
-}
-
-func (c *Client) checkout(ctx context.Context, term string) (*Checkout, url.Values, error) {
-	if err := c.SelectTerm(ctx, term); err != nil {
-		return nil, nil, err
-	}
-	data, err := c.page(ctx, "/Checkout", "/CourseBin")
-	if err != nil {
-		return nil, nil, err
-	}
-	document := dom.Parse(data)
-	wrapper := dom.FindFirst(document, dom.Class("div", "content-wrapper-regconfirm"))
-	if wrapper == nil {
-		return nil, nil, errors.New("WebReg checkout page has an unexpected layout")
-	}
-	checkout := &Checkout{Term: term, Groups: []CheckoutGroup{}}
-	if message := dom.FindFirst(wrapper, dom.Tag("h6")); message != nil {
-		checkout.Message = text(message)
-	}
-	for _, node := range dom.FindAll(wrapper, func(node *html.Node) bool {
-		return node.Data == "h5" && dom.HasClass(node, "RegAdDrpTitl") || node.Data == "div" && dom.HasClass(node, "course-header")
-	}) {
-		if node.Data == "h5" {
-			heading := text(node)
-			if checkoutAction(heading) == "" {
-				return nil, nil, errors.New("WebReg checkout contains an unknown action")
-			}
-			checkout.Groups = append(checkout.Groups, CheckoutGroup{Action: checkoutAction(heading), Heading: heading, Courses: []Course{}})
-			continue
-		}
-		course, ok := parseCourse(node)
-		if !ok {
-			return nil, nil, errors.New("WebReg checkout contains an unreadable course")
-		}
-		if len(checkout.Groups) == 0 {
-			return nil, nil, errors.New("WebReg checkout course has no action")
-		}
-		group := &checkout.Groups[len(checkout.Groups)-1]
-		group.Courses = append(group.Courses, course)
-	}
-
-	parsedSections := 0
-	seen := map[int]bool{}
-	for _, group := range checkout.Groups {
-		for _, course := range group.Courses {
-			if len(course.Sections) == 0 {
-				return nil, nil, errors.New("WebReg checkout course has no readable sections")
-			}
-			for _, section := range course.Sections {
-				if section.ID <= 0 || seen[section.ID] {
-					return nil, nil, errors.New("WebReg checkout contains an invalid or duplicate section")
-				}
-				seen[section.ID] = true
-				parsedSections++
-			}
-		}
-	}
-	if parsedSections != len(dom.FindAll(wrapper, dom.Class("div", "section"))) {
-		return nil, nil, errors.New("WebReg checkout contains unreadable sections")
-	}
-
-	form := dom.FindFirst(wrapper, func(node *html.Node) bool { return node.Data == "form" && dom.Attr(node, "id") == "MainForm" })
-	if form == nil {
-		return checkout, nil, nil
-	}
-	values := url.Values{}
-	for name, value := range formFields(form) {
-		if name != "btnSubmit" {
-			values.Set(name, value)
-		}
-	}
-	comparison := url.Values{}
-	for key, value := range values {
-		if key != tokenField {
-			comparison[key] = value
-		}
-	}
-	digest := sha256.Sum256([]byte(comparison.Encode()))
-	checkout.FormFingerprint = hex.EncodeToString(digest[:])
-	checkout.Ready = values.Get(tokenField) != "" && parsedSections > 0
-	return checkout, values, nil
-}
-
+// CheckoutAction is what checkout will do with a section.
 type CheckoutAction string
 
 const (
-	Register CheckoutAction = "register"
-	Drop     CheckoutAction = "drop"
+	// CheckoutRegister registers a scheduled section the student is not yet
+	// registered in.
+	CheckoutRegister CheckoutAction = "register"
+	// CheckoutDrop drops a registered section the student unscheduled.
+	CheckoutDrop CheckoutAction = "drop"
 )
 
-type CheckoutOutcome string
-
-const CheckoutUnknown CheckoutOutcome = "unknown"
-
-func checkoutAction(heading string) CheckoutAction {
-	switch strings.TrimSpace(heading) {
-	case "You are about to REGISTER for the following sections:":
-		return Register
-	case "You are about to DROP the following sections:":
-		return Drop
-	default:
-		return ""
-	}
+var checkoutActionsByHeading = map[string]CheckoutAction{
+	"You are about to REGISTER for the following sections:": CheckoutRegister,
+	"You are about to DROP the following sections:":         CheckoutDrop,
 }
 
-// ErrCheckoutChanged reports that the pending actions or submitted form no longer
-// match the approved checkout preview.
-var ErrCheckoutChanged = errors.New("WebReg pending changes differ from the approved checkout preview")
+// Checkout is a preview of the registration changes WebReg has pending for a
+// term. Pass it to Submit to make exactly these changes. A preview survives a
+// JSON round trip, so it can be shown, approved, and submitted later.
+type Checkout struct {
+	Term string `json:"term"`
+	// Message is WebReg's notice above the changes, such as why nothing can
+	// be submitted.
+	Message string `json:"message,omitempty"`
+	// Changes is empty when there is nothing to submit.
+	Changes []CheckoutChange `json:"changes"`
 
-// sameCheckoutChanges deliberately excludes presentation and live enrollment
-// counts. Neither changes the action the student approved.
-func sameCheckoutChanges(current, expected Checkout) bool {
-	if current.Term != expected.Term || current.FormFingerprint != expected.FormFingerprint {
-		return false
-	}
-
-	type sectionChange struct {
-		Action    CheckoutAction
-		SectionID int
-	}
-
-	collectChanges := func(checkout Checkout) (map[sectionChange]bool, bool) {
-		changes := make(map[sectionChange]bool)
-		for _, group := range checkout.Groups {
-			if group.Action != Register && group.Action != Drop {
-				return nil, false
-			}
-
-			for _, course := range group.Courses {
-				for _, section := range course.Sections {
-					change := sectionChange{Action: group.Action, SectionID: section.ID}
-					if section.ID <= 0 || changes[change] {
-						return nil, false
-					}
-
-					changes[change] = true
-				}
-			}
-		}
-
-		return changes, true
-	}
-
-	currentChanges, currentValid := collectChanges(current)
-	expectedChanges, expectedValid := collectChanges(expected)
-	if !currentValid || !expectedValid || len(currentChanges) != len(expectedChanges) {
-		return false
-	}
-
-	for change := range expectedChanges {
-		if !currentChanges[change] {
-			return false
-		}
-	}
-
-	return true
+	submitForm url.Values
 }
 
-// Submit registers and drops the sections Checkout lists. This is the same
-// irreversible action as WebReg's Submit button. Callers should show the
-// preview from Checkout and obtain the student's confirmation first.
-// The server has no conditional-submit primitive: another client can still
-// change the bin between the final read and POST. Use exclusive session ownership.
-func (c *Client) Submit(ctx context.Context, expected Checkout) (*CheckoutResult, error) {
-	term := expected.Term
-	if !expected.Ready {
-		return nil, errors.New("checkout preview is not ready")
-	}
-	for _, group := range expected.Groups {
-		if group.Action != Register && group.Action != Drop {
-			return nil, errors.New("unknown checkout action")
-		}
-	}
+// CheckoutChange is one section checkout will register or drop.
+type CheckoutChange struct {
+	Action      CheckoutAction     `json:"action"`
+	CourseCode  classes.CourseCode `json:"course_code"`
+	CourseTitle string             `json:"course_title"`
+	Section     Section            `json:"section"`
+}
 
-	checkout, form, err := c.checkout(ctx, term)
+// CheckoutResult is the page WebReg answers a submission with.
+//
+// WebReg's wording is not a dependable success signal, and it does not process
+// partial registrations. To know what happened, read CourseBin afterwards and
+// check each section's CourseBin.Registered.
+type CheckoutResult struct {
+	Term     string   `json:"term"`
+	Status   string   `json:"status"`
+	Messages []string `json:"messages,omitempty"`
+}
+
+// ErrCheckoutChanged means WebReg's pending changes are no longer the ones in
+// the preview given to Submit. Nothing was submitted.
+var ErrCheckoutChanged = errors.New("WebReg's pending changes differ from the checkout preview")
+
+// Checkout previews the changes Submit would make. It changes nothing.
+func (c *Client) Checkout(ctx context.Context, term string) (*Checkout, error) {
+	if err := c.SelectTerm(ctx, term); err != nil {
+		return nil, err
+	}
+	data, err := c.page(ctx, "/Checkout", "/CourseBin")
 	if err != nil {
 		return nil, err
 	}
-	if !sameCheckoutChanges(*checkout, expected) {
+	wrapper := dom.FindFirst(dom.Parse(data), dom.Class("div", "content-wrapper-regconfirm"))
+	if wrapper == nil {
+		return nil, errors.New("WebReg checkout page has an unexpected layout")
+	}
+
+	checkout := &Checkout{Term: term, Changes: []CheckoutChange{}}
+	if message := dom.FindFirst(wrapper, dom.Tag("h6")); message != nil {
+		checkout.Message = text(message)
+	}
+	if checkout.Changes, err = parseCheckoutChanges(wrapper); err != nil {
+		return nil, err
+	}
+
+	form := dom.FindFirst(wrapper, func(node *html.Node) bool {
+		return node.Data == "form" && dom.Attr(node, "id") == "MainForm"
+	})
+	if form == nil {
+		if len(checkout.Changes) > 0 {
+			return nil, errors.New("WebReg checkout lists changes but no form to submit them")
+		}
+		return checkout, nil
+	}
+	checkout.submitForm = url.Values{}
+	for name, value := range formFields(form) {
+		if name != "btnSubmit" {
+			checkout.submitForm.Set(name, value)
+		}
+	}
+	if activeTerm := checkout.submitForm.Get("activeTerm"); activeTerm != "" && activeTerm != term {
+		return nil, fmt.Errorf("WebReg checkout is for term %s, not %s", activeTerm, term)
+	}
+	return checkout, nil
+}
+
+func parseCheckoutChanges(wrapper *html.Node) ([]CheckoutChange, error) {
+	changes := []CheckoutChange{}
+	var action CheckoutAction
+	headingsAndCourses := dom.FindAll(wrapper, func(node *html.Node) bool {
+		return node.Data == "h5" && dom.HasClass(node, "RegAdDrpTitl") ||
+			node.Data == "div" && dom.HasClass(node, "course-header")
+	})
+	for _, node := range headingsAndCourses {
+		if node.Data == "h5" {
+			heading := text(node)
+			known := false
+			if action, known = checkoutActionsByHeading[heading]; !known {
+				return nil, fmt.Errorf("WebReg checkout has an unknown action heading %q", heading)
+			}
+			continue
+		}
+		if action == "" {
+			return nil, errors.New("WebReg checkout lists a course before any action heading")
+		}
+		course, err := parseCourse(node)
+		if err != nil {
+			return nil, err
+		}
+		for _, section := range course.Sections {
+			changes = append(changes, CheckoutChange{
+				Action:      action,
+				CourseCode:  course.Code,
+				CourseTitle: course.Title,
+				Section:     section,
+			})
+		}
+	}
+	if err := requireEverySectionPreviewed(wrapper, changes); err != nil {
+		return nil, err
+	}
+	return changes, nil
+}
+
+func requireEverySectionPreviewed(wrapper *html.Node, changes []CheckoutChange) error {
+	sectionRows := len(dom.FindAll(wrapper, dom.Class("div", "section")))
+	if sectionRows != len(changes) {
+		return fmt.Errorf("WebReg checkout shows %d sections but %d could be read", sectionRows, len(changes))
+	}
+	return nil
+}
+
+// Submit makes exactly the changes in preview: it registers and drops real
+// classes and cannot be undone. It reads checkout again first and returns
+// ErrCheckoutChanged, submitting nothing, if the sections to register and
+// drop have changed since the preview.
+//
+// WebReg has no conditional submit, so a change made by another signed-in
+// browser between that read and the post is not caught; use a session nothing
+// else is using.
+func (c *Client) Submit(ctx context.Context, preview *Checkout) (*CheckoutResult, error) {
+	if preview == nil || len(preview.Changes) == 0 {
+		return nil, errors.New("the checkout preview has no changes to submit")
+	}
+	current, err := c.Checkout(ctx, preview.Term)
+	if err != nil {
+		return nil, err
+	}
+	if !current.sameChangesAs(preview) {
 		return nil, ErrCheckoutChanged
 	}
-	if !checkout.Ready {
-		message := "WebReg has no pending registration changes for term " + term
-		if checkout.Message != "" {
-			message += ": " + checkout.Message
-		}
-		return nil, errors.New(message)
+	if current.submitForm.Get(tokenField) == "" {
+		return nil, errors.New("WebReg checkout did not provide a request verification token")
 	}
-	if form.Get("activeTerm") != "" && form.Get("activeTerm") != term {
-		return nil, errors.New("WebReg checkout is for term " + form.Get("activeTerm") + ", not " + term)
-	}
-	data, err := c.postForm(ctx, "/CheckoutResponse", form, "/Checkout")
+	data, err := c.postForm(ctx, "/CheckoutResponse", current.submitForm, "/Checkout")
 	if err != nil {
 		return nil, err
 	}
-	return parseCheckoutResult(term, data)
+	return parseCheckoutResult(preview.Term, data)
+}
+
+func (checkout *Checkout) sameChangesAs(other *Checkout) bool {
+	return checkout.Term == other.Term &&
+		maps.Equal(checkout.actionsBySectionID(), other.actionsBySectionID())
+}
+
+func (checkout *Checkout) actionsBySectionID() map[string]CheckoutAction {
+	actions := make(map[string]CheckoutAction, len(checkout.Changes))
+	for _, change := range checkout.Changes {
+		actions[change.Section.ID] = change.Action
+	}
+	return actions
 }
 
 func parseCheckoutResult(term string, data []byte) (*CheckoutResult, error) {
-	document := dom.Parse(data)
-	wrapper := dom.FindFirst(document, dom.Class("div", "content-wrapper-regconfirm"))
+	wrapper := dom.FindFirst(dom.Parse(data), dom.Class("div", "content-wrapper-regconfirm"))
 	if wrapper == nil {
-		return nil, errors.New("WebReg returned an unexpected checkout response; check myCourseBin before retrying")
+		return nil, errors.New("WebReg returned an unexpected checkout response; read the course bin before retrying")
 	}
-	result := &CheckoutResult{Term: term, Outcome: CheckoutUnknown}
+	result := &CheckoutResult{Term: term}
 	if status := dom.FindFirst(wrapper, dom.Tag("b")); status != nil {
 		result.Status = text(status)
 	}
 	heading := dom.FindFirst(wrapper, dom.Tag("h3"))
-	var walk func(*html.Node)
-	walk = func(node *html.Node) {
+	var collectMessages func(*html.Node)
+	collectMessages = func(node *html.Node) {
 		for child := node.FirstChild; child != nil; child = child.NextSibling {
-			if child == heading || child.Type == html.ElementNode && child.Data == "b" && text(child) == result.Status {
+			isStatus := child.Type == html.ElementNode && child.Data == "b" && text(child) == result.Status
+			if child == heading || isStatus {
 				continue
 			}
-			if child.Type == html.ElementNode && (child.Data == "div" || child.Data == "span" || child.Data == "p" || child.Data == "li") && dom.FindFirst(child, dom.Tag("div")) == nil {
+			isTextBlock := child.Type == html.ElementNode &&
+				strings.Contains(" div span p li ", " "+child.Data+" ") &&
+				dom.FindFirst(child, dom.Tag("div")) == nil
+			if isTextBlock {
 				result.Messages = append(result.Messages, lines(child)...)
 				continue
 			}
-			walk(child)
+			collectMessages(child)
 		}
 	}
-	walk(wrapper)
+	collectMessages(wrapper)
 	return result, nil
 }
