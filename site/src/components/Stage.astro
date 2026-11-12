@@ -72,6 +72,7 @@ const first = scenarios[0];
     <div class="chat-bar">
       <Sprite name="claude" scale={2} class="icon-claude" />
       <Sprite name="codex" scale={2} class="icon-codex" />
+      <Sprite name="grok" scale={2} class="icon-grok" />
       <span class="agent" data-agent-name>Claude Code</span>
     </div>
     <div class="log" data-log></div>
@@ -93,6 +94,7 @@ const first = scenarios[0];
   const agents = [
     { id: "claude", name: "Claude Code" },
     { id: "codex", name: "Codex" },
+    { id: "grok", name: "Grok" },
   ];
 
   let run = 0;
@@ -601,8 +603,9 @@ const first = scenarios[0];
     font-weight: 600;
   }
 
-  .chat[data-agent="claude"] :global(.icon-codex),
-  .chat[data-agent="codex"] :global(.icon-claude) {
+  .chat:not([data-agent="claude"]) :global(.icon-claude),
+  .chat:not([data-agent="codex"]) :global(.icon-codex),
+  .chat:not([data-agent="grok"]) :global(.icon-grok) {
     display: none;
   }
 

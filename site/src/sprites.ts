@@ -208,6 +208,18 @@ export const sprites = {
     "knnnnnnnnk",
     "kkkkkkkkkk",
   ],
+  grok: [
+    "kkkkkkkkkk",
+    "kwwwwwwwwk",
+    "kwwwwwwkwk",
+    "kwwwwwkwwk",
+    "kwwwwkwwwk",
+    "kwwwkwwwwk",
+    "kwwkwwwwwk",
+    "kwkwwwwwwk",
+    "kwwwwwwwwk",
+    "kkkkkkkkkk",
+  ],
 } satisfies Record<string, string[]>;
 
 export type SpriteName = keyof typeof sprites;

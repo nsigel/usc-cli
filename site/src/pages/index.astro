@@ -44,7 +44,7 @@ const sites: { sprite: SpriteName; name: string; does: string; docs: string }[] 
 
 <Base
   title="usc.sh: USC for your agent"
-  description="A command-line client for Brightspace, WebReg, Handshake, and Leavey Library rooms that Claude Code, Codex, or any agent with a terminal can use."
+  description="A command-line client for Brightspace, WebReg, Handshake, and Leavey Library rooms that Claude Code, Codex, Grok, or any agent with a terminal can use."
 >
   <main>
     <section class="wrap hero">
@@ -57,7 +57,7 @@ const sites: { sprite: SpriteName; name: string; does: string; docs: string }[] 
 
         <div class="cta">
           <Sprite name="trojan" scale={3} class="mascot" />
-          <div class="cta-label">Paste into Claude Code or Codex</div>
+          <div class="cta-label"><Sprite name="claude" scale={2} />Ask your favorite agent:</div>
           <div class="prompt">
             <code>{prompt}</code>
             <button class="copy-button" data-copy={prompt}>Copy</button>
@@ -180,6 +180,9 @@ const sites: { sprite: SpriteName; name: string; does: string; docs: string }[] 
   }
 
   .cta-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     padding: 10px 18px;
     border-bottom: 1px solid #3a3833;
     font-size: 12px;
