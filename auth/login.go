@@ -15,12 +15,17 @@ import (
 
 var (
 	// ErrCredentialsRequired means the saved session cannot reach the target
-	// without a fresh USC login.
-	ErrCredentialsRequired = errors.New("credentials are required")
-	// ErrBypassRejected means Duo did not accept the supplied bypass code.
-	ErrBypassRejected = errors.New("bypass code was rejected")
+	// and no complete credentials were supplied for a fresh USC login.
+	ErrCredentialsRequired = errors.New("USC sign-in is required")
 	// ErrPasswordRejected means USC did not accept the username and password.
 	ErrPasswordRejected = errors.New("USC rejected the username or password")
+	// ErrBypassRejected means Duo did not accept the supplied bypass code.
+	ErrBypassRejected = errors.New("Duo rejected the bypass code")
+	// ErrSessionInvalid means a site stopped accepting its session after the
+	// client was opened. Open a new client.
+	ErrSessionInvalid = errors.New("session expired")
+	// ErrSessionNotFound means there is no saved session file.
+	ErrSessionNotFound = errors.New("no saved session")
 )
 
 // Credentials are used only when an existing session cannot reach the target.
@@ -30,7 +35,7 @@ type Credentials struct {
 	BypassCode string // current Duo bypass code
 }
 
-// Complete reports whether a fresh SSO login can proceed without prompting.
+// Complete reports whether a fresh SSO login can proceed.
 func (c Credentials) Complete() bool {
 	return c.Username != "" && c.Password != "" && c.BypassCode != ""
 }
@@ -41,36 +46,6 @@ type authenticator struct {
 	duoClientHintUA string
 	saml2Request    string
 	microsoft       map[string]string
-}
-
-// Login restores the cookies in sessionFile and opens target. If USC requests
-// a fresh login, Login submits credentials through the USC, Microsoft, and Duo
-// flow. A successful call atomically persists the resulting cookie jar.
-//
-// Target must be an absolute HTTPS URL. A missing session file is treated as
-// an empty session. Login returns ErrCredentialsRequired when the session is
-// insufficient and credentials is incomplete, ErrPasswordRejected when USC
-// rejects the password, and ErrBypassRejected when Duo rejects the bypass code.
-func Login(ctx context.Context, target, sessionFile string, credentials Credentials) error {
-	return login(ctx, target, sessionFile, credentials, false)
-}
-
-// LoginFresh ignores the saved session before authenticating and replaces it
-// only after the requested application has been reached successfully.
-func LoginFresh(ctx context.Context, target, sessionFile string, credentials Credentials) error {
-	return login(ctx, target, sessionFile, credentials, true)
-}
-
-func login(ctx context.Context, target, sessionFile string, credentials Credentials, fresh bool) error {
-	session, err := OpenSession(sessionFile, SessionOptions{Fresh: fresh, AllowMissing: true})
-	if err != nil {
-		return err
-	}
-	response, err := session.Authenticate(ctx, target, credentials, "")
-	if response != nil {
-		response.Body.Close()
-	}
-	return err
 }
 
 func (a *authenticator) open(ctx context.Context, target string, credentials Credentials, initialReferer *url.URL) (*page, error) {
@@ -225,9 +200,6 @@ func needsMicrosoftReload(page *page) bool {
 func noContinuation(page *page) error {
 	if isMicrosoftPage(page) {
 		return fmt.Errorf("microsoft page has no form or supported redirect (title: %q)", pageTitle(page.Body))
-	}
-	if page.URL.Hostname() == "libcal.usc.edu" {
-		return fmt.Errorf("no safe continuation for %s%s (HTTP %d, content type %q, %d-byte body)", page.URL.Host, page.URL.Path, page.Status, page.Header.Get("Content-Type"), len(page.Body))
 	}
 	return fmt.Errorf("no safe continuation for %s%s (HTTP %d)", page.URL.Host, page.URL.Path, page.Status)
 }

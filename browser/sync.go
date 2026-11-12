@@ -40,8 +40,3 @@ func SyncCookies(ctx context.Context, sessionFile, target string) (*SyncResult, 
 		Skipped:   converted.Skipped,
 	}, nil
 }
-
-// DefaultTarget returns the default CDP target when neither --cdp nor USC_CDP is set.
-func DefaultTarget() string {
-	return defaultCDPTarget
-}

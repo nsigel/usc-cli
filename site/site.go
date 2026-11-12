@@ -1,69 +1,34 @@
-// Package site describes the USC systems supported by the CLI.
+// Package site names the USC systems the clients sign in to.
 package site
 
 import "fmt"
 
-// Name is the stable command-line name of a USC site.
+// Name identifies a USC site in errors and sign-in calls.
 type Name string
 
 const (
 	Brightspace Name = "brightspace"
-	Classes     Name = "classes"
 	Handshake   Name = "handshake"
 	LibCal      Name = "libcal"
 	WebReg      Name = "webreg"
 )
 
-const (
-	// SharedSSOLoginURL enters USC Shibboleth through Handshake's explicit SAML
-	// login. LibCal reuses the resulting USC session during checkout because its
-	// own SSO entry requires booking state. Login must never stage a room.
-	SharedSSOLoginURL = "https://usc.joinhandshake.com/auth/saml/70/session/new?redirect_to_idp=true"
-)
-
-// Login identifies how a site enters USC authentication. It does not imply
-// that two sites share cookies or an application protocol.
-type Login string
-
-const (
-	EntraOIDC      Login = "entra-oidc"
-	EntraSAML      Login = "entra-saml"
-	Legacy         Login = "legacy"
-	ShibbolethSAML Login = "shibboleth-saml"
-)
-
-// Site is the small amount of information shared by every integration.
-// Site-specific clients own everything else. LoginURL and Login are empty for
-// public sites.
-type Site struct {
-	Name     Name   `json:"name"`
-	URL      string `json:"url"`
-	LoginURL string `json:"login_url,omitempty"`
-	Login    Login  `json:"login,omitempty"`
-}
-
-var catalog = []Site{
-	{Name: Brightspace, URL: "https://brightspace.usc.edu/", LoginURL: "https://brightspace.usc.edu/", Login: EntraSAML},
-	{Name: Classes, URL: "https://classes.usc.edu/"},
-	{Name: Handshake, URL: "https://usc.joinhandshake.com/", LoginURL: SharedSSOLoginURL, Login: ShibbolethSAML},
-	{Name: LibCal, URL: "https://libcal.usc.edu/", LoginURL: SharedSSOLoginURL, Login: ShibbolethSAML},
+// loginURLs are the pages that enter USC SSO for each site. LibCal has none:
+// its SSO entry only exists once a booking is staged.
+var loginURLs = map[Name]string{
+	Brightspace: "https://brightspace.usc.edu/",
+	Handshake:   "https://usc.joinhandshake.com/auth/saml/70/session/new?redirect_to_idp=true",
 	// WebReg's /auth/login forces a new OIDC round trip on every visit, and
 	// Microsoft rejects rapid repeats as a request loop. An app page reaches
 	// Microsoft only when the WebReg session has expired.
-	{Name: WebReg, URL: "https://webreg.usc.edu/", LoginURL: "https://webreg.usc.edu/Terms", Login: EntraOIDC},
+	WebReg: "https://webreg.usc.edu/Terms",
 }
 
-// All returns the known sites in command-line order.
-func All() []Site {
-	return append([]Site(nil), catalog...)
-}
-
-// Find returns the site with name.
-func Find(name Name) (Site, error) {
-	for _, candidate := range catalog {
-		if candidate.Name == name {
-			return candidate, nil
-		}
+// LoginURL returns the page that signs in to a site.
+func LoginURL(name Name) (string, error) {
+	target, ok := loginURLs[name]
+	if !ok {
+		return "", fmt.Errorf("site %q has no sign-in page", name)
 	}
-	return Site{}, fmt.Errorf("unknown site %q", name)
+	return target, nil
 }

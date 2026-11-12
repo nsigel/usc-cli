@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/nsigel/usc-cli/internal/dom"
 	"io"
 	"net/url"
 	"strings"
@@ -28,11 +29,10 @@ const (
 	maxBody        = 16 << 20
 )
 
-// ErrSessionInvalid means WebReg did not accept the saved application session
-// and redirected to sign-in. Reopen the client after usc auth login webreg.
-var ErrSessionInvalid = errors.New("WebReg session expired or invalid; run usc auth login webreg")
+// errSessionInvalid reports that WebReg redirected to sign-in.
+var errSessionInvalid = &auth.SiteError{Site: site.WebReg, Err: auth.ErrSessionInvalid}
 
-// Doer is the HTTP surface used by Client. auth.Session satisfies it.
+// Doer is the HTTP surface the client needs. auth.Session satisfies it.
 type Doer interface {
 	Do(*http.Request) (*http.Response, error)
 }
@@ -48,17 +48,10 @@ func New(httpClient Doer) *Client {
 	return &Client{http: httpClient}
 }
 
-// Open creates an authenticated client using the CLI's saved USC session.
-// It establishes the WebReg session through SSO without prompting.
-func Open(ctx context.Context) (*Client, error) {
-	return OpenWithOptions(ctx, auth.Options{})
-}
-
-// OpenWithOptions creates an authenticated client with an optional session
-// path and explicit credentials. Missing or expired SSO requires credentials
-// and returns auth.ErrCredentialsRequired when they have not been supplied.
-// Reopen the client if a later call returns ErrSessionInvalid.
-func OpenWithOptions(ctx context.Context, options auth.Options) (*Client, error) {
+// Open signs in through USC SSO and returns an authenticated client. See
+// auth.Options for supplying credentials and keeping the session between
+// runs. It never prompts; authentication failures are *auth.SiteError values.
+func Open(ctx context.Context, options auth.Options) (*Client, error) {
 	session, err := auth.Open(ctx, site.WebReg, options)
 	if err != nil {
 		return nil, err
@@ -98,7 +91,7 @@ func validTerm(term string) error {
 }
 
 // page GETs a WebReg page, following same-site redirects such as term
-// selection. Any redirect toward sign-in reports ErrSessionInvalid.
+// selection. Any redirect toward sign-in reports errSessionInvalid.
 func (c *Client) page(ctx context.Context, path, referer string) ([]byte, error) {
 	target := baseURL + path
 	for range maxRedirects + 1 {
@@ -117,7 +110,7 @@ func (c *Client) page(ctx context.Context, path, referer string) ([]byte, error)
 				return nil, &Error{Operation: "GET " + path, Status: response.StatusCode, Message: "redirect without a location"}
 			}
 			if signInURL(next) {
-				return nil, ErrSessionInvalid
+				return nil, errSessionInvalid
 			}
 			referer, target = response.Request.URL.Path, next.String()
 			continue
@@ -153,11 +146,11 @@ func (c *Client) post(ctx context.Context, path string, form url.Values, referer
 	}
 	if response.StatusCode >= 300 && response.StatusCode < 400 {
 		if next, err := response.Request.URL.Parse(response.Header.Get("Location")); err == nil && signInURL(next) {
-			return nil, ErrSessionInvalid
+			return nil, errSessionInvalid
 		}
 	}
 	if response.StatusCode == http.StatusUnauthorized {
-		return nil, ErrSessionInvalid
+		return nil, errSessionInvalid
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return nil, &Error{Operation: "POST " + path, Status: response.StatusCode, Message: shortText(data)}
@@ -196,7 +189,7 @@ func (c *Client) do(request *http.Request) (*http.Response, []byte, error) {
 	// Transports that follow redirects themselves land on the sign-in page
 	// with a 200, so the final URL matters as much as the status.
 	if signInURL(response.Request.URL) {
-		return nil, nil, ErrSessionInvalid
+		return nil, nil, errSessionInvalid
 	}
 	return response, data, nil
 }
@@ -215,13 +208,13 @@ func signInURL(location *url.URL) bool {
 // shortText returns a brief plain-text server message, or nothing when the
 // body is a full page or may echo session state.
 func shortText(data []byte) string {
-	text := collapse(textOf(parseHTML(data)))
-	if len(data) > 2048 || len(text) > 300 {
+	message := text(dom.Parse(data))
+	if len(data) > 2048 || len(message) > 300 {
 		return ""
 	}
-	lower := strings.ToLower(text)
+	lower := strings.ToLower(message)
 	if strings.Contains(lower, "token") || strings.Contains(lower, "cookie") {
 		return ""
 	}
-	return text
+	return message
 }

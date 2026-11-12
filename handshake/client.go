@@ -1,4 +1,5 @@
-// Package handshake implements USC Handshake's student event contract.
+// Package handshake reads events and career fairs from USC Handshake's
+// student site.
 package handshake
 
 import (
@@ -7,41 +8,52 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"html"
 	"io"
-	"regexp"
 	"strings"
 
+	"github.com/nsigel/usc-cli/auth"
+	"github.com/nsigel/usc-cli/site"
 	http "github.com/saucesteals/fhttp"
 )
 
-const baseURL = "https://usc.joinhandshake.com"
-
-var (
-	// ErrSessionInvalid means Handshake did not accept the saved application session.
-	ErrSessionInvalid = errors.New("Handshake session expired or invalid")
-	htmlBreak         = regexp.MustCompile(`(?i)</?(?:br|p|div|li|h[1-6])\b[^>]*>`)
-	htmlTag           = regexp.MustCompile(`<[^>]+>`)
-	space             = regexp.MustCompile(`[\t\r ]+`)
-	blankLines        = regexp.MustCompile(`\n{3,}`)
+const (
+	baseURL = "https://usc.joinhandshake.com"
+	// The student site serves search from one GraphQL endpoint and full event
+	// records from another.
+	searchGraphQL = "/stu/graphql"
+	detailGraphQL = "/hs/graphql"
 )
 
-// Doer is the authenticated HTTP surface needed by the Handshake client.
+// errSessionInvalid reports that Handshake stopped accepting the session.
+var errSessionInvalid = &auth.SiteError{Site: site.Handshake, Err: auth.ErrSessionInvalid}
+
+// Doer is the HTTP surface the client needs. auth.Session satisfies it.
 type Doer interface {
 	Do(*http.Request) (*http.Response, error)
 }
 
-// Client calls Handshake with an authenticated browser session.
+// Client calls Handshake with an authenticated session.
 type Client struct {
 	http Doer
 }
 
-// New creates a Handshake client.
+// New creates a client from an authenticated HTTP client.
 func New(httpClient Doer) *Client {
 	return &Client{http: httpClient}
 }
 
-// Error describes a failed Handshake request.
+// Open signs in through USC SSO and returns an authenticated client. See
+// auth.Options for supplying credentials and keeping the session between
+// runs. It never prompts; authentication failures are *auth.SiteError values.
+func Open(ctx context.Context, options auth.Options) (*Client, error) {
+	session, err := auth.Open(ctx, site.Handshake, options)
+	if err != nil {
+		return nil, err
+	}
+	return New(session), nil
+}
+
+// Error is a Handshake request that failed with an HTTP status.
 type Error struct {
 	Label  string
 	Status int
@@ -49,43 +61,40 @@ type Error struct {
 }
 
 func (e *Error) Error() string {
-	if e.Status == http.StatusUnauthorized {
-		return ErrSessionInvalid.Error()
-	}
-	return fmt.Sprintf("%s: HTTP %d — %s", e.Label, e.Status, e.Body)
+	return fmt.Sprintf("%s: HTTP %d: %s", e.Label, e.Status, e.Body)
 }
 
-func (e *Error) Unwrap() error {
-	if e.Status == http.StatusUnauthorized {
-		return ErrSessionInvalid
-	}
-	return nil
-}
-
-type graphQLRequest struct {
-	OperationName string         `json:"operationName"`
-	Query         string         `json:"query"`
-	Variables     map[string]any `json:"variables"`
-}
-
-type graphQLError struct {
-	Message string `json:"message"`
-}
-
-type graphQLResponse[T any] struct {
-	Data   T              `json:"data"`
-	Errors []graphQLError `json:"errors"`
-}
-
-func (c *Client) graphQL(ctx context.Context, operation, query string, variables map[string]any, destination any) error {
-	return c.graphQLAt(ctx, "/stu/graphql", operation, query, variables, destination)
-}
-
-func (c *Client) graphQLAt(ctx context.Context, path, operation, query string, variables map[string]any, destination any) error {
+// send returns a successful response body. Handshake answers an expired
+// session with a redirect to sign-in or a 401. label names the request in errors.
+func (c *Client) send(request *http.Request, label string) ([]byte, error) {
 	if c.http == nil {
-		return errors.New("handshake client has no HTTP session")
+		return nil, errors.New("handshake client has no HTTP session")
 	}
-	payload, err := json.Marshal(graphQLRequest{OperationName: operation, Query: query, Variables: variables})
+	response, err := c.http.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode >= 300 && response.StatusCode < 400 || response.StatusCode == http.StatusUnauthorized {
+		return nil, errSessionInvalid
+	}
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		return nil, err
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		// Error pages are HTML; only a short API message is worth repeating.
+		message := strings.TrimSpace(string(body))
+		if strings.HasPrefix(message, "<") {
+			message = http.StatusText(response.StatusCode)
+		}
+		return nil, &Error{Label: label, Status: response.StatusCode, Body: message[:min(len(message), 200)]}
+	}
+	return body, nil
+}
+
+func (c *Client) graphQL(ctx context.Context, path, operation, query string, variables map[string]any, destination any) error {
+	payload, err := json.Marshal(map[string]any{"operationName": operation, "query": query, "variables": variables})
 	if err != nil {
 		return err
 	}
@@ -97,25 +106,20 @@ func (c *Client) graphQLAt(ctx context.Context, path, operation, query string, v
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Origin", baseURL)
 	request.Header.Set("Referer", baseURL+"/stu/events")
-	response, err := c.http.Do(request)
+	body, err := c.send(request, operation)
 	if err != nil {
 		return err
 	}
-	defer response.Body.Close()
-	body, err := io.ReadAll(response.Body)
-	if err != nil {
-		return err
+	var envelope struct {
+		Data   json.RawMessage `json:"data"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
 	}
-	if response.StatusCode >= 300 && response.StatusCode < 400 || response.StatusCode == http.StatusUnauthorized {
-		return ErrSessionInvalid
-	}
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return &Error{Label: operation, Status: response.StatusCode, Body: truncate(strings.TrimSpace(string(body)), 200)}
-	}
-	envelope := graphQLResponse[json.RawMessage]{}
 	if err := json.Unmarshal(body, &envelope); err != nil {
-		if strings.Contains(strings.ToLower(response.Header.Get("Content-Type")), "text/html") {
-			return ErrSessionInvalid
+		// An expired session can also answer with the sign-in page itself.
+		if bytes.HasPrefix(bytes.TrimSpace(body), []byte("<")) {
+			return errSessionInvalid
 		}
 		return fmt.Errorf("%s: decode response: %w", operation, err)
 	}
@@ -133,63 +137,10 @@ func (c *Client) graphQLAt(ctx context.Context, path, operation, query string, v
 }
 
 func (c *Client) getHTML(ctx context.Context, path, label string) ([]byte, error) {
-	if c.http == nil {
-		return nil, errors.New("handshake client has no HTTP session")
-	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+path, nil)
 	if err != nil {
 		return nil, err
 	}
 	request.Header.Set("Accept", "text/html,application/xhtml+xml")
-	response, err := c.http.Do(request)
-	if err != nil {
-		return nil, err
-	}
-	defer response.Body.Close()
-	if response.StatusCode >= 300 && response.StatusCode < 400 || response.StatusCode == http.StatusUnauthorized {
-		return nil, ErrSessionInvalid
-	}
-	body, err := io.ReadAll(response.Body)
-	if err != nil {
-		return nil, err
-	}
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, &Error{Label: label, Status: response.StatusCode, Body: truncate(strings.TrimSpace(string(body)), 200)}
-	}
-	return body, nil
-}
-
-func plainText(value string) string {
-	value = htmlBreak.ReplaceAllString(value, "\n")
-	value = htmlTag.ReplaceAllString(value, "")
-	value = html.UnescapeString(value)
-	lines := strings.Split(value, "\n")
-	for index := range lines {
-		lines[index] = strings.TrimSpace(space.ReplaceAllString(lines[index], " "))
-	}
-	return strings.TrimSpace(blankLines.ReplaceAllString(strings.Join(lines, "\n"), "\n\n"))
-}
-
-func slug(value string) string {
-	var result strings.Builder
-	separator := false
-	for _, char := range strings.ToLower(strings.TrimSpace(value)) {
-		if char >= 'a' && char <= 'z' || char >= '0' && char <= '9' {
-			if separator && result.Len() > 0 {
-				result.WriteByte('-')
-			}
-			separator = false
-			result.WriteRune(char)
-		} else {
-			separator = true
-		}
-	}
-	return result.String()
-}
-
-func truncate(value string, limit int) string {
-	if len(value) <= limit {
-		return value
-	}
-	return value[:limit]
+	return c.send(request, label)
 }

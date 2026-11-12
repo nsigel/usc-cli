@@ -1,6 +1,7 @@
 package webreg
 
 import (
+	"github.com/nsigel/usc-cli/internal/dom"
 	"strconv"
 	"strings"
 
@@ -76,23 +77,23 @@ type GradeChoice struct {
 // parseCourses reads every course header and its sections from a page.
 func parseCourses(document *html.Node) []Course {
 	courses := []Course{}
-	for _, header := range findAll(document, byClass("div", "course-header")) {
+	for _, header := range dom.FindAll(document, dom.Class("div", "course-header")) {
 		code := courseCode(header)
 		if code == "" {
 			continue
 		}
-		course := Course{Code: code, Title: collapse(textOf(findFirst(header, byClass("span", "crsTitl")))), Sections: []Section{}}
+		course := Course{Code: code, Title: text(dom.FindFirst(header, dom.Class("span", "crsTitl"))), Sections: []Section{}}
 		// The header's href names its body. It omits suffixes such as the x in
 		// BUAD-200x, so the displayed code cannot be used to find it.
-		body := findFirst(document, byID(strings.TrimPrefix(attr(header, "href"), "#")))
+		body := dom.FindFirst(document, dom.ID(strings.TrimPrefix(dom.Attr(header, "href"), "#")))
 		if body != nil {
-			if description := findFirst(body, byClass("div", "bs-callout-default")); description != nil {
-				course.Description = collapse(textOf(description))
+			if description := dom.FindFirst(body, dom.Class("div", "bs-callout-default")); description != nil {
+				course.Description = text(description)
 			}
-			for _, requirement := range findAll(body, byClass("span", "prereqcoreq_val")) {
-				course.Prerequisites = append(course.Prerequisites, collapse(textOf(requirement)))
+			for _, requirement := range dom.FindAll(body, dom.Class("span", "prereqcoreq_val")) {
+				course.Prerequisites = append(course.Prerequisites, text(requirement))
 			}
-			for _, row := range findAll(body, byClass("div", "section")) {
+			for _, row := range dom.FindAll(body, dom.Class("div", "section")) {
 				if section, ok := parseSection(row); ok {
 					course.Sections = append(course.Sections, section)
 				}
@@ -105,25 +106,25 @@ func parseCourses(document *html.Node) []Course {
 
 // courseCode reads a header's code, joining suffixes such as "BUAD-200 x".
 func courseCode(header *html.Node) string {
-	code := collapse(textOf(findFirst(header, byClass("span", "crsID"))))
+	code := text(dom.FindFirst(header, dom.Class("span", "crsID")))
 	return strings.ReplaceAll(strings.TrimSuffix(code, ":"), " ", "")
 }
 
 func parseSection(row *html.Node) (Section, bool) {
-	id, err := strconv.Atoi(strings.TrimPrefix(attr(row, "id"), "section_"))
+	id, err := strconv.Atoi(strings.TrimPrefix(dom.Attr(row, "id"), "section_"))
 	if err != nil {
 		return Section{}, false
 	}
 	section := Section{ID: id}
-	for _, column := range findAll(row, byClass("span", "section_row")) {
-		label := findFirst(column, byClass("span", "table-headers-xsmall"))
+	for _, column := range dom.FindAll(row, dom.Class("span", "section_row")) {
+		label := dom.FindFirst(column, dom.Class("span", "table-headers-xsmall"))
 		if label == nil {
 			continue
 		}
-		name := strings.TrimSuffix(collapse(textOf(label)), ":")
+		name := strings.TrimSuffix(text(label), ":")
 		switch name {
 		case "Section":
-			fields := strings.Fields(collapse(textOf(findFirst(column, func(node *html.Node) bool { return node.Data == "b" }))))
+			fields := strings.Fields(text(dom.FindFirst(column, dom.Tag("b"))))
 			if len(fields) > 1 {
 				section.Clearance = fields[1]
 			}
@@ -149,16 +150,16 @@ func parseSection(row *html.Node) (Section, bool) {
 			section.GradeOption = parseGradeOption(column, label)
 		}
 	}
-	if form := findFirst(row, byClass("div", "btnAddToMyCourseBin")); form != nil {
-		inBin := findFirst(form, byClass("label", "alrdyinmycb")) != nil
+	if form := dom.FindFirst(row, dom.Class("div", "btnAddToMyCourseBin")); form != nil {
+		inBin := dom.FindFirst(form, dom.Class("label", "alrdyinmycb")) != nil
 		section.InCourseBin = &inBin
 	}
-	for _, note := range findAll(row, byClass("div", "dvSRtxt")) {
+	for _, note := range dom.FindAll(row, dom.Class("div", "dvSRtxt")) {
 		// Status notes have IDs and are toggled by the action bar; the
 		// remaining callouts are section notes such as fees or locations.
-		if attr(note, "id") == "" {
-			if text := collapse(textOf(note)); text != "" {
-				section.Notes = append(section.Notes, text)
+		if dom.Attr(note, "id") == "" {
+			if content := text(note); content != "" {
+				section.Notes = append(section.Notes, content)
 			}
 		}
 	}
@@ -169,12 +170,12 @@ func parseSection(row *html.Node) (Section, bool) {
 func columnText(column, label *html.Node) string {
 	var builder strings.Builder
 	for child := column.FirstChild; child != nil; child = child.NextSibling {
-		if child == label || child.Type == html.ElementNode && (child.Data == "form" || hasClass(child, "grdoptsel") || hasClass(child, "spanUpdate")) {
+		if child == label || child.Type == html.ElementNode && (child.Data == "form" || dom.HasClass(child, "grdoptsel") || dom.HasClass(child, "spanUpdate")) {
 			continue
 		}
-		builder.WriteString(" " + textOf(child))
+		builder.WriteString(" " + dom.Text(child))
 	}
-	return collapse(builder.String())
+	return dom.Collapse(builder.String())
 }
 
 // columnValues returns a multi-valued column such as instructors, one value
@@ -183,7 +184,7 @@ func columnValues(column, label *html.Node) []string {
 	var values []string
 	for child := column.FirstChild; child != nil; child = child.NextSibling {
 		if child != label {
-			values = append(values, lines(textOf(child))...)
+			values = append(values, lines(child)...)
 		}
 	}
 	return values
@@ -210,7 +211,7 @@ func parseBinState(column *html.Node, id int) *BinState {
 		{"schedY_regY", BinState{Scheduled: true, Registered: true}},
 		{"schedN_regY", BinState{Registered: true}},
 	} {
-		if bar := findFirst(column, byID(candidate.prefix+suffix)); bar != nil && !hidden(bar) {
+		if bar := dom.FindFirst(column, dom.ID(candidate.prefix+suffix)); bar != nil && !hidden(bar) {
 			state := candidate.state
 			return &state
 		}
@@ -220,23 +221,23 @@ func parseBinState(column *html.Node, id int) *BinState {
 
 func parseGradeOption(column, label *html.Node) *GradeOption {
 	option := &GradeOption{Current: columnText(column, label)}
-	form := findFirst(column, func(node *html.Node) bool { return node.Data == "form" })
+	form := dom.FindFirst(column, dom.Tag("form"))
 	if form == nil {
 		return option
 	}
-	option.path = attr(form, "data-ajax-url")
+	option.path = dom.Attr(form, "data-ajax-url")
 	option.ChangeRequest = strings.HasSuffix(option.path, "/GradeOptionChangeRequest")
-	option.token = formFields(form)["__RequestVerificationToken"]
-	if selection := findFirst(form, func(node *html.Node) bool { return node.Data == "select" }); selection != nil {
-		option.field = attr(selection, "name")
-		for _, choice := range findAll(selection, func(node *html.Node) bool { return node.Data == "option" }) {
-			code := attr(choice, "value")
+	option.token = formFields(form)[tokenField]
+	if selection := dom.FindFirst(form, dom.Tag("select")); selection != nil {
+		option.field = dom.Attr(selection, "name")
+		for _, choice := range dom.FindAll(selection, dom.Tag("option")) {
+			code := dom.Attr(choice, "value")
 			if code == "" {
 				continue
 			}
-			name := collapse(textOf(choice))
+			name := text(choice)
 			option.Choices = append(option.Choices, GradeChoice{Code: code, Name: name})
-			if option.Current == "" && attr(choice, "selected") != "" {
+			if option.Current == "" && dom.Attr(choice, "selected") != "" {
 				option.Current = name
 			}
 		}

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/nsigel/usc-cli/internal/dom"
 )
 
 // ResponseError describes a rejected LibCal HTTP request without exposing the
@@ -100,3 +102,15 @@ func (e *ResponseError) Error() string {
 }
 
 func (e *ResponseError) Unwrap() error { return e.Cause }
+
+func safeMessage(value string) string {
+	value = strings.Join(strings.Fields(value), " ")
+	if len(value) > 240 {
+		value = value[:240]
+	}
+	return value
+}
+
+func textFromHTML(data []byte) string {
+	return spacedText(dom.Parse(data))
+}

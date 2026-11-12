@@ -5,13 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	stdhtml "html"
+	"html"
 	"regexp"
 	"sort"
 	"strings"
 
+	"github.com/nsigel/usc-cli/internal/dom"
 	http "github.com/saucesteals/fhttp"
-	"golang.org/x/net/html"
 )
 
 func (a *authenticator) continueMicrosoft(ctx context.Context, current *page) (*page, error) {
@@ -149,8 +149,8 @@ func microsoftRedirectForm(page *page) (form, bool) {
 		// BssoInterrupt_Core HTML-unescapes names and values before creating
 		// hidden inputs. Sending the encoded config changes signed SAML data.
 		fields = append(fields, field{
-			Name:  stdhtml.UnescapeString(name),
-			Value: stdhtml.UnescapeString(value),
+			Name:  html.UnescapeString(name),
+			Value: html.UnescapeString(value),
 		})
 	}
 	sort.Slice(fields, func(i, j int) bool { return fields[i].Name < fields[j].Name })
@@ -183,18 +183,11 @@ func microsoftValues(body []byte) map[string]string {
 // configuration strings can also appear in page markup or error messages, and
 // those must not be treated as executable SSO state.
 func microsoftScript(body []byte) []byte {
-	document := parseHTML(body)
-	if document == nil {
-		return nil
-	}
 	var script strings.Builder
-	walkHTML(document, func(node *html.Node) bool {
-		if node.Type == html.ElementNode && node.Data == "script" {
-			script.WriteString(htmlText(node))
-			script.WriteByte('\n')
-		}
-		return false
-	})
+	for _, node := range dom.FindAll(dom.Parse(body), dom.Tag("script")) {
+		script.WriteString(dom.RawText(node))
+		script.WriteByte('\n')
+	}
 	return []byte(script.String())
 }
 

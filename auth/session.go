@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	http "github.com/saucesteals/fhttp"
 	"github.com/saucesteals/fhttp/cookiejar"
@@ -17,22 +17,48 @@ import (
 
 const sessionVersion = 1
 
-type storedCookie struct {
+// StoredCookie is a session cookie plus the URL that set it, which is needed
+// to restore host-only and path-scoped cookies. Never log Cookie.Value.
+type StoredCookie struct {
 	SetBy  string      `json:"set_by"`
 	Cookie http.Cookie `json:"cookie"`
 }
 
 type savedSession struct {
 	Version int            `json:"version"`
-	Cookies []storedCookie `json:"cookies"`
+	Cookies []StoredCookie `json:"cookies"`
 }
 
-// sessionJar keeps the response URL that set each cookie. The standard jar
-// intentionally hides that data, but it is required to restore host-only and
-// path-scoped cookies correctly.
+// LoadStoredCookies reads the cookies in a saved session file. A missing file
+// returns ErrSessionNotFound.
+func LoadStoredCookies(sessionFile string) ([]StoredCookie, error) {
+	session, err := readSession(sessionFile)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, ErrSessionNotFound
+	}
+	return session.Cookies, err
+}
+
+func readSession(name string) (savedSession, error) {
+	var session savedSession
+	data, err := os.ReadFile(name)
+	if err != nil {
+		return session, err
+	}
+	if err := json.Unmarshal(data, &session); err != nil {
+		return session, fmt.Errorf("read session: %w", err)
+	}
+	if session.Version != sessionVersion {
+		return session, fmt.Errorf("unsupported session version %d", session.Version)
+	}
+	return session, nil
+}
+
+// sessionJar keeps the response URL that set each cookie, which the standard
+// jar hides.
 type sessionJar struct {
 	inner   *cookiejar.Jar
-	entries map[string]storedCookie
+	entries map[string]StoredCookie
 }
 
 func newSessionJar() (*sessionJar, error) {
@@ -40,7 +66,7 @@ func newSessionJar() (*sessionJar, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &sessionJar{inner: inner, entries: make(map[string]storedCookie)}, nil
+	return &sessionJar{inner: inner, entries: make(map[string]StoredCookie)}, nil
 }
 
 func (j *sessionJar) Cookies(url *url.URL) []*http.Cookie {
@@ -54,21 +80,27 @@ func (j *sessionJar) SetCookies(source *url.URL, cookies []*http.Cookie) {
 			continue
 		}
 		key := cookieKey(source, cookie)
-		if cookie.MaxAge < 0 {
+		stored := cloneCookie(cookie)
+		// Max-Age is relative to the response, so store an absolute expiry;
+		// otherwise a reloaded cookie would start its lifetime over.
+		if stored.MaxAge > 0 {
+			stored.Expires = time.Now().Add(time.Duration(stored.MaxAge) * time.Second).UTC()
+			stored.MaxAge = 0
+		}
+		if stored.MaxAge < 0 || expired(stored) {
 			delete(j.entries, key)
 			continue
 		}
-		j.entries[key] = storedCookie{
-			SetBy:  cookieSource(source),
-			Cookie: cloneCookie(cookie),
-		}
+		j.entries[key] = StoredCookie{SetBy: cookieSource(source), Cookie: stored}
 	}
 }
 
-func (j *sessionJar) snapshot() []storedCookie {
-	cookies := make([]storedCookie, 0, len(j.entries))
+func (j *sessionJar) snapshot() []StoredCookie {
+	cookies := make([]StoredCookie, 0, len(j.entries))
 	for _, cookie := range j.entries {
-		cookies = append(cookies, cookie)
+		if !expired(cookie.Cookie) {
+			cookies = append(cookies, cookie)
+		}
 	}
 	// Stable ordering prevents meaningless session-file churn between commands.
 	sort.Slice(cookies, func(i, j int) bool {
@@ -77,6 +109,10 @@ func (j *sessionJar) snapshot() []storedCookie {
 		return left < right
 	})
 	return cookies
+}
+
+func expired(cookie http.Cookie) bool {
+	return !cookie.Expires.IsZero() && !cookie.Expires.After(time.Now())
 }
 
 func cookieKey(source *url.URL, cookie *http.Cookie) string {
@@ -113,20 +149,15 @@ func cloneCookie(cookie *http.Cookie) http.Cookie {
 	return clone
 }
 
+// loadSession restores a saved session into jar, skipping ignoredDomains. A
+// missing file is an empty session.
 func loadSession(name string, jar *sessionJar, ignoredDomains []string) error {
-	data, err := os.ReadFile(name)
+	session, err := readSession(name)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
 	if err != nil {
 		return err
-	}
-	var session savedSession
-	if err := json.Unmarshal(data, &session); err != nil {
-		return fmt.Errorf("read session: %w", err)
-	}
-	if session.Version != sessionVersion {
-		return fmt.Errorf("unsupported session version %d", session.Version)
 	}
 	for _, entry := range session.Cookies {
 		if cookieMatchesDomains(entry, ignoredDomains) {
@@ -165,7 +196,7 @@ func saveSessionReplacingDomains(name string, jar *sessionJar, domains, preserve
 	return saveSession(name, existing)
 }
 
-func cookieMatchesDomains(entry storedCookie, domains []string) bool {
+func cookieMatchesDomains(entry StoredCookie, domains []string) bool {
 	if len(domains) == 0 {
 		return false
 	}
@@ -192,30 +223,5 @@ func saveSession(name string, jar *sessionJar) error {
 	if err != nil {
 		return err
 	}
-	directory := filepath.Dir(name)
-	if directory != "." {
-		if err := os.MkdirAll(directory, 0o700); err != nil {
-			return err
-		}
-	}
-	// Cookies are bearer credentials. A private temporary file plus rename keeps
-	// them from being briefly world-readable or leaving a partial session.
-	temporary, err := os.CreateTemp(directory, ".session-*")
-	if err != nil {
-		return err
-	}
-	temporaryName := temporary.Name()
-	defer os.Remove(temporaryName)
-	if err := temporary.Chmod(0o600); err != nil {
-		temporary.Close()
-		return err
-	}
-	if _, err := temporary.Write(append(data, '\n')); err != nil {
-		temporary.Close()
-		return err
-	}
-	if err := temporary.Close(); err != nil {
-		return err
-	}
-	return os.Rename(temporaryName, name)
+	return writePrivateFile(name, append(data, '\n'))
 }

@@ -3,6 +3,7 @@ package webreg
 import (
 	"context"
 	"errors"
+	"github.com/nsigel/usc-cli/internal/dom"
 	"net/url"
 	"strconv"
 	"strings"
@@ -24,16 +25,16 @@ func (c *Client) Terms(ctx context.Context) ([]Term, error) {
 	if err != nil {
 		return nil, err
 	}
-	document := parseHTML(data)
-	active := strings.TrimSuffix(collapse(textOf(findFirst(document, byID("activeTermTab")))), " Classes")
+	document := dom.Parse(data)
+	active := strings.TrimSuffix(text(dom.FindFirst(document, dom.ID("activeTermTab"))), " Classes")
 	terms := []Term{}
-	list := findFirst(document, byClass("ul", "terms-list"))
-	for _, link := range findAll(list, func(node *html.Node) bool { return node.Data == "a" }) {
-		target, err := url.Parse(attr(link, "href"))
+	list := dom.FindFirst(document, dom.Class("ul", "terms-list"))
+	for _, link := range dom.FindAll(list, dom.Tag("a")) {
+		target, err := url.Parse(dom.Attr(link, "href"))
 		if err != nil || target.Query().Get("term") == "" {
 			continue
 		}
-		name := collapse(textOf(link))
+		name := text(link)
 		terms = append(terms, Term{Code: target.Query().Get("term"), Name: name, Active: active != "" && name == active})
 	}
 	if len(terms) == 0 {
@@ -63,18 +64,18 @@ func (c *Client) Programs(ctx context.Context, term string) ([]School, error) {
 	if err != nil {
 		return nil, err
 	}
-	document := parseHTML(data)
+	document := dom.Parse(data)
 	schools := []School{}
-	for _, header := range findAll(document, byClass("div", "department-header")) {
-		school := School{Name: collapse(textOf(findFirst(header, byClass("span", "department-name")))), Programs: []Program{}}
-		body := findFirst(document, byID(strings.TrimPrefix(attr(header, "href"), "#")))
-		for _, link := range findAll(body, byClass("a", "deptSub")) {
-			target, err := url.Parse(attr(link, "href"))
+	for _, header := range dom.FindAll(document, dom.Class("div", "department-header")) {
+		school := School{Name: text(dom.FindFirst(header, dom.Class("span", "department-name"))), Programs: []Program{}}
+		body := dom.FindFirst(document, dom.ID(strings.TrimPrefix(dom.Attr(header, "href"), "#")))
+		for _, link := range dom.FindAll(body, dom.Class("a", "deptSub")) {
+			target, err := url.Parse(dom.Attr(link, "href"))
 			if err != nil {
 				continue
 			}
 			code := target.Query().Get("Program")
-			name := collapse(textOf(link))
+			name := text(link)
 			name = strings.TrimSpace(strings.TrimSuffix(name, "("+code+")"))
 			school.Programs = append(school.Programs, Program{Code: code, Name: name})
 		}
@@ -121,10 +122,10 @@ func (c *Client) Courses(ctx context.Context, term string, query CourseQuery) ([
 		if err != nil {
 			return nil, err
 		}
-		document := parseHTML(data)
+		document := dom.Parse(data)
 		courses = append(courses, parseCourses(document)...)
-		next := findFirst(document, func(node *html.Node) bool {
-			return node.Data == "a" && attr(node, "rel") == "next" && attr(node, "href") != ""
+		next := dom.FindFirst(document, func(node *html.Node) bool {
+			return node.Data == "a" && dom.Attr(node, "rel") == "next" && dom.Attr(node, "href") != ""
 		})
 		if next == nil {
 			return courses, nil

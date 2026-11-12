@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/nsigel/usc-cli/internal/dom"
 	"net/url"
 	"strconv"
 	"strings"
@@ -31,16 +32,15 @@ func (c *Client) CourseBin(ctx context.Context, term string) (*CourseBin, error)
 	if err != nil {
 		return nil, err
 	}
-	document := parseHTML(data)
+	document := dom.Parse(data)
 	bin := &CourseBin{Term: term, Courses: parseCourses(document)}
-	if status := findFirst(document, byClass("span", "mycbstat")); status != nil {
-		counts := findAll(status, byClass("span", "courseBinStat"))
+	if status := dom.FindFirst(document, dom.Class("span", "mycbstat")); status != nil {
+		counts := dom.FindAll(status, dom.Class("span", "courseBinStat"))
 		if len(counts) == 2 {
-			bin.RegisteredSections, _ = strconv.Atoi(collapse(textOf(counts[0])))
-			bin.ScheduledSections, _ = strconv.Atoi(collapse(textOf(counts[1])))
+			bin.RegisteredSections, _ = strconv.Atoi(text(counts[0]))
+			bin.ScheduledSections, _ = strconv.Atoi(text(counts[1]))
 		}
-		text := collapse(textOf(status))
-		if _, asOf, ok := strings.Cut(text, "(As of "); ok {
+		if _, asOf, ok := strings.Cut(text(status), "(As of "); ok {
 			bin.AsOf = strings.TrimSuffix(asOf, ")")
 		}
 	}
@@ -70,7 +70,7 @@ func (c *Client) Add(ctx context.Context, term string, sectionID int) error {
 	if err != nil {
 		return err
 	}
-	form := url.Values{"submit": {"Add"}, "__RequestVerificationToken": {token}, "X-Requested-With": {"XMLHttpRequest"}}
+	form := url.Values{"submit": {"Add"}, tokenField: {token}, "X-Requested-With": {"XMLHttpRequest"}}
 	_, err = c.post(ctx, sectionPath(term, sectionID, "add"), form, "/Courses", true)
 	return err
 }
@@ -132,12 +132,12 @@ func (c *Client) SetGradeOption(ctx context.Context, term string, sectionID int,
 	if !valid {
 		return "", fmt.Errorf("grade option %q is not offered for section %d", code, sectionID)
 	}
-	form := url.Values{option.field: {code}, "__RequestVerificationToken": {option.token}, "X-Requested-With": {"XMLHttpRequest"}}
+	form := url.Values{option.field: {code}, tokenField: {option.token}, "X-Requested-With": {"XMLHttpRequest"}}
 	data, err := c.post(ctx, option.path, form, "/CourseBin", true)
 	if err != nil {
 		return "", err
 	}
-	return collapse(textOf(parseHTML(data))), nil
+	return text(dom.Parse(data)), nil
 }
 
 // token returns an anti-forgery token for the session from a page that
@@ -148,7 +148,7 @@ func (c *Client) token(ctx context.Context) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		if token := requestToken(parseHTML(data)); token != "" {
+		if token := requestToken(dom.Parse(data)); token != "" {
 			return token, nil
 		}
 	}

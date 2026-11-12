@@ -3,6 +3,7 @@ package webreg
 import (
 	"context"
 	"errors"
+	"github.com/nsigel/usc-cli/internal/dom"
 	"net/url"
 	"strings"
 
@@ -49,14 +50,14 @@ func (c *Client) checkout(ctx context.Context, term string) (*Checkout, url.Valu
 	if err != nil {
 		return nil, nil, err
 	}
-	document := parseHTML(data)
-	wrapper := findFirst(document, byClass("div", "content-wrapper-regconfirm"))
+	document := dom.Parse(data)
+	wrapper := dom.FindFirst(document, dom.Class("div", "content-wrapper-regconfirm"))
 	if wrapper == nil {
 		return nil, nil, errors.New("WebReg checkout page has an unexpected layout")
 	}
 	checkout := &Checkout{Term: term, Groups: []CheckoutGroup{}}
-	if message := findFirst(wrapper, func(node *html.Node) bool { return node.Data == "h6" }); message != nil {
-		checkout.Message = collapse(textOf(message))
+	if message := dom.FindFirst(wrapper, dom.Tag("h6")); message != nil {
+		checkout.Message = text(message)
 	}
 
 	// Headings and course blocks are siblings, so walk them in document order.
@@ -65,11 +66,11 @@ func (c *Client) checkout(ctx context.Context, term string) (*Checkout, url.Valu
 	for _, course := range courses {
 		byCode[course.Code] = course
 	}
-	for _, node := range findAll(wrapper, func(node *html.Node) bool {
-		return node.Data == "h5" && hasClass(node, "RegAdDrpTitl") || node.Data == "div" && hasClass(node, "course-header")
+	for _, node := range dom.FindAll(wrapper, func(node *html.Node) bool {
+		return node.Data == "h5" && dom.HasClass(node, "RegAdDrpTitl") || node.Data == "div" && dom.HasClass(node, "course-header")
 	}) {
 		if node.Data == "h5" {
-			heading := collapse(textOf(node))
+			heading := text(node)
 			checkout.Groups = append(checkout.Groups, CheckoutGroup{Action: checkoutAction(heading), Heading: heading, Courses: []Course{}})
 			continue
 		}
@@ -80,7 +81,7 @@ func (c *Client) checkout(ctx context.Context, term string) (*Checkout, url.Valu
 		group.Courses = append(group.Courses, byCode[courseCode(node)])
 	}
 
-	form := findFirst(wrapper, func(node *html.Node) bool { return node.Data == "form" && attr(node, "id") == "MainForm" })
+	form := dom.FindFirst(wrapper, func(node *html.Node) bool { return node.Data == "form" && dom.Attr(node, "id") == "MainForm" })
 	if form == nil {
 		return checkout, nil, nil
 	}
@@ -90,7 +91,7 @@ func (c *Client) checkout(ctx context.Context, term string) (*Checkout, url.Valu
 			values.Set(name, value)
 		}
 	}
-	checkout.Ready = values.Get("__RequestVerificationToken") != "" && len(checkout.Groups) > 0
+	checkout.Ready = values.Get(tokenField) != "" && len(checkout.Groups) > 0
 	return checkout, values, nil
 }
 
@@ -132,24 +133,24 @@ func (c *Client) Submit(ctx context.Context, term string) (*CheckoutResult, erro
 }
 
 func parseCheckoutResult(term string, data []byte) (*CheckoutResult, error) {
-	document := parseHTML(data)
-	wrapper := findFirst(document, byClass("div", "content-wrapper-regconfirm"))
+	document := dom.Parse(data)
+	wrapper := dom.FindFirst(document, dom.Class("div", "content-wrapper-regconfirm"))
 	if wrapper == nil {
 		return nil, errors.New("WebReg returned an unexpected checkout response; check myCourseBin before retrying")
 	}
 	result := &CheckoutResult{Term: term}
-	if status := findFirst(wrapper, func(node *html.Node) bool { return node.Data == "b" }); status != nil {
-		result.Status = collapse(textOf(status))
+	if status := dom.FindFirst(wrapper, dom.Tag("b")); status != nil {
+		result.Status = text(status)
 	}
-	heading := findFirst(wrapper, func(node *html.Node) bool { return node.Data == "h3" })
+	heading := dom.FindFirst(wrapper, dom.Tag("h3"))
 	var walk func(*html.Node)
 	walk = func(node *html.Node) {
 		for child := node.FirstChild; child != nil; child = child.NextSibling {
-			if child == heading || child.Type == html.ElementNode && child.Data == "b" && collapse(textOf(child)) == result.Status {
+			if child == heading || child.Type == html.ElementNode && child.Data == "b" && text(child) == result.Status {
 				continue
 			}
-			if child.Type == html.ElementNode && (child.Data == "div" || child.Data == "span" || child.Data == "p" || child.Data == "li") && findFirst(child, func(node *html.Node) bool { return node.Data == "div" }) == nil {
-				result.Messages = append(result.Messages, lines(textOf(child))...)
+			if child.Type == html.ElementNode && (child.Data == "div" || child.Data == "span" || child.Data == "p" || child.Data == "li") && dom.FindFirst(child, dom.Tag("div")) == nil {
+				result.Messages = append(result.Messages, lines(child)...)
 				continue
 			}
 			walk(child)

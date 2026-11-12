@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/url"
 	"os"
@@ -24,8 +25,11 @@ type checkoutState struct {
 	Submitting bool   `json:"submitting,omitempty"`
 }
 
-// Keep the lock file separate from the atomically replaced recovery record.
-// Never unlink the lock file: another process may be using the same inode.
+// checkout is one booking attempt and its crash-recovery record. The record
+// (libcal-checkout.json) names the server-side checkout to release if this
+// process dies, and marks a submission whose outcome was never seen. Its lock
+// file is separate from the atomically replaced record and is never
+// unlinked: another process may hold the same inode.
 type checkout struct {
 	client  *Client
 	file    *os.File
@@ -34,6 +38,9 @@ type checkout struct {
 	pending *pendingBooking
 }
 
+// beginCheckout takes the checkout lock and releases whatever a previous
+// attempt left behind. An unknown submission outcome blocks new bookings
+// until Release acknowledges it.
 func (c *Client) beginCheckout(ctx context.Context, release bool) (*checkout, error) {
 	tx := &checkout{client: c}
 	if c.checkoutPath == "" {
@@ -103,6 +110,8 @@ func (tx *checkout) save() error {
 	return os.Rename(file.Name(), tx.client.checkoutPath)
 }
 
+// finish releases the attempt's hold unless the booking was confirmed or its
+// outcome is unknown, and adds any cleanup failure to resultErr.
 func (tx *checkout) finish(resultErr *error) {
 	if tx.file != nil {
 		defer tx.file.Close()
@@ -118,7 +127,7 @@ func (tx *checkout) finish(resultErr *error) {
 	if tx.state.Session != "" {
 		cleanupErr = tx.client.endCheckout(ctx, tx.state.Session)
 	} else if tx.pending != nil {
-		cleanupErr = tx.client.removePendingBooking(ctx, tx.slot, *tx.pending)
+		cleanupErr = tx.client.removeHold(ctx, tx.slot, *tx.pending)
 	}
 	if cleanupErr != nil {
 		*resultErr = errors.Join(*resultErr, &Error{Code: "libcal_cleanup_failed", Message: "could not release LibCal checkout; retry usc libcal release: " + cleanupErr.Error(), Cause: cleanupErr})
@@ -140,7 +149,7 @@ func (c *Client) Release(ctx context.Context) (resultErr error) {
 }
 
 func (c *Client) endCheckout(ctx context.Context, session string) error {
-	data, err := c.request(ctx, http.MethodPost, "/ajax/space/session/end", url.Values{"session": {session}}, "application/json")
+	data, err := c.request(ctx, http.MethodPost, "/ajax/space/session/end", url.Values{"session": {session}}, "application/json", "")
 	if err != nil {
 		return err
 	}
@@ -156,87 +165,154 @@ func (c *Client) endCheckout(ctx context.Context, session string) error {
 	return nil
 }
 
-// These fields are appended by LibCal's checkout submit handler, not present
-// as input elements in the HTML. Parse only the known literals, never execute JS.
+const equipmentCheckoutPath = "/ajax/equipment/checkout"
+
+// LibCal's checkout page appends these fields in its submit handler instead
+// of rendering them as inputs. Only the known literals are read; no
+// JavaScript is evaluated.
 var checkoutInputPattern = regexp.MustCompile(`appendHiddenInput\('(?P<name>returnUrl|logoutUrl|session)',\s*("(?:\\.|[^"\\])*"|[0-9]+),`)
 
+// checkoutForm holds the slot for its full duration and returns LibCal's
+// checkout form, signing in through USC SSO when LibCal asks for it.
 func (c *Client) checkoutForm(ctx context.Context, slot availableSlot, tx *checkout) (bookingForm, error) {
-	booking, err := c.addPendingBooking(ctx, slot)
+	hold, err := c.addHold(ctx, slot)
 	if err != nil {
 		return bookingForm{}, err
 	}
-	tx.slot, tx.pending = slot, &booking
-	updated, err := c.setPendingDuration(ctx, slot, booking)
+	tx.slot, tx.pending = slot, &hold
+	extended, err := c.extendHold(ctx, slot, hold)
 	if err != nil {
 		return bookingForm{}, err
 	}
-	tx.pending = &updated
-	booking = updated
-	page, err := c.bookingForm(ctx, slot, booking)
+	tx.pending = &extended
+	page, err := c.checkoutPage(ctx, slot, extended)
 	if err != nil {
-		return bookingForm{}, err // HTTP 400 is not an authentication challenge.
+		return bookingForm{}, err
 	}
-	referer := refererForSpace(slot.Space)
+	html, referer := page.HTML, refererFor(slot.Space)
+	var authErr error
 	if page.Redirect != "" {
-		if c.authenticate == nil {
-			return bookingForm{}, ErrAuthenticationRequired
-		}
-		response, authErr := c.authenticate(ctx, page.Redirect, referer)
-		if response != nil {
-			defer response.Body.Close()
-			data, readErr := io.ReadAll(io.LimitReader(response.Body, 10<<20))
-			if readErr != nil {
-				return bookingForm{}, errors.Join(authErr, readErr)
-			}
-			page.HTML = string(data)
-			referer = response.Request.URL.String()
-		}
-		// Capture the checkout ID even when saving authenticated cookies failed,
-		// so the server-side hold can still be released.
-		if response == nil {
-			return bookingForm{}, authErr
-		}
-		if err := tx.capture(page.HTML); err != nil {
-			return bookingForm{}, errors.Join(authErr, err)
-		}
-		if authErr != nil {
-			return bookingForm{}, authErr
-		}
-	} else if err := tx.capture(page.HTML); err != nil {
+		html, referer, authErr = c.signIn(ctx, page.Redirect, referer)
+	}
+	// Record the checkout ID even when sign-in failed after reaching the
+	// page, so the server-side hold can still be released.
+	if err := errors.Join(authErr, tx.capture(html)); err != nil {
 		return bookingForm{}, err
 	}
-	form, err := parseBookingForm(page.HTML)
+	form, err := parseBookingForm(html)
 	if err != nil {
 		return bookingForm{}, err
 	}
 	form.Referer = referer
-	if form.Action == "/ajax/equipment/checkout" {
+	if form.Action == equipmentCheckoutPath {
 		if tx.state.Session == "" {
 			return bookingForm{}, errors.New("LibCal checkout is missing its session identifier")
 		}
-		fields := make(map[string]bool)
-		for _, match := range checkoutInputPattern.FindAllStringSubmatch(page.HTML, -1) {
-			value := match[2]
-			if strings.HasPrefix(value, `"`) {
-				value, err = strconv.Unquote(value)
-				if err != nil {
-					return bookingForm{}, errors.New("LibCal checkout has an invalid form value")
-				}
-			}
-			form.Fields = append(form.Fields, bookingFormField{Name: match[1], Type: "hidden", Value: value})
-			fields[match[1]] = value != ""
-		}
-		for _, name := range []string{"session", "returnUrl", "logoutUrl"} {
-			if !fields[name] {
-				return bookingForm{}, &Error{Code: "libcal_invalid_form", Message: "LibCal checkout is missing the required " + name + " field"}
-			}
+		if err := form.addScriptedFields(html); err != nil {
+			return bookingForm{}, err
 		}
 	}
 	return form, nil
 }
 
-func (tx *checkout) capture(body string) error {
-	for _, match := range checkoutInputPattern.FindAllStringSubmatch(body, -1) {
+type checkoutPage struct {
+	Redirect string `json:"redirect"`
+	HTML     string `json:"html"`
+	Error    string `json:"error"`
+}
+
+// checkoutPage asks LibCal for the held slot's checkout form. LibCal answers
+// with the form's HTML, or with a redirect to its SSO entry.
+func (c *Client) checkoutPage(ctx context.Context, slot availableSlot, hold pendingBooking) (checkoutPage, error) {
+	category, err := categoryOf(slot.Space)
+	if err != nil {
+		return checkoutPage{}, err
+	}
+	values := url.Values{
+		"patron":     {""},
+		"patronHash": {""},
+		"returnUrl":  {category.returnPath()},
+		"method":     {bookingMethodID},
+	}
+	hold.echo(values)
+	data, err := c.request(ctx, http.MethodPost, "/ajax/space/times", values, ajaxAccept, refererFor(slot.Space))
+	if err != nil {
+		return checkoutPage{}, err
+	}
+	var page checkoutPage
+	if err := json.Unmarshal(data, &page); err != nil {
+		return checkoutPage{}, fmt.Errorf("decode LibCal booking form: %w", err)
+	}
+	switch {
+	case page.Redirect != "":
+		page.Redirect, err = authRedirect(page.Redirect)
+		return page, err
+	case page.Error != "":
+		return checkoutPage{}, libcalError(page.Error)
+	case page.HTML == "":
+		return checkoutPage{}, errors.New("LibCal returned no reservation form")
+	}
+	return page, nil
+}
+
+// authRedirect accepts only LibCal's own SSO entry as a sign-in target.
+func authRedirect(value string) (string, error) {
+	base, _ := url.Parse(baseURL)
+	target, err := base.Parse(value)
+	if err != nil {
+		return "", fmt.Errorf("parse LibCal authentication redirect: %w", err)
+	}
+	if target.Scheme != "https" || !strings.EqualFold(target.Hostname(), base.Hostname()) || target.Path != "/spaces/auth" {
+		return "", errors.New("LibCal returned an unsupported authentication redirect")
+	}
+	return target.String(), nil
+}
+
+// signIn follows LibCal's SSO redirect and returns the checkout page it lands
+// on and that page's URL. The page is returned even when saving the session
+// failed.
+func (c *Client) signIn(ctx context.Context, target, referer string) (html, landed string, err error) {
+	if c.authenticate == nil {
+		return "", "", ErrAuthenticationRequired
+	}
+	response, err := c.authenticate(ctx, target, referer)
+	if response == nil {
+		return "", "", err
+	}
+	defer response.Body.Close()
+	data, readErr := io.ReadAll(io.LimitReader(response.Body, 10<<20))
+	if readErr != nil {
+		return "", "", errors.Join(err, readErr)
+	}
+	return string(data), response.Request.URL.String(), err
+}
+
+// addScriptedFields adds the hidden fields the checkout page's script would
+// append, all of which the submission requires.
+func (form *bookingForm) addScriptedFields(html string) error {
+	found := make(map[string]bool)
+	for _, match := range checkoutInputPattern.FindAllStringSubmatch(html, -1) {
+		name, value := match[1], match[2]
+		if strings.HasPrefix(value, `"`) {
+			var err error
+			if value, err = strconv.Unquote(value); err != nil {
+				return errors.New("LibCal checkout has an invalid form value")
+			}
+		}
+		form.Fields = append(form.Fields, bookingFormField{Name: name, Type: "hidden", Value: value})
+		found[name] = value != ""
+	}
+	for _, name := range []string{"session", "returnUrl", "logoutUrl"} {
+		if !found[name] {
+			return &Error{Code: "libcal_invalid_form", Message: "LibCal checkout is missing the required " + name + " field"}
+		}
+	}
+	return nil
+}
+
+// capture records the checkout session ID from a checkout page, if it has one.
+func (tx *checkout) capture(html string) error {
+	for _, match := range checkoutInputPattern.FindAllStringSubmatch(html, -1) {
 		if match[1] == "session" {
 			tx.state.Session = strings.Trim(match[2], `"`)
 			return tx.save()

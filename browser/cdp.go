@@ -11,11 +11,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"nhooyr.io/websocket"
+	"github.com/coder/websocket"
 )
 
 // ErrCDPUnavailable means the Chrome DevTools endpoint could not be reached.
-var ErrCDPUnavailable = errors.New("chrome DevTools unavailable")
+var ErrCDPUnavailable = errors.New("Chrome DevTools unavailable (start Chrome with --remote-debugging-port=9222)")
 
 // Client is a minimal Chrome DevTools Protocol client for Storage.setCookies.
 type Client struct {
@@ -45,31 +45,25 @@ type cdpError struct {
 	Message string `json:"message"`
 }
 
-// Connect dials a CDP target (HTTP endpoint or websocket debugger URL).
+// Connect dials a CDP target: an HTTP endpoint, whose browser websocket is
+// looked up, or a websocket debugger URL.
 func Connect(ctx context.Context, target string) (*Client, error) {
-	resolved, err := ResolveTarget(target)
+	endpoint, err := ResolveTarget(target)
 	if err != nil {
 		return nil, err
 	}
-
-	wsURL := resolved
-	display := resolved
-	if strings.HasPrefix(strings.ToLower(resolved), "http://") || strings.HasPrefix(strings.ToLower(resolved), "https://") {
-		var err error
-		wsURL, err = fetchWebSocketURL(ctx, resolved)
-		if err != nil {
+	wsURL := endpoint
+	if strings.HasPrefix(endpoint, "http") {
+		if wsURL, err = fetchWebSocketURL(ctx, endpoint); err != nil {
 			return nil, err
 		}
-		display = resolved
 	}
-
 	conn, _, err := websocket.Dial(ctx, wsURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("%w: connect to %s: %v", ErrCDPUnavailable, display, err)
+		return nil, fmt.Errorf("%w: connect to %s: %v", ErrCDPUnavailable, endpoint, err)
 	}
 	conn.SetReadLimit(16 << 20)
-
-	return &Client{ws: conn, endpoint: display}, nil
+	return &Client{ws: conn, endpoint: endpoint}, nil
 }
 
 // Endpoint returns the resolved CDP HTTP endpoint or websocket URL used to connect.

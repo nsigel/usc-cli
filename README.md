@@ -12,8 +12,7 @@ go build -o usc ./cmd/usc
 
 ## Go library
 
-All service clients and shared authentication are importable without running
-`usc`. Install the module in your Go project:
+Every CLI feature is a library call; commands only parse flags and print JSON.
 
 ```sh
 go get github.com/nsigel/usc-cli
@@ -21,81 +20,64 @@ go get github.com/nsigel/usc-cli
 
 | Package (under `github.com/nsigel/usc-cli/`) | Entry point |
 | --- | --- |
-| `brightspace` | `Open(ctx)` for authenticated course data and downloads |
-| `handshake` | `Open(ctx)` for authenticated events and career fairs |
-| `libcal` | `NewPublic()` for availability; `Open(ctx)` for booking |
-| `webreg` | `Open(ctx)` for Web Registration catalog, course bin, and checkout |
+| `brightspace` | `Open(ctx, auth.Options)` for course data and downloads |
+| `handshake` | `Open(ctx, auth.Options)` for events and career fairs |
+| `webreg` | `Open(ctx, auth.Options)` for Web Registration catalog, course bin, and checkout |
+| `libcal` | `NewPublic()` for availability; `Open(auth.Options)` for booking |
 | `classes` | `New()` for public course and section data |
-| `auth` | `Open(ctx, site.Name, Options)` for USC SSO; `Login` / `LoginFresh` for explicit login |
+| `auth` | `Options` for signing in; `Open(ctx, site.Name, Options)` for a raw SSO session; `SiteError` |
 | `browser` | `SyncCookies(ctx, sessionFile, target)` for Chrome CDP sync |
-| `site` | `All()` / `Find(name)` for the site catalog |
-| `config` | Shared session, credential, and reservation file paths |
+| `site` | Site names used by `auth.Open` and `auth.SiteError` |
+| `config` | `CredentialsPath()` and `SessionPath()`, the `usc` command's files |
 | `skill` | `WriteUSC(writer)` for the embedded agent skill |
 
-Only command parsing, terminal prompts, CLI output formatting, and the CLI's
-Docling conversion wrapper remain internal. Brightspace's `Download` method
-returns an authenticated stream that applications can save or convert themselves.
+A program signs in with `auth.Options` and owns its session; nothing is shared
+with the `usc` command unless you point at its files. Give it credentials in
+one of two ways:
 
 ```go
-client, err := brightspace.Open(ctx)
-if err != nil {
-    return err
-}
+// Username, password, and Duo bypass code directly:
+options := auth.Options{Credentials: auth.Credentials{
+    Username: netID, Password: password, BypassCode: bypass,
+}}
+
+// Or the credentials file that `usc auth login` saved:
+file, err := config.CredentialsPath() // the usc command's file; any path works
+options := auth.Options{CredentialsFile: file}
+
+client, err := brightspace.Open(ctx, options)
 courses, err := client.Courses(ctx, false)
 ```
 
-`brightspace.Open`, `handshake.Open`, `webreg.Open`, and `libcal.Open` share the
-CLI's session path, including `USC_CONFIG_DIR`. Brightspace, Handshake, and WebReg establish their
-application sessions through USC SSO when opened. LibCal defers authentication
-until its checkout handoff; availability does not need login.
-
-For a standalone application, use `OpenWithOptions` (available in every
-authenticated package) with `auth.Options`:
+By default the session's cookies live in memory, so each run signs in again.
+Set `SessionFile` to a file your program owns to keep them between runs; later
+runs then need credentials only when that session has expired:
 
 ```go
-client, err := brightspace.OpenWithOptions(ctx, auth.Options{
-    SessionFile: "/private/app/usc/session.json", // optional; defaults to the CLI path
-    Credentials: auth.Credentials{
-        Username: os.Getenv("USC_USERNAME"),
-        Password: os.Getenv("USC_PASSWORD"),
-        BypassCode: os.Getenv("USC_DUO_BYPASS"),
-    },
-})
+options.SessionFile = "/var/lib/myapp/usc-session.json"
 ```
 
-The library never prompts, reads saved passwords, or implicitly loads credentials
-from environment variables. Supply credentials explicitly as above when fresh
-SSO is needed. Successful authentication persists cookies with private file
-permissions; supplied passwords and bypass codes are not saved by these APIs.
-Missing credentials return `auth.ErrCredentialsRequired`; LibCal translates this
-to `libcal.ErrAuthenticationRequired`. Use `errors.Is` to handle these errors, or use the shared lightweight classifier
-for the same JSON shape as the CLI:
+Do not use the `usc` command's `session.json` as a `SessionFile`, and give each
+concurrently running program its own file: a client is sequential and the
+last writer wins.
 
-```go
-// import usc "github.com/nsigel/usc-cli"
-info := usc.DescribeError(err, site.Brightspace)
-// {"error":"credentials are required","action":"usc auth login"}
-```
+The library never prompts and never reads environment variables. Every
+authentication failure is an `*auth.SiteError` naming the site and wrapping
+`auth.ErrCredentialsRequired`, `auth.ErrPasswordRejected`,
+`auth.ErrBypassRejected`, or, when a site drops its session after the client
+was opened, `auth.ErrSessionInvalid`. A rejected secret is submitted once; if
+it came from `CredentialsFile` it is also removed from that file. Check for
+these with `errors.As` and `errors.Is`.
 
-This only describes the error; it does not recover, retry, or initiate login.
-If a later Brightspace, Handshake, or WebReg request returns `ErrSessionInvalid`,
-reopen the client. API operations are not automatically replayed.
-
-LibCal stores checkout recovery and booking history beside the selected session
-file. `client.Reservations(includePast)` reads that client's history; the
-package-level `libcal.Reservations` reads the default configuration directory.
-Treat a client/session as sequential: concurrent use and concurrent writes to a
-shared session file are not supported. Use separate session files for independent
-workers. LibCal clients sharing a directory serialize checkout via its file lock.
-Custom transports for `New` use `github.com/saucesteals/fhttp` request/response
-types, as does `auth.Session`; these differ from the standard `net/http` types.
+Clients built with `New` take any `Do(*http.Request)` implementation using
+`github.com/saucesteals/fhttp` types, which `auth.Session` provides.
 
 Runnable examples:
 
 ```sh
 go run ./examples/availability  # today's Leavey room intervals, no login needed
-go run ./examples/brightspace  # enrollments using saved SSO or explicit env credentials
-go run ./examples/webreg       # the newest term's course bin using saved SSO or env credentials
+go run ./examples/brightspace  # enrollments, using the credentials usc auth login saved
+go run ./examples/webreg       # the newest term's course bin, same credentials
 ```
 
 ## Features
@@ -112,7 +94,6 @@ go run ./examples/webreg       # the newest term's course bin using saved SSO or
 | Assignments |
 | Assignment submissions and submitted-file downloads |
 | Content downloads |
-| PDF-to-Markdown conversion with optional OCR |
 
 ### Schedule of Classes
 
@@ -161,20 +142,53 @@ usc skill > SKILL.md
 
 ## How it works
 
-### Authentication storage
+### Authentication
 
-`usc auth login [site]` follows USC's SSO flow through Microsoft and Duo, then saves
-the cross-domain cookie session to the platform's user configuration directory:
+```sh
+usc auth login            # prompts for NetID, password, and Duo bypass code
+usc auth status           # {"authenticated":true,"credentials_saved":true}
+usc auth logout           # deletes the session and the saved credentials
+```
 
-| Platform | Default session path |
+`usc auth login` follows USC's SSO flow through Microsoft and Duo and saves
+the credentials. One sign-in covers every site. After that, every command
+signs itself in: it reuses the saved session and repeats the login with the
+saved credentials when the session has expired. Only `usc auth login` prompts.
+
+Two private (`0600`) files in the user configuration directory hold the sign-in:
+
+| File | Contents |
 | --- | --- |
-| macOS | `~/Library/Application Support/usc/session.json` |
-| Linux | `$XDG_CONFIG_HOME/usc/session.json`, or `~/.config/usc/session.json` when `XDG_CONFIG_HOME` is unset |
-| Windows | `%AppData%\usc\session.json` |
+| `session.json` | The cross-domain cookie session |
+| `credentials.json` | NetID, password, and Duo bypass code |
 
-Set `USC_CONFIG_DIR` to replace the platform-specific `usc` directory. For
-example, `USC_CONFIG_DIR=/path/to/config` stores the session at
-`/path/to/config/session.json`.
+| Platform | Directory |
+| --- | --- |
+| macOS | `~/Library/Application Support/usc/` |
+| Linux | `$XDG_CONFIG_HOME/usc/`, or `~/.config/usc/` |
+| Windows | `%AppData%\usc\` |
+
+Set `USC_CONFIG_DIR` to use another directory.
+
+[Duo](https://itservices.usc.edu/duo/) is USC's multi-factor service, and the
+CLI completes it with a bypass code. To get one, open the [USC Duo bypass code
+page](https://account.usc.edu/2fa/duo-bypass-code), sign in, and copy the code.
+
+Credentials in the environment override saved values for any `usc` command, so
+a shell script or CI job can skip `usc auth login` and save no credentials:
+
+```sh
+USC_USERNAME=netid USC_PASSWORD=password USC_DUO_BYPASS=123456789 \
+usc brightspace courses
+```
+
+`usc auth login` only prompts on a terminal. Anywhere else it uses those
+variables and reports which ones are missing.
+
+If USC rejects the password or Duo rejects the bypass code, the command stops
+after that single attempt and removes the rejected saved value, so the next
+`usc auth login` prompts for a replacement. Secrets are never resubmitted
+automatically and are never accepted as command-line flags.
 
 ### LibCal reservations
 
@@ -183,13 +197,13 @@ without choosing a room, start, duration, or form answer. Agents inspect the
 schedule, choose up to two hours of continuous availability, then book the exact
 selection. The client handles checkout using direct HTTP requests.
 
-`schedule` (alias `availability`) returns each category's `window_end` and
+`schedule` returns each category's `window_end` and
 each space's metadata plus `intervals`: `start`, `end`, `available`, and
 the original server `status`. Intervals retain the server's granularity;
 missing intervals do not imply availability. The default category is `all`.
 `--end-date` is exclusive and defaults to the next day; extend it when
-inspecting a schedule across midnight. Capacity filters accept arbitrary bounds:
-`--capacity 6-12`, `--min-capacity 6`, or `--max-capacity 12`.
+inspecting a schedule across midnight. `--min-capacity` and `--max-capacity`
+filter spaces by size.
 
 The CLI and package reject any selection longer than two hours locally with
 `libcal_duration_limit`, before making requests. This checks the selected
@@ -201,38 +215,23 @@ values from live responses.
 
 ```sh
 usc libcal schedule --date 2026-10-02 --end-date 2026-10-04 --category rooms --min-capacity 6
-# If authentication is required, sign in to USC SSO:
-usc auth login libcal
-# With terms accepted and any required field answers supplied:
 usc libcal book --space 31391 --start 2026-10-02T23:00:00-07:00 \
   --end 2026-10-03T01:00:00-07:00 --accept-terms
-usc libcal reservations
 ```
 
 `book` requires `--space`, `--start`, and `--end`; it never selects a
 replacement. Repeat `--field FIELD=VALUE` to supply explicit checkout answers.
 Required dropdowns without a server-selected answer must be supplied; the CLI
 never picks the first available option. Validation errors identify missing fields
-and list available choices so the agent can correct the request. `--name` and `--email` are optional
-identity conveniences, with explicit `--field` answers taking precedence.
-Only authentication commands can prompt.
+and list available choices so the agent can correct the request.
 
-Booking reuses the saved USC SSO session. `usc auth login libcal` and
-`usc auth status libcal` establish/check that shared session through the existing
-Handshake SAML entry, without booking flags or room holds. Their status describes
-shared USC SSO; `book` completes LibCal's checkout-specific authentication handoff.
+LibCal only issues its SSO redirect once a booking is staged, so `book` signs
+in during checkout with the saved session or credentials. LibCal has no API that lists a patron's bookings, so the confirmation
+email is the record of a reservation; the CLI keeps no local history.
 
-The public Go package exposes `Client.Schedule(ctx, ScheduleOptions)` and
-`Client.Book(ctx, Selection, ReservationDetails)`. `Selection.Validate()` checks
+The Go package exposes `Client.Schedule(ctx, ScheduleOptions)` and
+`Client.Book(ctx, Selection, ReservationDetails)`; `Selection.Validate()` checks
 inputs without making requests.
-Use `libcal.NewPublic()` for public reads and `libcal.Open(ctx)` to reuse
-the CLI session. The former duration-filtered `Availability` and
-`BookEarliest` APIs have been removed.
-
-The `reservations` command reads private local history of bookings confirmed
-by this CLI; its `complete` field is false and browser bookings may be absent.
-History is stored at `$USC_CONFIG_DIR/libcal-reservations.json` (or the platform
-configuration directory when that variable is unset).
 
 Checkout follows the form returned by SSO instead of staging the same booking
 again. Failed or interrupted commands release their temporary checkout using
@@ -269,7 +268,6 @@ marks it to be dropped. `checkout` previews exactly what would be submitted.
 failure such as a closed section changes nothing and is reported in `messages`.
 
 ```sh
-usc auth login webreg
 usc webreg terms
 usc webreg courses --term 20271 --course BUAD-306
 usc webreg add 14790 --term 20271
@@ -280,21 +278,6 @@ usc webreg submit --term 20271 --confirm
 `grade-option SECTION_ID CODE` accepts a code from the section's
 `grade_option.choices`. Unregistered sections change immediately; registered
 sections (`change_request: true`) submit a request that takes effect at checkout.
-
-### Marshall EMS credentials
-
-Marshall EMS currently challenges clients with HTTP `Negotiate`/`NTLM`, which
-the browser presents as a native authentication dialog. `usc auth marshall`
-stores the Marshall email and password in `credentials.json`; it does not yet
-provide Marshall booking commands or validate an EMS login. The password is
-optional when a USC password is already saved, and is never accepted as a
-command-line flag.
-
-```sh
-usc auth marshall user@marshall.usc.edu
-# Or set USC_MARSHALL_EMAIL and optionally USC_MARSHALL_PASSWORD.
-```
-
 
 ### Browser sync
 
@@ -311,9 +294,7 @@ usc browser sync --cdp http://127.0.0.1:9224
 ```
 
 `--cdp` accepts a port, `host:port`, an HTTP(S) CDP endpoint, or a full
-`ws://` / `wss://` debugger URL. When omitted, the CLI uses `USC_CDP` if set,
-otherwise `127.0.0.1:9222`. Some setups (including Grok Bot) expose CDP on
-port `9224`.
+`ws://` / `wss://` debugger URL, and defaults to `127.0.0.1:9222`.
 
 Start Chrome with remote debugging enabled, for example:
 
@@ -324,40 +305,6 @@ chromium --remote-debugging-port=9222
 The command reports attempted/set/skipped counts and the resolved CDP endpoint.
 It never prints cookie values.
 
-
-### Duo bypass code
-
-[Duo](https://itservices.usc.edu/duo/) is USC's multi-factor authentication
-service. The CLI uses a Duo bypass code to complete this second authentication
-step.
-
-To get one, open the [USC Duo bypass code
-page](https://account.usc.edu/2fa/duo-bypass-code), sign in to USC SSO with your
-usual Duo method or a passkey, then copy the bypass code. Paste it when
-`usc auth login` asks for it.
-
-For non-interactive login, provide all credentials through environment
-variables:
-
-```sh
-USC_USERNAME=netid \
-USC_PASSWORD=password \
-USC_DUO_BYPASS=123456789 \
-usc auth login handshake --non-interactive
-```
-
-If USC rejects the password or Duo rejects the bypass code, login stops after
-that single attempt and removes the rejected saved value, so the next
-`usc auth login` prompts for a replacement. Secrets are never resubmitted
-automatically.
-
-After a successful login, the CLI saves the username, password, and bypass
-code with mode `0600` in `credentials.json` inside the USC configuration
-directory (for example, `~/Library/Application Support/usc/credentials.json`
-on macOS). Saved credentials are used for later logins; `--username` and the
-`USC_USERNAME`, `USC_PASSWORD`, and `USC_DUO_BYPASS` environment variables
-override their corresponding saved values. Brightspace and Handshake commands
-use the saved USC session to establish their own application sessions.
 
 ### Command data
 
@@ -370,9 +317,11 @@ session. The CLI does not maintain a separate local cache of course data.
 does not use or require the saved USC session.
 
 Handshake commands use the same operations as the student events experience at
-`usc.joinhandshake.com`. Run `usc auth login handshake` once before using them.
-Category filters accept IDs, names, or the slugs returned by
-`usc handshake categories`. Native relevance/date ordering uses Handshake's
+`usc.joinhandshake.com`.
+Lists return one page as `items` with `has_more` and `next_cursor`; pass
+`next_cursor` to `--after` with the same filters for the next page. Category
+filters accept IDs, names, or the slugs returned by `usc handshake categories`.
+`--organizer` matches a host, employer, or contact name or email. Native relevance/date ordering uses Handshake's
 opaque cursor. The site exposes no event posted timestamp or posted-time sort,
 so `--sort posted-desc` orders numeric event IDs descending as a practical
 new-event monitoring signal and returns an ID cursor.
@@ -391,62 +340,59 @@ usc handshake career-fair 65867
 
 | Command | Description |
 | --- | --- |
-| `usc auth login [brightspace\|handshake\|libcal\|webreg]` | Sign in through USC SSO. Defaults to Brightspace; no booking flags required. |
-| `usc auth status [brightspace\|handshake\|libcal\|webreg]` | Check the saved session; LibCal checks shared USC SSO without staging a room. |
-| `usc auth marshall [EMAIL]` | Save Marshall EMS credentials; the password defaults to the saved USC password. |
-| `usc auth logout` | Delete the saved USC session. |
+| `usc auth login` | Sign in to USC and save the credentials that every later command reuses. |
+| `usc auth status` | Report whether the saved session is valid and whether credentials are saved. |
+| `usc auth logout` | Delete the saved USC session and credentials. |
 | `usc browser sync [--cdp TARGET]` | Copy the saved USC session into Chrome over CDP. Never prints cookie values. |
 | `usc brightspace whoami` | Show the authenticated Brightspace user. |
 | `usc brightspace courses [--all]` | List course enrollments. |
 | `usc brightspace content COURSE_ID [--flat]` | Show a course's content table of contents. |
 | `usc brightspace grades COURSE_ID [--graded-only]` | Show grades for a course. |
 | `usc brightspace announcements [COURSE_ID] [--since TIME]` | Show announcements for one course or all courses. |
-| `usc brightspace assignments COURSE_ID` | List assignment folders for a course. Alias: `dropbox`. |
+| `usc brightspace assignments COURSE_ID` | List assignment folders for a course. |
 | `usc brightspace submissions COURSE_ID FOLDER_ID [--download] [--output DIR]` | List your submissions to an assignment folder, or download every submitted file. |
-| `usc brightspace download COURSE_ID TOPIC_ID [--output DIR] [--markdown] [--ocr]` | Download a content item, optionally converting a PDF to Markdown. Markdown conversion requires [Docling](https://docling-project.github.io/docling/) (`pip install docling`); `--ocr` requires `--markdown`. |
+| `usc brightspace download COURSE_ID TOPIC_ID [--output DIR]` | Download a content item. |
 | `usc handshake categories` | List live event category IDs, names, and CLI slugs. |
 | `usc handshake events [FILTERS]` | Search events. Filters: `--category`, `--organizer`, `--keyword`, `--medium`, `--date`, `--posted-by-school`, `--sort`, `--limit`, and `--after`. |
 | `usc handshake event EVENT_ID` | Show the full event description, contacts, employers, location, and registration state. |
-| `usc handshake career-fairs [FILTERS]` | Search career fairs with the event-list filters. Alias: `fairs`. |
-| `usc handshake career-fair CAREER_FAIR_ID` | Show career-fair details and sessions. Alias: `fair`. |
+| `usc handshake career-fairs [FILTERS]` | Search career fairs with the event-list filters. |
+| `usc handshake career-fair CAREER_FAIR_ID` | Show career-fair details and sessions. |
 | `usc libcal categories` | List Leavey room and pod categories. |
 | `usc libcal spaces [rooms\|pods\|all\|lvl1\|lvl2\|lvl3]` | List Leavey spaces. |
-| `usc libcal room SPACE_ID` | Show a Leavey space's details. |
-| `usc libcal schedule [FILTERS]` | Return server intervals and actual capacities; alias: `availability`. |
+| `usc libcal space SPACE_ID` | Show one Leavey room or pod. |
+| `usc libcal schedule [FILTERS]` | Show each space's available and unavailable intervals. Filters: `--date`, `--end-date`, `--category`, `--min-capacity`, `--max-capacity`. |
 | `usc libcal book --space ID --start TIMESTAMP --end TIMESTAMP` | Book only the explicit selection; requires `--accept-terms`. |
-| `usc libcal reservations [--all]` | List upcoming or all reservations confirmed by this CLI. |
 | `usc libcal release` | Release unfinished CLI checkout state; never cancels confirmed reservations. |
 | `usc webreg terms` | List registration terms and their codes. |
 | `usc webreg programs --term TERM` | List schools and program codes. |
 | `usc webreg courses --term TERM (--program CODE\|--course CODE)` | List courses with sections, seats, clearance, and course-bin membership. |
-| `usc webreg bin --term TERM` | Show myCourseBin with scheduled/registered state and grade options. Alias: `coursebin`. |
+| `usc webreg bin --term TERM` | Show myCourseBin with scheduled/registered state and grade options. |
 | `usc webreg calendar --term TERM` | Show weekly meetings with scheduled, registered, and conflict status. |
 | `usc webreg add\|schedule\|unschedule\|remove SECTION_ID --term TERM` | Change a course-bin section. These plan changes; only `submit` registers or drops. |
 | `usc webreg grade-option SECTION_ID CODE --term TERM` | Change a course-bin section's grade option. |
 | `usc webreg checkout --term TERM` | Preview pending registrations and drops without submitting. |
 | `usc webreg submit --term TERM --confirm` | Submit checkout; changes enrollment. |
 | `usc classes TERM_CODE COURSE_CODE` | Show a public Schedule of Classes course and all of its sections. |
-| `usc sites [NAME]` | List supported USC sites, or show one site. |
 | `usc skill` | Print the bundled `SKILL.md` for use with agent skill systems. |
-| `usc version` | Print version information. |
+| `usc version` | Print the module version and commit this binary was built from. |
 
 ## Output format
 
 Every command except `usc skill` writes JSON to stdout. `usc skill` writes its
 raw Markdown so it can be piped directly into an agent skill system. JSON output
 is pretty-printed when stdout is an interactive terminal and compact when it is
-piped or redirected. Pass `--json` to force compact JSON or `--pretty` to force
-pretty-printed JSON; the flags are mutually exclusive.
+piped or redirected. Pass `--compact` to force single-line JSON or `--pretty` to
+force indented JSON; the flags are mutually exclusive.
 
-Errors are written as JSON to stderr and commands return exit code 1. When the
-CLI knows how to recover, the error object also includes an `action` command:
+Errors are written as JSON to stderr and commands return exit code 1. When a
+command resolves the error, the object names it in `action`:
 
 ```json
-{"error":"authentication required","action":"usc auth login"}
+{"error":"brightspace: USC sign-in is required","action":"usc auth login"}
 ```
 
-Only authentication commands prompt for input.
+Only `usc auth login` prompts for input.
 
 ## License
 
-This project does not currently include a license.
+MIT. See [LICENSE](LICENSE).

@@ -1,4 +1,4 @@
-// Package classes implements the public USC Schedule of Classes contract.
+// Package classes reads the public USC Schedule of Classes.
 package classes
 
 import (
@@ -111,11 +111,11 @@ type instructorResponse struct {
 func (c *Client) Course(ctx context.Context, termCode, courseCode string) (Course, error) {
 	termCode = strings.TrimSpace(termCode)
 	if len(termCode) != 5 || strings.Trim(termCode, "0123456789") != "" {
-		return Course{}, errors.New("TERM_CODE must be a five-digit term code")
+		return Course{}, errors.New("term code must be five digits, such as 20271")
 	}
 	courseCode = strings.ToUpper(strings.TrimSpace(courseCode))
 	if courseCode == "" {
-		return Course{}, errors.New("COURSE_CODE must not be empty")
+		return Course{}, errors.New("course code must not be empty")
 	}
 
 	requestURL := courseURL + "?" + url.Values{
@@ -136,11 +136,8 @@ func (c *Client) Course(ctx context.Context, termCode, courseCode string) (Cours
 		return Course{}, fmt.Errorf("course %s was not found in term %s", courseCode, termCode)
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		body, readErr := io.ReadAll(io.LimitReader(response.Body, 201))
-		if readErr != nil {
-			return Course{}, readErr
-		}
-		return Course{}, fmt.Errorf("classes course: HTTP %d — %s", response.StatusCode, truncate(strings.TrimSpace(string(body)), 200))
+		body, _ := io.ReadAll(io.LimitReader(response.Body, 200))
+		return Course{}, fmt.Errorf("classes course: HTTP %d: %s", response.StatusCode, strings.TrimSpace(string(body)))
 	}
 
 	var wire courseResponse
@@ -162,10 +159,6 @@ func normalizeCourse(wire courseResponse) Course {
 		Sections:       make([]Section, len(wire.Sections)),
 	}
 	for index, wireSection := range wire.Sections {
-		openSeats := wireSection.TotalSeats - wireSection.RegisteredSeats
-		if openSeats < 0 {
-			openSeats = 0
-		}
 		section := Section{
 			ID:              firstField(wireSection.SISSectionID),
 			Type:            wireSection.RNRMode,
@@ -174,7 +167,7 @@ func normalizeCourse(wire courseResponse) Course {
 			TotalSeats:      wireSection.TotalSeats,
 			RegisteredSeats: wireSection.RegisteredSeats,
 			WaitlistedSeats: wireSection.WaitlistedSeats,
-			OpenSeats:       openSeats,
+			OpenSeats:       max(wireSection.TotalSeats-wireSection.RegisteredSeats, 0),
 			Full:            wireSection.IsFull,
 			Units:           append([]string(nil), wireSection.Units...),
 			Schedule:        make([]Meeting, len(wireSection.Schedule)),
@@ -190,10 +183,7 @@ func normalizeCourse(wire courseResponse) Course {
 			}
 		}
 		for instructorIndex, wireInstructor := range wireSection.Instructors {
-			section.Instructors[instructorIndex] = Instructor{
-				FirstName: wireInstructor.FirstName,
-				LastName:  wireInstructor.LastName,
-			}
+			section.Instructors[instructorIndex] = Instructor(wireInstructor)
 		}
 		course.Sections[index] = section
 	}
@@ -206,11 +196,4 @@ func firstField(value string) string {
 		return ""
 	}
 	return fields[0]
-}
-
-func truncate(value string, limit int) string {
-	if len(value) <= limit {
-		return value
-	}
-	return value[:limit]
 }
