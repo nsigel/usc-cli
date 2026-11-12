@@ -62,16 +62,17 @@ const sites: { sprite: SpriteName; name: string; does: string; docs: string }[] 
             <code>{prompt}</code>
             <button class="copy-button" data-copy={prompt}>Copy</button>
           </div>
-          <div class="asks">
-            <span class="asks-label">Then ask</span>
-            {
-              scenarios.map((scenario, index) => (
-                <button class="ask" data-ask={index}>
-                  {scenario.question}
-                </button>
-              ))
-            }
-          </div>
+        </div>
+
+        <div class="asks">
+          <div class="asks-label">Then ask</div>
+          {
+            scenarios.map((scenario, index) => (
+              <button class="ask" data-ask={index}>
+                {scenario.question}
+              </button>
+            ))
+          }
         </div>
 
         <p class="alt">Or install it yourself: <a href="#setup">three commands</a></p>
@@ -159,8 +160,9 @@ const sites: { sprite: SpriteName; name: string; does: string; docs: string }[] 
   .cta {
     position: relative;
     border: 1.5px solid var(--ink);
-    background: var(--panel);
-    box-shadow: var(--shadow);
+    background: var(--ink);
+    color: var(--bg);
+    box-shadow: 4px 4px 0 var(--gold);
   }
 
   .cta :global(.mascot) {
@@ -178,38 +180,54 @@ const sites: { sprite: SpriteName; name: string; does: string; docs: string }[] 
   }
 
   .cta-label {
-    padding: 8px 14px;
-    border-bottom: 1.5px solid var(--ink);
+    padding: 10px 18px;
+    border-bottom: 1px solid #3a3833;
     font-size: 12px;
-    font-weight: 600;
+    color: #b8b2a7;
   }
 
   .prompt {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 16px 14px;
+    gap: 16px;
+    padding: 20px 18px;
   }
 
   .prompt code {
     flex: 1;
-    font-size: 14px;
+    font-size: 16px;
+    font-weight: 500;
     overflow-wrap: anywhere;
+  }
+
+  .prompt code::before {
+    content: "> ";
+    color: var(--gold);
+  }
+
+  .prompt .copy-button {
+    padding: 9px 18px;
+    font-size: 14px;
+    color: var(--ink);
+    box-shadow: 2px 2px 0 var(--bg);
+  }
+
+  .prompt .copy-button.copied {
+    background: var(--bg);
   }
 
   .asks {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
-    align-items: center;
-    padding: 12px 14px 14px;
-    border-top: 1px dashed var(--line);
+    margin-top: 36px;
   }
 
   .asks-label {
+    flex-basis: 100%;
     font-size: 12px;
     color: var(--muted);
-    margin-right: 4px;
+    margin-bottom: 2px;
   }
 
   .ask {
