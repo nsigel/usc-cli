@@ -1,6 +1,6 @@
 // Package usc provides shared error descriptions for USC service clients.
 // Service implementations live in the auth, brightspace, classes, handshake,
-// libcal, and browser subpackages.
+// libcal, webreg, and browser subpackages.
 package usc
 
 import (
@@ -11,6 +11,7 @@ import (
 	"github.com/nsigel/usc-cli/handshake"
 	"github.com/nsigel/usc-cli/libcal"
 	"github.com/nsigel/usc-cli/site"
+	"github.com/nsigel/usc-cli/webreg"
 )
 
 // ErrorInfo is a JSON-ready error description with optional recovery guidance.
@@ -37,11 +38,13 @@ func DescribeError(err error, name site.Name) ErrorInfo {
 		result.Action = "usc auth login handshake"
 	case errors.Is(err, libcal.ErrAuthenticationRequired):
 		result.Action = "usc auth login libcal"
+	case errors.Is(err, webreg.ErrSessionInvalid):
+		result.Action = "usc auth login webreg"
 	case errors.Is(err, brightspace.ErrSessionInvalid):
 		result.Action = "usc auth login"
-	case errors.Is(err, auth.ErrCredentialsRequired), errors.Is(err, auth.ErrBypassRejected), errors.Is(err, auth.ErrSessionNotFound):
+	case errors.Is(err, auth.ErrCredentialsRequired), errors.Is(err, auth.ErrBypassRejected), errors.Is(err, auth.ErrPasswordRejected), errors.Is(err, auth.ErrSessionNotFound):
 		result.Action = "usc auth login"
-		if name == site.Handshake || name == site.LibCal {
+		if name == site.Handshake || name == site.LibCal || name == site.WebReg {
 			result.Action += " " + string(name)
 		}
 	}

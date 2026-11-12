@@ -44,8 +44,6 @@ func loginCommand() *cobra.Command {
 				Password:   first(os.Getenv("USC_PASSWORD"), savedCredentials.Password),
 				BypassCode: first(os.Getenv("USC_DUO_BYPASS"), savedCredentials.BypassCode),
 			}
-			usingSavedBypassCode := credentials.BypassCode != "" &&
-				os.Getenv("USC_DUO_BYPASS") == "" && savedCredentials.BypassCode != ""
 			path, err := config.SessionPath()
 			if err != nil {
 				return err
@@ -54,6 +52,9 @@ func loginCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// A valid session needs no secrets, so prompt only after USC asks for
+			// them, and then only for the missing fields. Each secret is submitted
+			// at most once per command; rejected ones are never retried.
 			err = loginTarget(cmd.Context(), target, path, credentials, fresh)
 			if errors.Is(err, auth.ErrCredentialsRequired) {
 				if err := completeCredentials(cmd, &credentials, nonInteractive); err != nil {
@@ -61,14 +62,12 @@ func loginCommand() *cobra.Command {
 				}
 				err = loginTarget(cmd.Context(), target, path, credentials, fresh)
 			}
-			if errors.Is(err, auth.ErrBypassRejected) && usingSavedBypassCode && !nonInteractive {
-				// A bypass code can expire. Keep the stored value until a replacement
-				// succeeds, but let an interactive login replace it immediately.
-				credentials.BypassCode = ""
-				if err := completeCredentials(cmd, &credentials, false); err != nil {
-					return err
+			if rejected := rejectedField(err); rejected != "" {
+				// Forget the bad saved value so the next login asks for a new one.
+				if forgetErr := forgetCredential(rejected, credentials); forgetErr != nil {
+					return forgetErr
 				}
-				err = loginTarget(cmd.Context(), target, path, credentials, fresh)
+				return withAction(err, strings.TrimSpace("usc auth login "+strings.Join(args, " ")))
 			}
 			if err != nil {
 				return err
@@ -132,6 +131,35 @@ func logoutCommand() *cobra.Command {
 			return writeJSON(cmd, map[string]bool{"logged_out": true})
 		},
 	}
+}
+
+// rejectedField names the saved credential an authentication error rejected.
+func rejectedField(err error) string {
+	switch {
+	case errors.Is(err, auth.ErrPasswordRejected):
+		return "password"
+	case errors.Is(err, auth.ErrBypassRejected):
+		return "bypass_code"
+	}
+	return ""
+}
+
+// forgetCredential clears a saved secret only if it is the value that was
+// rejected; an environment override must not erase a working saved value.
+func forgetCredential(field string, submitted auth.Credentials) error {
+	saved, err := loadCredentials()
+	if err != nil {
+		return err
+	}
+	switch {
+	case field == "password" && saved.Password != "" && saved.Password == submitted.Password:
+		saved.Password = ""
+	case field == "bypass_code" && saved.BypassCode != "" && saved.BypassCode == submitted.BypassCode:
+		saved.BypassCode = ""
+	default:
+		return nil
+	}
+	return writeCredentials(saved)
 }
 
 func authenticationTarget(args []string) (string, error) {

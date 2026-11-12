@@ -24,6 +24,7 @@ go get github.com/nsigel/usc-cli
 | `brightspace` | `Open(ctx)` for authenticated course data and downloads |
 | `handshake` | `Open(ctx)` for authenticated events and career fairs |
 | `libcal` | `NewPublic()` for availability; `Open(ctx)` for booking |
+| `webreg` | `Open(ctx)` for Web Registration catalog, course bin, and checkout |
 | `classes` | `New()` for public course and section data |
 | `auth` | `Open(ctx, site.Name, Options)` for USC SSO; `Login` / `LoginFresh` for explicit login |
 | `browser` | `SyncCookies(ctx, sessionFile, target)` for Chrome CDP sync |
@@ -43,13 +44,13 @@ if err != nil {
 courses, err := client.Courses(ctx, false)
 ```
 
-`brightspace.Open`, `handshake.Open`, and `libcal.Open` share the CLI's session
-path, including `USC_CONFIG_DIR`. Brightspace and Handshake establish their
+`brightspace.Open`, `handshake.Open`, `webreg.Open`, and `libcal.Open` share the
+CLI's session path, including `USC_CONFIG_DIR`. Brightspace, Handshake, and WebReg establish their
 application sessions through USC SSO when opened. LibCal defers authentication
 until its checkout handoff; availability does not need login.
 
-For a standalone application, use `OpenWithOptions` (available in all three
-packages) with `auth.Options`:
+For a standalone application, use `OpenWithOptions` (available in every
+authenticated package) with `auth.Options`:
 
 ```go
 client, err := brightspace.OpenWithOptions(ctx, auth.Options{
@@ -77,8 +78,8 @@ info := usc.DescribeError(err, site.Brightspace)
 ```
 
 This only describes the error; it does not recover, retry, or initiate login.
-If a later Brightspace or Handshake request returns `ErrSessionInvalid`, reopen
-the client. API operations are not automatically replayed.
+If a later Brightspace, Handshake, or WebReg request returns `ErrSessionInvalid`,
+reopen the client. API operations are not automatically replayed.
 
 LibCal stores checkout recovery and booking history beside the selected session
 file. `client.Reservations(includePast)` reads that client's history; the
@@ -94,6 +95,7 @@ Runnable examples:
 ```sh
 go run ./examples/availability  # today's Leavey room intervals, no login needed
 go run ./examples/brightspace  # enrollments using saved SSO or explicit env credentials
+go run ./examples/webreg       # the newest term's course bin using saved SSO or env credentials
 ```
 
 ## Features
@@ -136,6 +138,18 @@ go run ./examples/brightspace  # enrollments using saved SSO or explicit env cre
 | Live Leavey room and pod inventory |
 | Structured schedules with actual capacities and interval status |
 | Explicit-slot booking and inspectable checkout forms |
+
+### Web Registration
+
+| Feature |
+| --- |
+| Registration terms and per-term schools and program codes |
+| Program or course catalog with sections, seats, clearance, and course-bin membership |
+| myCourseBin with each section's scheduled/registered state and grade option |
+| myCalendar meetings with conflict status |
+| Add, schedule, unschedule, and remove course-bin sections |
+| Grade-option changes |
+| Checkout preview and explicitly confirmed submission |
 
 ### Agent skill
 
@@ -241,6 +255,32 @@ A hard kill or lost connection before LibCal returns a checkout ID cannot be
 recovered locally; LibCal's temporary hold expiry remains the fallback.
 
 
+### WebReg registration
+
+WebReg keeps an active term in its server session, so every term-scoped command
+takes `--term` (a code from `usc webreg terms`) and selects it first. Section IDs
+are the numbers shown in `courses` and `bin`.
+
+Registration is a two-step flow, as in the browser. Course-bin commands only
+plan changes: `add` places a section in myCourseBin already scheduled,
+`schedule` marks it for registration, and `unschedule` on a registered section
+marks it to be dropped. `checkout` previews exactly what would be submitted.
+`submit --confirm` sends it; WebReg does not process partial registrations, so a
+failure such as a closed section changes nothing and is reported in `messages`.
+
+```sh
+usc auth login webreg
+usc webreg terms
+usc webreg courses --term 20271 --course BUAD-306
+usc webreg add 14790 --term 20271
+usc webreg checkout --term 20271
+usc webreg submit --term 20271 --confirm
+```
+
+`grade-option SECTION_ID CODE` accepts a code from the section's
+`grade_option.choices`. Unregistered sections change immediately; registered
+sections (`change_request: true`) submit a request that takes effect at checkout.
+
 ### Marshall EMS credentials
 
 Marshall EMS currently challenges clients with HTTP `Negotiate`/`NTLM`, which
@@ -306,6 +346,11 @@ USC_DUO_BYPASS=123456789 \
 usc auth login handshake --non-interactive
 ```
 
+If USC rejects the password or Duo rejects the bypass code, login stops after
+that single attempt and removes the rejected saved value, so the next
+`usc auth login` prompts for a replacement. Secrets are never resubmitted
+automatically.
+
 After a successful login, the CLI saves the username, password, and bypass
 code with mode `0600` in `credentials.json` inside the USC configuration
 directory (for example, `~/Library/Application Support/usc/credentials.json`
@@ -346,8 +391,8 @@ usc handshake career-fair 65867
 
 | Command | Description |
 | --- | --- |
-| `usc auth login [brightspace\|handshake\|libcal]` | Sign in through USC SSO. Defaults to Brightspace; no booking flags required. |
-| `usc auth status [brightspace\|handshake\|libcal]` | Check the saved session; LibCal checks shared USC SSO without staging a room. |
+| `usc auth login [brightspace\|handshake\|libcal\|webreg]` | Sign in through USC SSO. Defaults to Brightspace; no booking flags required. |
+| `usc auth status [brightspace\|handshake\|libcal\|webreg]` | Check the saved session; LibCal checks shared USC SSO without staging a room. |
 | `usc auth marshall [EMAIL]` | Save Marshall EMS credentials; the password defaults to the saved USC password. |
 | `usc auth logout` | Delete the saved USC session. |
 | `usc browser sync [--cdp TARGET]` | Copy the saved USC session into Chrome over CDP. Never prints cookie values. |
@@ -371,6 +416,15 @@ usc handshake career-fair 65867
 | `usc libcal book --space ID --start TIMESTAMP --end TIMESTAMP` | Book only the explicit selection; requires `--accept-terms`. |
 | `usc libcal reservations [--all]` | List upcoming or all reservations confirmed by this CLI. |
 | `usc libcal release` | Release unfinished CLI checkout state; never cancels confirmed reservations. |
+| `usc webreg terms` | List registration terms and their codes. |
+| `usc webreg programs --term TERM` | List schools and program codes. |
+| `usc webreg courses --term TERM (--program CODE\|--course CODE)` | List courses with sections, seats, clearance, and course-bin membership. |
+| `usc webreg bin --term TERM` | Show myCourseBin with scheduled/registered state and grade options. Alias: `coursebin`. |
+| `usc webreg calendar --term TERM` | Show weekly meetings with scheduled, registered, and conflict status. |
+| `usc webreg add\|schedule\|unschedule\|remove SECTION_ID --term TERM` | Change a course-bin section. These plan changes; only `submit` registers or drops. |
+| `usc webreg grade-option SECTION_ID CODE --term TERM` | Change a course-bin section's grade option. |
+| `usc webreg checkout --term TERM` | Preview pending registrations and drops without submitting. |
+| `usc webreg submit --term TERM --confirm` | Submit checkout; changes enrollment. |
 | `usc classes TERM_CODE COURSE_CODE` | Show a public Schedule of Classes course and all of its sections. |
 | `usc sites [NAME]` | List supported USC sites, or show one site. |
 | `usc skill` | Print the bundled `SKILL.md` for use with agent skill systems. |

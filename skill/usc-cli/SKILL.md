@@ -1,6 +1,6 @@
 ---
 name: usc-cli
-description: Access USC Brightspace, Handshake events and career fairs, Leavey Library room availability and bookings, and the public Schedule of Classes with the Go-based `usc` CLI. Use when retrieving authorized course data, searching career events, booking or checking study spaces, or checking current sections.
+description: Access USC Brightspace, Handshake events and career fairs, Leavey Library room availability and bookings, Web Registration (course bin, calendar, and checkout), and the public Schedule of Classes with the Go-based `usc` CLI. Use when retrieving authorized course data, searching career events, booking or checking study spaces, planning or submitting registration, or checking current sections.
 ---
 
 # USC CLI
@@ -11,7 +11,8 @@ description: Access USC Brightspace, Handshake events and career fairs, Leavey L
 - Run `usc auth status handshake` before every Handshake request.
 - LibCal discovery is public. Inspect room types and availability before booking; authenticate when the saved session is missing or the command reports `libcal_authentication_required`.
 - Treat authentication sessions, passwords, Duo codes, and cookies as secrets. Never print, store, or share them.
-- Do not submit coursework, alter enrollment, or send messages.
+- Do not submit coursework or send messages.
+- Only change WebReg state (`add`, `schedule`, `unschedule`, `remove`, `grade-option`) when the user asks. Only run `usc webreg submit --confirm` after showing the user `usc webreg checkout` and receiving explicit approval to change their enrollment.
 - Only book a room when the user explicitly requests a reservation. Include `--accept-terms` only when the user has agreed to the reservation terms.
 
 ## Locate a course
@@ -55,6 +56,28 @@ usc handshake career-fair CAREER_FAIR_ID
 - Organizer matching checks host, employer, and detail contact names/emails.
 - Handshake exposes no event posting timestamp. `posted-desc` uses descending numeric IDs as a new-event monitoring signal; its cursor kind is `id`.
 - Event and fair data is live and requires the saved Handshake application session.
+
+## Web Registration
+
+```sh
+usc auth login webreg
+usc webreg terms
+usc webreg programs --term TERM
+usc webreg courses --term TERM --program CODE | --course CODE
+usc webreg bin --term TERM
+usc webreg calendar --term TERM
+usc webreg add|schedule|unschedule|remove SECTION_ID --term TERM
+usc webreg grade-option SECTION_ID CODE --term TERM
+usc webreg checkout --term TERM
+usc webreg submit --term TERM --confirm
+```
+
+- Get `TERM` codes from `webreg terms`; section IDs from `courses` or `bin`.
+- Course-bin changes only plan registration. `add` places a section in the bin already scheduled. Checkout registers scheduled, unregistered sections and drops registered, unscheduled ones. Unscheduling a registered section therefore means dropping it at checkout.
+- `clearance: "D"` sections need department clearance; `seats.closed` sections usually fail at checkout.
+- Use `calendar` to spot `Conflicted` meetings before checkout.
+- `submit` is all-or-nothing. On `succeeded: false`, report `messages`; nothing changed. Do not retry automatically.
+- If an error's `action` is `usc auth login webreg`, authenticate and retry the read.
 
 ## Leavey Library / LibCal
 

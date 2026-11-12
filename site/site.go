@@ -47,7 +47,10 @@ var catalog = []Site{
 	{Name: Classes, URL: "https://classes.usc.edu/"},
 	{Name: Handshake, URL: "https://usc.joinhandshake.com/", LoginURL: SharedSSOLoginURL, Login: ShibbolethSAML},
 	{Name: LibCal, URL: "https://libcal.usc.edu/", LoginURL: SharedSSOLoginURL, Login: ShibbolethSAML},
-	{Name: WebReg, URL: "https://webreg.usc.edu/", LoginURL: "https://webreg.usc.edu/auth/login?returnUrl=%2FTerms", Login: EntraOIDC},
+	// WebReg's /auth/login forces a new OIDC round trip on every visit, and
+	// Microsoft rejects rapid repeats as a request loop. An app page reaches
+	// Microsoft only when the WebReg session has expired.
+	{Name: WebReg, URL: "https://webreg.usc.edu/", LoginURL: "https://webreg.usc.edu/Terms", Login: EntraOIDC},
 }
 
 // All returns the known sites in command-line order.

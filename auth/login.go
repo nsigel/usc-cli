@@ -3,6 +3,7 @@
 package auth
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -18,6 +19,8 @@ var (
 	ErrCredentialsRequired = errors.New("credentials are required")
 	// ErrBypassRejected means Duo did not accept the supplied bypass code.
 	ErrBypassRejected = errors.New("bypass code was rejected")
+	// ErrPasswordRejected means USC did not accept the username and password.
+	ErrPasswordRejected = errors.New("USC rejected the username or password")
 )
 
 // Credentials are used only when an existing session cannot reach the target.
@@ -46,8 +49,8 @@ type authenticator struct {
 //
 // Target must be an absolute HTTPS URL. A missing session file is treated as
 // an empty session. Login returns ErrCredentialsRequired when the session is
-// insufficient and credentials is incomplete, and ErrBypassRejected when Duo
-// rejects the bypass code.
+// insufficient and credentials is incomplete, ErrPasswordRejected when USC
+// rejects the password, and ErrBypassRejected when Duo rejects the bypass code.
 func Login(ctx context.Context, target, sessionFile string, credentials Credentials) error {
 	return login(ctx, target, sessionFile, credentials, false)
 }
@@ -100,6 +103,11 @@ func (a *authenticator) open(ctx context.Context, target string, credentials Cre
 			setField(&form, "j_username", credentials.Username)
 			setField(&form, "j_password", credentials.Password)
 			current, err = a.submit(ctx, current, form)
+
+		case isUSCLoginRejected(current):
+			// The rejection page repeats the login form. Submitting it again would
+			// post blank credentials in a loop and count against account lockout.
+			return nil, ErrPasswordRejected
 
 		case isUSCSAMLBootstrap(current):
 			// USC splits its SAML request across two visits, so the value must
@@ -181,6 +189,11 @@ func (a *authenticator) follow(ctx context.Context, current *page) (*page, error
 
 func isUSCLogin(page *page) bool {
 	return page.URL.Hostname() == "login.usc.edu" && page.URL.Path == "/login/login"
+}
+
+func isUSCLoginRejected(page *page) bool {
+	return page.URL.Hostname() == "login.usc.edu" && page.URL.Path == "/login/authuserpassword" &&
+		bytes.Contains(page.Body, []byte(`id="loginform"`))
 }
 
 func isUSCSAMLBootstrap(page *page) bool {
