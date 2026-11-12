@@ -14,8 +14,6 @@ import (
 )
 
 const (
-	// Keep the full build here: Mimic uses it for the User-Agent, and Duo's
-	// high-entropy client hints must report the same version.
 	chromeVersion  = "151.0.7922.76"
 	documentAccept = "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
 )
@@ -54,16 +52,27 @@ func newAuthenticator() (*authenticator, error) {
 		duoClientHintUA: transport.DefaultHeaders.Get("sec-ch-ua"),
 		microsoft:       make(map[string]string),
 		client: &http.Client{
-			Transport: transport,
-			Jar:       jar,
-			Timeout:   45 * time.Second,
-			// The state machine must see every identity-provider boundary; the
-			// default redirect policy would hide the page that chose the next flow.
-			CheckRedirect: func(*http.Request, []*http.Request) error {
-				return http.ErrUseLastResponse
-			},
+			Transport:     transport,
+			Jar:           jar,
+			Timeout:       45 * time.Second,
+			CheckRedirect: neverFollowRedirects,
 		},
 	}, nil
+}
+
+// neverFollowRedirects hands every redirect back to the SSO state machine,
+// which must see each identity-provider boundary to choose the next step.
+func neverFollowRedirects(*http.Request, []*http.Request) error {
+	return http.ErrUseLastResponse
+}
+
+// requireHTTPS is checked on every hop, since each can carry cookies or
+// signed SSO state.
+func requireHTTPS(target *url.URL) error {
+	if target.Scheme != "https" || target.Host == "" {
+		return fmt.Errorf("refusing non-HTTPS authentication URL %q", target.Redacted())
+	}
+	return nil
 }
 
 func (a *authenticator) submit(ctx context.Context, current *page, form form) (*page, error) {
@@ -71,8 +80,6 @@ func (a *authenticator) submit(ctx context.Context, current *page, form form) (*
 	if err != nil {
 		return nil, err
 	}
-	// HTML methods are case-insensitive, while the request-header decisions
-	// below compare Go's canonical method constants.
 	method := strings.ToUpper(form.Method)
 	if method == "" {
 		method = http.MethodGet
@@ -95,10 +102,8 @@ func (a *authenticator) do(ctx context.Context, method, rawURL string, body []by
 	if err != nil {
 		return nil, err
 	}
-	// Every continuation can carry bearer cookies or signed SSO state, so the
-	// initial target's HTTPS check is not enough to prevent a downgrade leak.
-	if request.URL.Scheme != "https" || request.URL.Host == "" {
-		return nil, fmt.Errorf("refusing non-HTTPS authentication URL %q", request.URL.Redacted())
+	if err := requireHTTPS(request.URL); err != nil {
+		return nil, err
 	}
 	request.Header.Set("Accept", documentAccept)
 	request.Header.Set("Accept-Language", "en-US,en;q=0.9")

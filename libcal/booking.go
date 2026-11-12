@@ -74,12 +74,12 @@ func (c *Client) Book(ctx context.Context, selection Selection, details Reservat
 	if !details.AcceptTerms {
 		return Reservation{}, errors.New("booking requires acceptance of the LibCal reservation terms")
 	}
-	tx, err := c.beginCheckout(ctx, false)
+	tx, err := c.beginCheckout(ctx)
 	if err != nil {
 		return Reservation{}, err
 	}
 	defer tx.finish(&resultErr)
-	slot, err := c.selectedSlot(ctx, selection)
+	slot, err := c.slotStartingAt(ctx, selection)
 	if err != nil {
 		return Reservation{}, err
 	}
@@ -97,9 +97,9 @@ func (c *Client) Book(ctx context.Context, selection Selection, details Reservat
 	return Reservation{Space: slot.Space, Start: slot.Start, End: slot.End, State: "confirmed", ConfirmedAt: time.Now()}, nil
 }
 
-// selectedSlot finds the selection's start in the live schedule. LibCal's
-// hold validates the requested end.
-func (c *Client) selectedSlot(ctx context.Context, selection Selection) (availableSlot, error) {
+// slotStartingAt finds the selection's start in the live schedule. The end is
+// not checked here: LibCal validates it when the hold is extended.
+func (c *Client) slotStartingAt(ctx context.Context, selection Selection) (availableSlot, error) {
 	space, err := c.Space(ctx, selection.SpaceID)
 	if err != nil {
 		return availableSlot{}, err
@@ -124,9 +124,8 @@ func (c *Client) selectedSlot(ctx context.Context, selection Selection) (availab
 	return availableSlot{}, &Error{Code: "libcal_selected_slot_unavailable", Message: "the selected space and start are unavailable; refresh the schedule"}
 }
 
-// submission is the checkout form's complete POST body. LibCal's own booking
-// form gets the fields its browser submit handler appends; the equipment
-// checkout form already carries them.
+// LibCal's own booking form gets the fields its browser submit handler
+// appends; the equipment checkout form already carries them.
 func (form bookingForm) submission(details ReservationDetails, slot availableSlot, hold pendingBooking) (url.Values, error) {
 	values, err := form.answers(details)
 	if err != nil || form.Action == equipmentCheckoutPath {
@@ -150,26 +149,23 @@ func (form bookingForm) submission(details ReservationDetails, slot availableSlo
 	return values, nil
 }
 
-// submit posts the reservation. The checkout is marked as submitting first,
-// so a killed process can never silently retry a reservation whose
-// confirmation was lost; only a definite rejection clears the mark.
 func (c *Client) submit(ctx context.Context, form bookingForm, values url.Values, tx *checkout) error {
-	tx.state.Submitting = true
+	tx.state.OutcomeUnknown = true
 	if err := tx.save(); err != nil {
-		tx.state.Submitting = false
+		tx.state.OutcomeUnknown = false
 		return err
 	}
 	response, err := c.sendForm(ctx, form, values)
 	var httpRejection *ResponseError
 	if errors.As(err, &httpRejection) && httpRejection.Status >= 400 && httpRejection.Status < 500 {
-		tx.state.Submitting = false
+		tx.state.OutcomeUnknown = false
 		return err
 	}
 	if err == nil {
 		err = checkBookingResponse(response)
 		var rejection *Error
 		if errors.As(err, &rejection) {
-			tx.state.Submitting = false
+			tx.state.OutcomeUnknown = false
 			return err
 		}
 	}
@@ -184,7 +180,6 @@ func (c *Client) submit(ctx context.Context, form bookingForm, values url.Values
 	return nil
 }
 
-// sendForm submits the form to its own action, which must stay on LibCal.
 func (c *Client) sendForm(ctx context.Context, form bookingForm, values url.Values) ([]byte, error) {
 	base, _ := url.Parse(baseURL)
 	target, err := base.Parse(form.Action)

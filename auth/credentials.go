@@ -43,9 +43,6 @@ func SaveCredentials(file string, credentials Credentials) error {
 	return nil
 }
 
-// forgetRejected clears a secret in file that USC or Duo just rejected, so it
-// is never resubmitted and cannot count toward an account lockout. A rejected
-// value that did not come from file leaves it alone.
 func forgetRejected(file string, err error, submitted Credentials) {
 	password, bypass := errors.Is(err, ErrPasswordRejected), errors.Is(err, ErrBypassRejected)
 	if file == "" || !password && !bypass {
@@ -66,8 +63,6 @@ func forgetRejected(file string, err error, submitted Credentials) {
 	_ = SaveCredentials(file, saved)
 }
 
-// writePrivateFile atomically replaces path with owner-only contents, so
-// secrets are never briefly world-readable or left partially written.
 func writePrivateFile(path string, data []byte) error {
 	directory := filepath.Dir(path)
 	if err := os.MkdirAll(directory, 0o700); err != nil {

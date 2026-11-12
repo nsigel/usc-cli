@@ -2,9 +2,6 @@ package handshake
 
 import "strings"
 
-// Wire types mirror Handshake's GraphQL responses; normalize functions turn
-// them into the package's public types.
-
 type categoryWire struct {
 	ID                 string `json:"id"`
 	Name               string `json:"name"`

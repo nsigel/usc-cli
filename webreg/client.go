@@ -29,7 +29,6 @@ const (
 	maxBody        = 16 << 20
 )
 
-// errSessionInvalid reports that WebReg redirected to sign-in.
 var errSessionInvalid = &auth.SiteError{Site: site.WebReg, Err: auth.ErrSessionInvalid}
 
 // Doer is the HTTP surface the client needs. auth.Session satisfies it.
@@ -90,8 +89,6 @@ func validTerm(term string) error {
 	return nil
 }
 
-// page GETs a WebReg page, following same-site redirects such as term
-// selection. Any redirect toward sign-in reports errSessionInvalid.
 func (c *Client) page(ctx context.Context, path, referer string) ([]byte, error) {
 	target := baseURL + path
 	for range maxRedirects + 1 {
@@ -116,29 +113,39 @@ func (c *Client) page(ctx context.Context, path, referer string) ([]byte, error)
 			continue
 		}
 		if response.StatusCode < 200 || response.StatusCode >= 300 {
-			return nil, &Error{Operation: "GET " + path, Status: response.StatusCode, Message: shortText(data)}
+			return nil, &Error{Operation: "GET " + path, Status: response.StatusCode, Message: safeServerMessage(data)}
 		}
 		return data, nil
 	}
 	return nil, fmt.Errorf("WebReg GET %s: too many redirects", path)
 }
 
-// post sends a same-origin form POST the way WebReg's pages do. ajax adds the
-// XMLHttpRequest markers its section API requires.
-func (c *Client) post(ctx context.Context, path string, form url.Values, referer string, ajax bool) ([]byte, error) {
+// postForm submits a page's form the way a browser navigation does.
+func (c *Client) postForm(ctx context.Context, path string, form url.Values, referer string) ([]byte, error) {
+	return c.post(ctx, path, form, referer, map[string]string{
+		"Accept":       documentAccept,
+		"Content-Type": "application/x-www-form-urlencoded",
+	})
+}
+
+// postAJAX calls WebReg's section API the way its page scripts do.
+func (c *Client) postAJAX(ctx context.Context, path string, form url.Values, referer string) ([]byte, error) {
+	return c.post(ctx, path, form, referer, map[string]string{
+		"Accept":           "*/*",
+		"Content-Type":     "application/x-www-form-urlencoded; charset=UTF-8",
+		"X-Requested-With": "XMLHttpRequest",
+		"X-Csrf":           "1",
+	})
+}
+
+func (c *Client) post(ctx context.Context, path string, form url.Values, referer string, headers map[string]string) ([]byte, error) {
 	request, err := c.newRequest(ctx, http.MethodPost, baseURL+path, strings.NewReader(form.Encode()), referer)
 	if err != nil {
 		return nil, err
 	}
 	request.Header.Set("Origin", baseURL)
-	if ajax {
-		request.Header.Set("Accept", "*/*")
-		request.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
-		request.Header.Set("X-Requested-With", "XMLHttpRequest")
-		request.Header.Set("X-Csrf", "1")
-	} else {
-		request.Header.Set("Accept", documentAccept)
-		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	for name, value := range headers {
+		request.Header.Set(name, value)
 	}
 	response, data, err := c.do(request)
 	if err != nil {
@@ -153,7 +160,7 @@ func (c *Client) post(ctx context.Context, path string, form url.Values, referer
 		return nil, errSessionInvalid
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, &Error{Operation: "POST " + path, Status: response.StatusCode, Message: shortText(data)}
+		return nil, &Error{Operation: "POST " + path, Status: response.StatusCode, Message: safeServerMessage(data)}
 	}
 	return data, nil
 }
@@ -186,12 +193,16 @@ func (c *Client) do(request *http.Request) (*http.Response, []byte, error) {
 	if response.Request == nil {
 		response.Request = request
 	}
-	// Transports that follow redirects themselves land on the sign-in page
-	// with a 200, so the final URL matters as much as the status.
-	if signInURL(response.Request.URL) {
+	if landedOnSignIn(response) {
 		return nil, nil, errSessionInvalid
 	}
 	return response, data, nil
+}
+
+// landedOnSignIn catches a transport that followed redirects by itself: the
+// sign-in page then arrives as a 200, and only its URL gives it away.
+func landedOnSignIn(response *http.Response) bool {
+	return signInURL(response.Request.URL)
 }
 
 func signInURL(location *url.URL) bool {
@@ -205,9 +216,9 @@ func signInURL(location *url.URL) bool {
 	return strings.HasPrefix(path, "/auth/login") || path == "/signin-oidc"
 }
 
-// shortText returns a brief plain-text server message, or nothing when the
+// safeServerMessage returns a short server explanation, or nothing when the
 // body is a full page or may echo session state.
-func shortText(data []byte) string {
+func safeServerMessage(data []byte) string {
 	message := text(dom.Parse(data))
 	if len(data) > 2048 || len(message) > 300 {
 		return ""

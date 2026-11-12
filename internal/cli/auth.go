@@ -17,9 +17,9 @@ func authCommand() *cobra.Command {
 	return group("auth", "Manage the saved USC sign-in", loginCommand(), statusCommand(), logoutCommand())
 }
 
-// One USC sign-in covers every site, so auth commands need no site argument;
-// they open Brightspace to run or check it.
-const authSite = site.Brightspace
+// signInProbe is the site auth commands open to run or check the USC sign-in.
+// Any site would do: one sign-in covers them all.
+const signInProbe = site.Brightspace
 
 func loginCommand() *cobra.Command {
 	return &cobra.Command{
@@ -30,14 +30,11 @@ func loginCommand() *cobra.Command {
 			"Without a terminal it reads USC_USERNAME, USC_PASSWORD, and USC_DUO_BYPASS instead.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			// Secrets have no flags: process listings and shell histories expose
-			// command-line arguments.
 			options, err := signIn()
 			if err != nil {
 				return err
 			}
-			// A valid session needs no secrets, so ask only after USC does.
-			_, err = auth.Open(cmd.Context(), authSite, options)
+			_, err = auth.Open(cmd.Context(), signInProbe, options)
 			if errors.Is(err, auth.ErrCredentialsRequired) {
 				if options.Credentials, err = options.ResolveCredentials(); err != nil {
 					return err
@@ -45,12 +42,11 @@ func loginCommand() *cobra.Command {
 				if err := promptForMissing(cmd, &options.Credentials); err != nil {
 					return err
 				}
-				_, err = auth.Open(cmd.Context(), authSite, options)
+				_, err = auth.Open(cmd.Context(), signInProbe, options)
 			}
 			if err != nil {
 				return err
 			}
-			// Save the credentials so later commands can sign in by themselves.
 			credentials, err := options.ResolveCredentials()
 			if err != nil {
 				return err
@@ -79,13 +75,10 @@ func statusCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			// Test the session alone: without credentials nothing is submitted.
-			_, err = auth.Open(cmd.Context(), authSite, auth.Options{SessionFile: options.SessionFile})
+			_, err = auth.Open(cmd.Context(), signInProbe, auth.Options{SessionFile: options.SessionFile})
 			if err != nil && !errors.Is(err, auth.ErrCredentialsRequired) {
 				return err
 			}
-			// With credentials available, commands sign in again by themselves
-			// when the session has expired.
 			return writeJSON(cmd, map[string]bool{"authenticated": err == nil, "credentials_saved": credentials.Complete()})
 		},
 	}
@@ -111,8 +104,6 @@ func logoutCommand() *cobra.Command {
 	}
 }
 
-// promptForMissing asks for each empty credential on a terminal. Without one
-// there is nobody to ask, so the missing fields are reported instead.
 func promptForMissing(cmd *cobra.Command, credentials *auth.Credentials) error {
 	fields := []struct {
 		name, label string
@@ -131,7 +122,7 @@ func promptForMissing(cmd *cobra.Command, credentials *auth.Credentials) error {
 				missing = append(missing, field.name)
 			}
 		}
-		return auth.ForSite(authSite, fmt.Errorf("%w: run usc auth login in a terminal, or set %s", auth.ErrCredentialsRequired, strings.Join(missing, ", ")))
+		return auth.ForSite(signInProbe, fmt.Errorf("%w: run usc auth login in a terminal, or set %s", auth.ErrCredentialsRequired, strings.Join(missing, ", ")))
 	}
 	reader := bufio.NewReader(input)
 	for _, field := range fields {

@@ -29,7 +29,6 @@ type pendingBooking struct {
 	OptionSelected  int      `json:"optionSelected"`
 }
 
-// fields are the hold's values as LibCal expects them echoed back.
 func (b pendingBooking) fields() map[string]string {
 	return map[string]string{
 		"id": strconv.Itoa(b.ID), "eid": strconv.Itoa(b.EID), "seat_id": strconv.Itoa(b.SeatID),
@@ -38,15 +37,12 @@ func (b pendingBooking) fields() map[string]string {
 	}
 }
 
-// echo adds the hold to a request as bookings[0][...] form values.
 func (b pendingBooking) echo(values url.Values) {
 	for name, value := range b.fields() {
 		values.Set("bookings[0]["+name+"]", value)
 	}
 }
 
-// changeHolds posts one change to the slot's day and returns the holds LibCal
-// reports afterwards. action names the change in errors.
 func (c *Client) changeHolds(ctx context.Context, slot availableSlot, values url.Values, action string) ([]pendingBooking, error) {
 	values.Set("lid", strconv.Itoa(leaveyLocationID))
 	values.Set("gid", strconv.Itoa(slot.Space.CategoryID))
@@ -69,7 +65,6 @@ func (c *Client) changeHolds(ctx context.Context, slot availableSlot, values url
 	return response.Bookings, nil
 }
 
-// addHold stages the slot's start with LibCal's default duration.
 func (c *Client) addHold(ctx context.Context, slot availableSlot) (pendingBooking, error) {
 	holds, err := c.changeHolds(ctx, slot, url.Values{
 		"add[eid]":      {strconv.Itoa(slot.Space.ID)},
@@ -90,8 +85,6 @@ func (c *Client) addHold(ctx context.Context, slot availableSlot) (pendingBookin
 	return pendingBooking{}, errors.New("LibCal did not return the selected room hold")
 }
 
-// extendHold changes the hold to end at slot.End, which must be one of the
-// end times LibCal offered with the hold.
 func (c *Client) extendHold(ctx context.Context, slot availableSlot, hold pendingBooking) (pendingBooking, error) {
 	endsAtSlotEnd := func(value string) bool {
 		end, err := parseLibCalTime(value, slot.Start.Location())
@@ -131,7 +124,6 @@ func (c *Client) extendHold(ctx context.Context, slot availableSlot, hold pendin
 	return pendingBooking{}, errors.New("LibCal did not return the updated room hold")
 }
 
-// removeHold releases a hold that never reached a checkout session.
 func (c *Client) removeHold(ctx context.Context, slot availableSlot, hold pendingBooking) error {
 	values := url.Values{"removeId": {strconv.Itoa(hold.ID)}}
 	hold.echo(values)

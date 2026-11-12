@@ -60,7 +60,6 @@ func (c *Client) checkout(ctx context.Context, term string) (*Checkout, url.Valu
 		checkout.Message = text(message)
 	}
 
-	// Headings and course blocks are siblings, so walk them in document order.
 	courses := parseCourses(wrapper)
 	byCode := make(map[string]Course, len(courses))
 	for _, course := range courses {
@@ -125,7 +124,7 @@ func (c *Client) Submit(ctx context.Context, term string) (*CheckoutResult, erro
 	if form.Get("activeTerm") != "" && form.Get("activeTerm") != term {
 		return nil, errors.New("WebReg checkout is for term " + form.Get("activeTerm") + ", not " + term)
 	}
-	data, err := c.post(ctx, "/CheckoutResponse", form, "/Checkout", false)
+	data, err := c.postForm(ctx, "/CheckoutResponse", form, "/Checkout")
 	if err != nil {
 		return nil, err
 	}

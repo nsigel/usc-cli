@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"errors"
 	"net/url"
 	"regexp"
 	"strings"
@@ -21,18 +20,7 @@ type form struct {
 	Fields []field
 }
 
-func firstForm(page *page) (form, error) {
-	form, ok := autoForm(page)
-	if !ok {
-		return form, errors.New("no form found")
-	}
-	return form, nil
-}
-
-// autoForm reads the page's first form. SSO handoff pages make the first form
-// their continuation; restricting the choice avoids submitting unrelated
-// account or recovery forms.
-func autoForm(page *page) (form, bool) {
+func firstForm(page *page) (form, bool) {
 	node := dom.FindFirst(dom.Parse(page.Body), dom.Tag("form"))
 	if node == nil {
 		return form{}, false
@@ -55,9 +43,7 @@ var (
 	scriptURLPattern        = regexp.MustCompile(`(?is)(?:var|let|const)\s+url\s*=\s*["']([^"']+)["']`)
 )
 
-// htmlNavigation recognizes only static browser redirects used by the known
-// providers. It is intentionally not a general JavaScript evaluator.
-func htmlNavigation(page *page) (*url.URL, bool) {
+func staticRedirect(page *page) (*url.URL, bool) {
 	document := dom.Parse(page.Body)
 	destination := metaRefresh(document)
 	if destination == "" {

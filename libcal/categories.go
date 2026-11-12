@@ -45,8 +45,6 @@ func Categories() []CategoryInfo {
 	return result
 }
 
-// selectCategories resolves a selector to category pages in site order.
-// "rooms" is every group-room floor; a blank selector is "all".
 func selectCategories(selector Category) ([]categoryPage, error) {
 	var selected []categoryPage
 	for _, category := range leaveyCategories {
@@ -61,7 +59,6 @@ func selectCategories(selector Category) ([]categoryPage, error) {
 	return selected, nil
 }
 
-// categoryOf returns a space's category page.
 func categoryOf(space Space) (categoryPage, error) {
 	for _, category := range leaveyCategories {
 		if category.ID == space.CategoryID {
@@ -82,11 +79,13 @@ func (c categoryPage) returnPath() string {
 	return c.Path
 }
 
-// refererFor is the page a browser would be on when booking space.
+// defaultReferer is a reservation page, the origin of LibCal's own requests.
+const defaultReferer = baseURL + "/reserve/lvl2"
+
 func refererFor(space Space) string {
 	category, err := categoryOf(space)
 	if err != nil {
-		return baseURL + "/reserve/lvl2"
+		return defaultReferer
 	}
 	return baseURL + category.returnPath()
 }

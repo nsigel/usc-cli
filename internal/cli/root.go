@@ -1,4 +1,3 @@
-// Package cli defines the command-line boundary for usc.
 package cli
 
 import (
@@ -15,7 +14,6 @@ import (
 	"golang.org/x/term"
 )
 
-// New returns a configured usc root command.
 func New() *cobra.Command {
 	root := &cobra.Command{
 		Use:               "usc",
@@ -31,8 +29,7 @@ func New() *cobra.Command {
 	return root
 }
 
-// group is a command that only holds subcommands. Cobra would otherwise print
-// help and exit 0 for a mistyped subcommand.
+// Cobra would otherwise print help and exit 0 for a mistyped subcommand.
 func group(use, short string, children ...*cobra.Command) *cobra.Command {
 	cmd := &cobra.Command{
 		Use: use, Short: short,
@@ -58,8 +55,6 @@ func versionCommand() *cobra.Command {
 	}
 }
 
-// buildVersion reads what the Go toolchain recorded at build time: the module
-// version for go install, and the commit for a build from a checkout.
 func buildVersion() map[string]any {
 	version := map[string]any{"version": "unknown"}
 	info, ok := debug.ReadBuildInfo()
@@ -83,22 +78,18 @@ func writeJSON(cmd *cobra.Command, value any) error {
 	return encodeJSON(writer, value, prettyOutput(cmd, writer))
 }
 
-// errorInfo is the JSON written to stderr. Action is the usc command that
-// resolves the error, when there is one.
 type errorInfo struct {
 	Error  string `json:"error"`
 	Code   string `json:"code,omitempty"`
 	Action string `json:"action,omitempty"`
 }
 
-// WriteError writes a command error as JSON in the command's output format.
 func WriteError(cmd *cobra.Command, err error) error {
 	info := errorInfo{Error: err.Error()}
 	var coded interface{ ErrorCode() string }
 	if errors.As(err, &coded) {
 		info.Code = coded.ErrorCode()
 	}
-	// Every sign-in problem has the same fix, whichever site reported it.
 	var siteErr *auth.SiteError
 	if errors.As(err, &siteErr) || errors.Is(err, auth.ErrSessionNotFound) {
 		info.Action = "usc auth login"
@@ -132,7 +123,6 @@ func isTerminal(writer io.Writer) bool {
 	return ok && term.IsTerminal(int(file.Fd()))
 }
 
-// positiveID parses a numeric identifier argument; label names it in errors.
 func positiveID(value, label string) (int, error) {
 	id, err := strconv.Atoi(value)
 	if err != nil || id < 1 {

@@ -12,8 +12,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// signIn is the usc command's own sign-in: its session and credentials files, with USC_USERNAME, USC_PASSWORD, and
-// USC_DUO_BYPASS overriding saved credentials.
 func signIn() (auth.Options, error) {
 	credentialsFile, err := config.CredentialsPath()
 	if err != nil {

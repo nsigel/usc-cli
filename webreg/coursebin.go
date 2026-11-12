@@ -71,7 +71,7 @@ func (c *Client) Add(ctx context.Context, term string, sectionID int) error {
 		return err
 	}
 	form := url.Values{"submit": {"Add"}, tokenField: {token}, "X-Requested-With": {"XMLHttpRequest"}}
-	_, err = c.post(ctx, sectionPath(term, sectionID, "add"), form, "/Courses", true)
+	_, err = c.postAJAX(ctx, sectionPath(term, sectionID, "add"), form, "/Courses")
 	return err
 }
 
@@ -96,7 +96,7 @@ func (c *Client) sectionAction(ctx context.Context, term string, sectionID int, 
 	if err := c.SelectTerm(ctx, term); err != nil {
 		return err
 	}
-	_, err := c.post(ctx, sectionPath(term, sectionID, action), url.Values{"X-Requested-With": {"XMLHttpRequest"}}, "/CourseBin", true)
+	_, err := c.postAJAX(ctx, sectionPath(term, sectionID, action), url.Values{"X-Requested-With": {"XMLHttpRequest"}}, "/CourseBin")
 	return err
 }
 
@@ -133,15 +133,14 @@ func (c *Client) SetGradeOption(ctx context.Context, term string, sectionID int,
 		return "", fmt.Errorf("grade option %q is not offered for section %d", code, sectionID)
 	}
 	form := url.Values{option.field: {code}, tokenField: {option.token}, "X-Requested-With": {"XMLHttpRequest"}}
-	data, err := c.post(ctx, option.path, form, "/CourseBin", true)
+	data, err := c.postAJAX(ctx, option.path, form, "/CourseBin")
 	if err != nil {
 		return "", err
 	}
 	return text(dom.Parse(data)), nil
 }
 
-// token returns an anti-forgery token for the session from a page that
-// renders one. ASP.NET Core accepts any of the session's tokens.
+// ASP.NET Core accepts any of the session's tokens.
 func (c *Client) token(ctx context.Context) (string, error) {
 	for _, path := range []string{"/CourseBin", "/Checkout"} {
 		data, err := c.page(ctx, path, "/Departments")
@@ -154,6 +153,10 @@ func (c *Client) token(ctx context.Context) (string, error) {
 	}
 	return "", errors.New("WebReg did not provide a request verification token")
 }
+
+// calendarDataMarker precedes the events embedded in the calendar page's
+// scheduler widget configuration.
+const calendarDataMarker = `"data":{"Data":`
 
 // CalendarEvent is one meeting or blocked time on myCalendar. Status is
 // Scheduled, Registered, Blocked, or Conflicted.
@@ -176,9 +179,7 @@ func (c *Client) Calendar(ctx context.Context, term string) ([]CalendarEvent, er
 	if err != nil {
 		return nil, err
 	}
-	// The scheduler's initial data is embedded in its widget configuration.
-	marker := []byte(`"data":{"Data":`)
-	index := bytes.Index(data, marker)
+	index := bytes.Index(data, []byte(calendarDataMarker))
 	if index < 0 {
 		return nil, errors.New("WebReg calendar page did not include calendar data")
 	}

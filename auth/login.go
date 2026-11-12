@@ -40,6 +40,9 @@ func (c Credentials) Complete() bool {
 	return c.Username != "" && c.Password != "" && c.BypassCode != ""
 }
 
+// maxProtocolSteps turns an identity-provider redirect loop into an error.
+const maxProtocolSteps = 40
+
 type authenticator struct {
 	client          *http.Client
 	jar             *sessionJar
@@ -58,9 +61,7 @@ func (a *authenticator) open(ctx context.Context, target string, credentials Cre
 	if err != nil {
 		return nil, err
 	}
-	// Keeping the protocol explicit makes credential submission auditable. The
-	// bound turns an identity-provider redirect loop into a useful error.
-	for range 40 {
+	for range maxProtocolSteps {
 		switch {
 		case current.Status >= 300 && current.Status < 400:
 			current, err = a.follow(ctx, current)
@@ -69,19 +70,15 @@ func (a *authenticator) open(ctx context.Context, target string, credentials Cre
 			if !credentials.Complete() {
 				return nil, ErrCredentialsRequired
 			}
-			// Credentials are only injected into USC's exact login endpoint, never
-			// into a generic form discovered elsewhere in the chain.
-			form, formErr := firstForm(current)
-			if formErr != nil {
-				return nil, fmt.Errorf("USC login form: %w", formErr)
+			form, ok := firstForm(current)
+			if !ok {
+				return nil, errors.New("USC login page has no form")
 			}
 			setField(&form, "j_username", credentials.Username)
 			setField(&form, "j_password", credentials.Password)
 			current, err = a.submit(ctx, current, form)
 
 		case isUSCLoginRejected(current):
-			// The rejection page repeats the login form. Submitting it again would
-			// post blank credentials in a loop and count against account lockout.
 			return nil, ErrPasswordRejected
 
 		case isUSCSAMLBootstrap(current):
@@ -95,9 +92,9 @@ func (a *authenticator) open(ctx context.Context, target string, credentials Cre
 			current, err = a.do(ctx, http.MethodGet, loginURL, nil, "", current.URL, "")
 
 		case isUSCSAMLContinuation(current):
-			form, formErr := firstForm(current)
-			if formErr != nil {
-				return nil, fmt.Errorf("USC SAML continuation form: %w", formErr)
+			form, ok := firstForm(current)
+			if !ok {
+				return nil, errors.New("USC SAML continuation page has no form")
 			}
 			setField(&form, "saml2Request", a.saml2Request)
 			if secondVisitURL := current.URL.Query().Get("secondVisitUrl"); secondVisitURL != "" {
@@ -111,7 +108,7 @@ func (a *authenticator) open(ctx context.Context, target string, credentials Cre
 		case current.URL.Host == targetURL.Host && current.Status >= 200 && current.Status < 300:
 			// Salesforce serves a successful 200 trampoline before authentication.
 			// A real browser follows it, so host and status alone are insufficient.
-			if destination, ok := htmlNavigation(current); ok {
+			if destination, ok := staticRedirect(current); ok {
 				current, err = a.do(ctx, http.MethodGet, destination.String(), nil, "", current.URL, "")
 			} else {
 				return current, nil
@@ -130,11 +127,9 @@ func (a *authenticator) open(ctx context.Context, target string, credentials Cre
 			current, err = a.continueMicrosoft(ctx, current)
 
 		default:
-			// SAML handoffs often use an auto-post form or a static HTML redirect
-			// instead of an HTTP redirect.
-			if form, ok := autoForm(current); ok {
+			if form, ok := firstForm(current); ok {
 				current, err = a.submit(ctx, current, form)
-			} else if destination, ok := htmlNavigation(current); ok {
+			} else if destination, ok := staticRedirect(current); ok {
 				current, err = a.do(ctx, http.MethodGet, destination.String(), nil, "", current.URL, "")
 			} else {
 				return nil, noContinuation(current)
@@ -144,7 +139,7 @@ func (a *authenticator) open(ctx context.Context, target string, credentials Cre
 			return nil, err
 		}
 	}
-	return nil, errors.New("authentication exceeded 40 protocol steps")
+	return nil, fmt.Errorf("authentication exceeded %d protocol steps", maxProtocolSteps)
 }
 
 func (a *authenticator) follow(ctx context.Context, current *page) (*page, error) {

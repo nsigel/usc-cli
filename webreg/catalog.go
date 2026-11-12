@@ -134,7 +134,6 @@ func (c *Client) Courses(ctx context.Context, term string, query CourseQuery) ([
 	return courses, nil
 }
 
-// normalizeCourseCode accepts "buad 302" or "BUAD-302".
 func normalizeCourseCode(code string) string {
 	code = strings.ToUpper(strings.TrimSpace(code))
 	if fields := strings.Fields(code); len(fields) == 2 {

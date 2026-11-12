@@ -82,8 +82,6 @@ func (c *Client) Schedule(ctx context.Context, options ScheduleOptions) (Schedul
 	return result, nil
 }
 
-// scheduleWindow resolves the options to whole Los Angeles days: Date
-// defaults to today and EndDate to the following day.
 func scheduleWindow(options ScheduleOptions) (start, end time.Time, err error) {
 	location, err := pacific()
 	if err != nil {

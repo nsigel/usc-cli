@@ -9,19 +9,25 @@ import (
 	"strings"
 )
 
-// query is a validated Search translated to Handshake's vocabulary.
+const (
+	defaultLimit = 30
+	// organizerFetchSize is the smallest page fetched under an organizer
+	// filter, which discards most results.
+	organizerFetchSize = 30
+)
+
 type query struct {
-	model     string // "Event" or "CareerFair"
+	model     string
 	params    map[string]any
 	limit     int
 	after     string
-	organizer string // lowercase; empty matches everything
+	organizer string
 	sort      string
 }
 
 func (c *Client) search(ctx context.Context, search Search, model string) (Page[abstractionWire], error) {
 	if search.Limit == 0 {
-		search.Limit = 30
+		search.Limit = defaultLimit
 	}
 	if search.Limit < 1 || search.Limit > 100 {
 		return Page[abstractionWire]{}, errors.New("limit must be between 1 and 100")
@@ -38,13 +44,13 @@ func (c *Client) search(ctx context.Context, search Search, model string) (Page[
 	if err != nil {
 		return Page[abstractionWire]{}, err
 	}
-	serverSort, err := searchSort(search.Sort)
+	order, err := serverSort(search.Sort)
 	if err != nil {
 		return Page[abstractionWire]{}, err
 	}
 	q := query{
 		model: model, limit: search.Limit, after: search.After,
-		organizer: strings.ToLower(strings.TrimSpace(search.Organizer)), sort: normalizedSort(search.Sort),
+		organizer: strings.TrimSpace(search.Organizer), sort: normalizedSort(search.Sort),
 		params: map[string]any{
 			"categories":     categoryIDs,
 			"collection":     "ALL",
@@ -53,7 +59,7 @@ func (c *Client) search(ctx context.Context, search Search, model string) (Page[
 			"medium":         medium,
 			"postedBySchool": search.PostedBySchool,
 			"searchModels":   []string{model},
-			"sort":           serverSort,
+			"sort":           order,
 		},
 	}
 	if q.sort == sortPosted {
@@ -62,14 +68,11 @@ func (c *Client) search(ctx context.Context, search Search, model string) (Page[
 	return c.searchByCursor(ctx, q)
 }
 
-// searchByCursor pages through Handshake's own ordering until limit matches
-// are collected.
 func (c *Client) searchByCursor(ctx context.Context, q query) (Page[abstractionWire], error) {
 	result := Page[abstractionWire]{Items: []abstractionWire{}, CursorKind: "graphql", Sort: q.sort}
-	// An organizer filter discards most results, so fetch full pages for it.
 	fetchSize := q.limit
 	if q.organizer != "" {
-		fetchSize = max(fetchSize, 30)
+		fetchSize = max(fetchSize, organizerFetchSize)
 	}
 	after := q.after
 	for {
@@ -101,10 +104,8 @@ func (c *Client) searchByCursor(ctx context.Context, q query) (Page[abstractionW
 	}
 }
 
-// searchByNewestID reads the complete result set and orders it by descending
-// ID. Handshake exposes no posting timestamp and rejects every posting sort,
+// Handshake exposes no posting timestamp and rejects every posting sort,
 // but IDs are monotonic, so this is the order in which results were posted.
-// Its cursor is the last ID returned.
 func (c *Client) searchByNewestID(ctx context.Context, q query) (Page[abstractionWire], error) {
 	before := int64(0)
 	if q.after != "" {
@@ -162,47 +163,51 @@ func (c *Client) fetchAbstractions(ctx context.Context, params map[string]any, f
 	return response.Connection, err
 }
 
-// matchesOrganizer reports whether the organizer filter names the result's
-// host, an employer, or a contact. Contacts are only in the detail record, so
-// results the search card does not settle cost one extra request each.
+// matchesOrganizer reports whether the organizer filter accepts a result.
 func (c *Client) matchesOrganizer(ctx context.Context, node abstractionWire, q query) (bool, error) {
-	if q.organizer == "" || containsFold(node.Host.Name, q.organizer) {
+	if q.organizer == "" || cardNamesOrganizer(node, q.organizer) {
 		return true, nil
 	}
-	for _, employer := range node.Employers {
-		if containsFold(employer.Name, q.organizer) {
-			return true, nil
-		}
-	}
-	id, err := strconv.Atoi(node.ID)
-	if err != nil {
-		return false, nil
-	}
-	contacts := []Contact{}
-	if q.model == "CareerFair" {
-		fair, err := c.CareerFair(ctx, id)
-		if err != nil {
-			return false, err
-		}
-		contacts = append(contacts, fair.Contact)
-	} else {
-		event, err := c.Event(ctx, id)
-		if err != nil {
-			return false, err
-		}
-		contacts = event.Contacts
-	}
+	contacts, err := c.fetchContacts(ctx, node.ID, q.model)
 	for _, contact := range contacts {
 		if containsFold(contact.Name, q.organizer) || containsFold(contact.Email, q.organizer) {
 			return true, nil
 		}
 	}
-	return false, nil
+	return false, err
 }
 
-// containsFold reports whether value contains the lowercase needle.
-func containsFold(value, needle string) bool {
-	return strings.Contains(strings.ToLower(value), needle)
+// cardNamesOrganizer checks what a search result already carries: its host
+// and employers.
+func cardNamesOrganizer(node abstractionWire, organizer string) bool {
+	if containsFold(node.Host.Name, organizer) {
+		return true
+	}
+	for _, employer := range node.Employers {
+		if containsFold(employer.Name, organizer) {
+			return true
+		}
+	}
+	return false
+}
+
+// fetchContacts requests a result's detail record, the only place its
+// contacts are listed.
+func (c *Client) fetchContacts(ctx context.Context, id, model string) ([]Contact, error) {
+	number, err := strconv.Atoi(id)
+	if err != nil {
+		return nil, nil
+	}
+	if model == "CareerFair" {
+		fair, err := c.CareerFair(ctx, number)
+		return []Contact{fair.Contact}, err
+	}
+	event, err := c.Event(ctx, number)
+	return event.Contacts, err
+}
+
+func containsFold(value, substring string) bool {
+	return strings.Contains(strings.ToLower(value), strings.ToLower(substring))
 }
 
 func numericID(value string) int64 {
@@ -284,9 +289,9 @@ func searchDate(value string) (string, error) {
 
 const sortPosted = "posted-desc"
 
-// searchSort returns the server sort for a Search.Sort value. posted-desc
-// reads everything in date order and is reordered by searchByNewestID.
-func searchSort(value string) (string, error) {
+// serverSort is the order requested from Handshake. posted-desc has no
+// server equivalent: everything is read by date and reordered by ID here.
+func serverSort(value string) (string, error) {
 	switch normalizedSort(value) {
 	case "relevance":
 		return "RELEVANCE", nil

@@ -54,15 +54,17 @@ func libcalError(message string) *Error {
 	case strings.Contains(lower, "required"), strings.Contains(lower, "field"):
 		code = "libcal_invalid_details"
 	}
-	// Do not echo secret-bearing diagnostic responses. Known failure classes
-	// above use fixed messages; other short server validation messages remain
-	// useful to both humans and agents.
-	if message == "" || strings.Contains(strings.ToLower(message), "cookie") ||
-		strings.Contains(strings.ToLower(message), "token") ||
-		strings.Contains(strings.ToLower(message), "password") {
+	if message == "" || mentionsSecret(message) {
 		message = "LibCal rejected the request"
 	}
 	return &Error{Code: code, Message: message}
+}
+
+// mentionsSecret reports a server message that may echo session state and
+// must not be repeated to the caller.
+func mentionsSecret(message string) bool {
+	lower := strings.ToLower(message)
+	return strings.Contains(lower, "cookie") || strings.Contains(lower, "token") || strings.Contains(lower, "password")
 }
 
 func responseError(operation string, status int, data []byte) *ResponseError {

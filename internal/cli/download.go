@@ -52,7 +52,6 @@ func downloadCommand() *cobra.Command {
 	return cmd
 }
 
-// saveDownload writes body to a new file in directory and never overwrites.
 func saveDownload(directory, name string, body io.Reader) (string, error) {
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		return "", err

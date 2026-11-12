@@ -116,7 +116,6 @@ type newsItem struct {
 
 var htmlTag = regexp.MustCompile(`<[^>]+>`)
 
-// plain prefers Brightspace's text rendering and falls back to stripped HTML.
 func plain(value *richText) string {
 	if value == nil {
 		return ""

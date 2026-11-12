@@ -37,8 +37,6 @@ type bookingOption struct {
 	Selected bool
 }
 
-// parseBookingForm reads LibCal's checkout form: its booking form when
-// present, otherwise the page's first form.
 func parseBookingForm(raw string) (bookingForm, error) {
 	document := dom.Parse([]byte(raw))
 	node := dom.FindFirst(document, dom.ID("s-lc-eq-bform"))
@@ -72,8 +70,6 @@ func parseBookingForm(raw string) (bookingForm, error) {
 	return form, nil
 }
 
-// parseField reads one submittable control. Disabled, unnamed, password, and
-// button controls are not part of a submission.
 func parseField(node *html.Node, label string) (bookingFormField, bool) {
 	field := bookingFormField{
 		Name: dom.Attr(node, "name"), Type: node.Data, Label: label,
@@ -108,9 +104,6 @@ func parseField(node *html.Node, label string) (bookingFormField, bool) {
 	return field, true
 }
 
-// answers builds the form's submission values from its own defaults and the
-// caller's explicit answers. It never invents an answer: a required field
-// without one is an error that lists the valid choices.
 func (form bookingForm) answers(details ReservationDetails) (url.Values, error) {
 	for name := range details.Fields {
 		if !slices.ContainsFunc(form.Fields, func(field bookingFormField) bool { return field.Name == name && field.Type != "hidden" }) {
@@ -125,14 +118,13 @@ func (form bookingForm) answers(details ReservationDetails) (url.Values, error) 
 			continue
 		}
 		if field.Type == "radio" {
-			// A radio group is one answer, taken when its first button is seen.
 			if radioGroups[field.Name] {
 				continue
 			}
 			radioGroups[field.Name] = true
 			field.Required = slices.ContainsFunc(form.radios(field.Name), func(choice bookingFormField) bool { return choice.Required })
 		}
-		value, err := form.answer(field, details.Fields)
+		value, err := form.answer(field, details)
 		if err != nil {
 			return nil, err
 		}
@@ -146,17 +138,15 @@ func (form bookingForm) answers(details ReservationDetails) (url.Values, error) 
 	return values, nil
 }
 
-// answer returns one field's value, or "" to leave it out of the submission.
-func (form bookingForm) answer(field bookingFormField, explicit map[string]string) (string, error) {
-	given, provided := explicit[field.Name]
+func (form bookingForm) answer(field bookingFormField, details ReservationDetails) (string, error) {
+	given, provided := details.Fields[field.Name]
 	value := field.Value
 	if provided {
 		value = given
 	}
 	switch field.Type {
 	case "checkbox":
-		// Book only reaches this point with the terms accepted.
-		if isTermsField(field) {
+		if details.AcceptTerms && isTermsField(field) {
 			return cmp.Or(value, "1"), nil
 		}
 		if provided || field.Checked {
@@ -206,8 +196,6 @@ func isTermsField(field bookingFormField) bool {
 	return strings.Contains(name, "terms") || strings.Contains(name, "condition") || strings.Contains(name, "agree")
 }
 
-// fieldError names the field and its valid choices so a caller can correct
-// the request without a separate form-discovery step.
 func (form bookingForm) fieldError(field bookingFormField, reason string) error {
 	var choices []string
 	for _, option := range field.Options {
@@ -227,7 +215,6 @@ func (form bookingForm) fieldError(field bookingFormField, reason string) error 
 	return &Error{Code: "libcal_invalid_details", Message: message}
 }
 
-// spacedText joins a node's text nodes with single spaces.
 func spacedText(node *html.Node) string {
 	var parts []string
 	var walk func(*html.Node)

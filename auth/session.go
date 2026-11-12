@@ -91,7 +91,7 @@ func (j *sessionJar) SetCookies(source *url.URL, cookies []*http.Cookie) {
 			delete(j.entries, key)
 			continue
 		}
-		j.entries[key] = StoredCookie{SetBy: cookieSource(source), Cookie: stored}
+		j.entries[key] = StoredCookie{SetBy: sourceWithoutQuery(source), Cookie: stored}
 	}
 }
 
@@ -102,7 +102,6 @@ func (j *sessionJar) snapshot() []StoredCookie {
 			cookies = append(cookies, cookie)
 		}
 	}
-	// Stable ordering prevents meaningless session-file churn between commands.
 	sort.Slice(cookies, func(i, j int) bool {
 		left := cookies[i].SetBy + "\x00" + cookies[i].Cookie.Name
 		right := cookies[j].SetBy + "\x00" + cookies[j].Cookie.Name
@@ -134,9 +133,8 @@ func defaultCookiePath(requestPath string) string {
 	return requestPath[:strings.LastIndex(requestPath, "/")]
 }
 
-func cookieSource(source *url.URL) string {
-	// Queries can contain signed SAML state. Cookies only need the origin and
-	// path to recover host-only and default-path behavior.
+// sourceWithoutQuery keeps signed SAML state in query strings off disk.
+func sourceWithoutQuery(source *url.URL) string {
 	clean := *source
 	clean.RawQuery = ""
 	clean.Fragment = ""
@@ -149,8 +147,6 @@ func cloneCookie(cookie *http.Cookie) http.Cookie {
 	return clone
 }
 
-// loadSession restores a saved session into jar, skipping ignoredDomains. A
-// missing file is an empty session.
 func loadSession(name string, jar *sessionJar, ignoredDomains []string) error {
 	session, err := readSession(name)
 	if errors.Is(err, os.ErrNotExist) {
@@ -173,27 +169,31 @@ func loadSession(name string, jar *sessionJar, ignoredDomains []string) error {
 }
 
 func saveSessionReplacingDomains(name string, jar *sessionJar, domains, preserve []string) error {
-	existing, err := newSessionJar()
+	onDisk, err := newSessionJar()
 	if err != nil {
 		return err
 	}
-	if err := loadSession(name, existing, nil); err != nil {
+	if err := loadSession(name, onDisk, nil); err != nil {
 		return err
 	}
-	// Keep only the explicitly preserved cookies from disk. Re-merging all
-	// saved cookies would resurrect cookies deleted during authentication.
-	for key, entry := range existing.entries {
-		if !cookieMatchesDomains(entry, domains) || !slices.Contains(preserve, entry.Cookie.Name) {
-			delete(existing.entries, key)
+	preserved := func(entry StoredCookie) bool {
+		return cookieMatchesDomains(entry, domains) && slices.Contains(preserve, entry.Cookie.Name)
+	}
+	merged, err := newSessionJar()
+	if err != nil {
+		return err
+	}
+	for key, entry := range onDisk.entries {
+		if preserved(entry) {
+			merged.entries[key] = entry
 		}
 	}
 	for key, entry := range jar.entries {
-		if cookieMatchesDomains(entry, domains) && slices.Contains(preserve, entry.Cookie.Name) {
-			continue
+		if !preserved(entry) {
+			merged.entries[key] = entry
 		}
-		existing.entries[key] = entry
 	}
-	return saveSession(name, existing)
+	return saveSession(name, merged)
 }
 
 func cookieMatchesDomains(entry StoredCookie, domains []string) bool {

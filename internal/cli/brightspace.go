@@ -209,9 +209,6 @@ type downloadedFile struct {
 	Path         string  `json:"path"`
 }
 
-// downloadSubmissions saves every submitted file into directory. A file name
-// reused by a resubmission is prefixed with its submission ID, so every
-// version is kept.
 func downloadSubmissions(cmd *cobra.Command, client *brightspace.Client, courseID, folderID int, submissions []brightspace.Submission, directory string) ([]downloadedFile, error) {
 	files := []downloadedFile{}
 	used := make(map[string]bool)

@@ -17,14 +17,11 @@ import (
 )
 
 const (
-	baseURL = "https://usc.joinhandshake.com"
-	// The student site serves search from one GraphQL endpoint and full event
-	// records from another.
+	baseURL       = "https://usc.joinhandshake.com"
 	searchGraphQL = "/stu/graphql"
 	detailGraphQL = "/hs/graphql"
 )
 
-// errSessionInvalid reports that Handshake stopped accepting the session.
 var errSessionInvalid = &auth.SiteError{Site: site.Handshake, Err: auth.ErrSessionInvalid}
 
 // Doer is the HTTP surface the client needs. auth.Session satisfies it.
@@ -64,8 +61,7 @@ func (e *Error) Error() string {
 	return fmt.Sprintf("%s: HTTP %d: %s", e.Label, e.Status, e.Body)
 }
 
-// send returns a successful response body. Handshake answers an expired
-// session with a redirect to sign-in or a 401. label names the request in errors.
+// Handshake answers an expired session with a redirect to sign-in or a 401.
 func (c *Client) send(request *http.Request, label string) ([]byte, error) {
 	if c.http == nil {
 		return nil, errors.New("handshake client has no HTTP session")
@@ -83,7 +79,6 @@ func (c *Client) send(request *http.Request, label string) ([]byte, error) {
 		return nil, err
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		// Error pages are HTML; only a short API message is worth repeating.
 		message := strings.TrimSpace(string(body))
 		if strings.HasPrefix(message, "<") {
 			message = http.StatusText(response.StatusCode)

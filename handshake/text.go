@@ -13,7 +13,6 @@ var (
 	blankLines = regexp.MustCompile(`\n{3,}`)
 )
 
-// plainText renders a rich-text description as paragraphs of plain text.
 func plainText(value string) string {
 	value = htmlBreak.ReplaceAllString(value, "\n")
 	value = htmlTag.ReplaceAllString(value, "")
@@ -25,8 +24,6 @@ func plainText(value string) string {
 	return strings.TrimSpace(blankLines.ReplaceAllString(strings.Join(lines, "\n"), "\n\n"))
 }
 
-// slug lowercases value and joins its alphanumeric runs with hyphens, so
-// "In Person" and "in-person" compare equal.
 func slug(value string) string {
 	var result strings.Builder
 	separator := false

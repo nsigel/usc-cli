@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html"
+	"maps"
 	"regexp"
 	"sort"
 	"strings"
@@ -37,10 +38,10 @@ func (a *authenticator) continueMicrosoft(ctx context.Context, current *page) (*
 	} else if ok {
 		return a.submit(ctx, current, form)
 	}
-	if form, ok := autoForm(current); ok {
+	if form, ok := firstForm(current); ok {
 		return a.submit(ctx, current, form)
 	}
-	if destination, ok := htmlNavigation(current); ok {
+	if destination, ok := staticRedirect(current); ok {
 		return a.do(ctx, http.MethodGet, destination.String(), nil, "", current.URL, "")
 	}
 	return nil, noContinuation(current)
@@ -54,23 +55,16 @@ func (a *authenticator) rememberMicrosoft(body []byte) {
 	}
 }
 
-func microsoftForm(page *page, stored map[string]string) (form, bool, error) {
-	// Continuation state is cumulative: app verification and "stay signed in"
-	// pages do not repeat every token received earlier in the flow.
-	values := make(map[string]string, len(stored))
-	for key, value := range stored {
-		values[key] = value
-	}
-	current := microsoftValues(page.Body)
-	for key, value := range current {
+func microsoftForm(page *page, remembered map[string]string) (form, bool, error) {
+	thisPage := microsoftValues(page.Body)
+	known := maps.Clone(remembered)
+	for key, value := range thisPage {
 		if value != "" {
-			values[key] = value
+			known[key] = value
 		}
 	}
 
-	// urlPost belongs to this page. Reusing it from an earlier page can turn a
-	// terminal SAML auto-post into a duplicate Microsoft postback.
-	action := firstValue(current, "urlPost", "urlPostMsa")
+	action := firstValue(thisPage, "urlPost", "urlPostMsa")
 	if action == "" {
 		return form{}, false, nil
 	}
@@ -82,10 +76,10 @@ func microsoftForm(page *page, stored map[string]string) (form, bool, error) {
 		return form{}, false, nil
 	}
 
-	ctxValue := firstValue(values, "sCtx", "ctx")
-	requestID := firstValue(values, "sessionId", "hpgrequestid")
-	flowToken := firstValue(values, "sFT", "flowToken")
-	canary := values["canary"]
+	ctxValue := firstValue(known, "sCtx", "ctx")
+	requestID := firstValue(known, "sessionId", "hpgrequestid")
+	flowToken := firstValue(known, "sFT", "flowToken")
+	canary := known["canary"]
 	required := map[string]string{
 		"ctx":          ctxValue,
 		"flowToken":    flowToken,
@@ -103,7 +97,7 @@ func microsoftForm(page *page, stored map[string]string) (form, bool, error) {
 		return form{}, false, fmt.Errorf("microsoft %s did not expose required SSO state: %s", page.URL.Path, strings.Join(missing, ","))
 	}
 
-	pageTime := values["i19"]
+	pageTime := known["i19"]
 	if pageTime == "" {
 		// Microsoft uses i19 for client-side timing telemetry, not SSO state.
 		pageTime = "0"
@@ -179,9 +173,6 @@ func microsoftValues(body []byte) map[string]string {
 	return values
 }
 
-// microsoftScript limits JavaScript extraction to script elements. Microsoft
-// configuration strings can also appear in page markup or error messages, and
-// those must not be treated as executable SSO state.
 func microsoftScript(body []byte) []byte {
 	var script strings.Builder
 	for _, node := range dom.FindAll(dom.Parse(body), dom.Tag("script")) {

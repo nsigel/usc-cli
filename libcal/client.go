@@ -79,9 +79,6 @@ func Open(options auth.Options) (*Client, error) {
 	return client, nil
 }
 
-// request sends one LibCal request and returns a successful response body.
-// form, when set, is posted as LibCal's own pages post it, with referer
-// defaulting to a reservation page.
 func (c *Client) request(ctx context.Context, method, path string, form url.Values, accept, referer string) ([]byte, error) {
 	if c == nil || c.http == nil {
 		return nil, errors.New("LibCal client has no HTTP transport")
@@ -102,7 +99,7 @@ func (c *Client) request(ctx context.Context, method, path string, form url.Valu
 		request.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
 		request.Header.Set("X-Requested-With", "XMLHttpRequest")
 		if referer == "" {
-			referer = baseURL + "/reserve/lvl2"
+			referer = defaultReferer
 		}
 		request.Header.Set("Referer", referer)
 	}

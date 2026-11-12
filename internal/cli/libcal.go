@@ -127,8 +127,6 @@ func libcalBookCommand() *cobra.Command {
 			return writeJSON(cmd, reservation)
 		},
 	}
-	// Complete timestamps keep a selection exact across midnight and
-	// daylight-saving transitions.
 	cmd.Flags().IntVar(&spaceID, "space", 0, "space ID from the schedule")
 	cmd.Flags().StringVar(&start, "start", "", "start of an available interval, RFC3339 with UTC offset")
 	cmd.Flags().StringVar(&end, "end", "", "end of a later contiguous interval, at most 2 hours after --start")
@@ -161,7 +159,6 @@ func parseFields(items []string) (map[string]string, error) {
 	return fields, nil
 }
 
-// libcalReleaseCommand only releases temporary checkout state, never a reservation.
 func libcalReleaseCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "release",

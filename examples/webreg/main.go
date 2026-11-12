@@ -1,4 +1,3 @@
-// Read the newest term's WebReg course bin with the sign-in saved by usc auth login.
 package main
 
 import (
@@ -16,8 +15,6 @@ import (
 func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	// Read the credentials usc auth login saved. The session stays in memory;
-	// set auth.Options.SessionFile to reuse it across runs.
 	credentials, err := config.CredentialsPath()
 	if err != nil {
 		log.Fatal(err)

@@ -74,7 +74,6 @@ type GradeChoice struct {
 	Name string `json:"name"`
 }
 
-// parseCourses reads every course header and its sections from a page.
 func parseCourses(document *html.Node) []Course {
 	courses := []Course{}
 	for _, header := range dom.FindAll(document, dom.Class("div", "course-header")) {
@@ -166,7 +165,6 @@ func parseSection(row *html.Node) (Section, bool) {
 	return section, true
 }
 
-// columnText returns a column's text without its mobile label or forms.
 func columnText(column, label *html.Node) string {
 	var builder strings.Builder
 	for child := column.FirstChild; child != nil; child = child.NextSibling {
@@ -178,8 +176,6 @@ func columnText(column, label *html.Node) string {
 	return dom.Collapse(builder.String())
 }
 
-// columnValues returns a multi-valued column such as instructors, one value
-// per line in WebReg's markup.
 func columnValues(column, label *html.Node) []string {
 	var values []string
 	for child := column.FirstChild; child != nil; child = child.NextSibling {
@@ -199,7 +195,6 @@ func parseSeats(text string) Seats {
 	return seats
 }
 
-// parseBinState reads which pre-rendered action bar WebReg left visible.
 func parseBinState(column *html.Node, id int) *BinState {
 	suffix := "_" + strconv.Itoa(id)
 	for _, candidate := range []struct {

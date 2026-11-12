@@ -101,35 +101,19 @@ type duoClientHints struct {
 	UAFullVersion   string     `json:"uaFullVersion"`
 }
 
-func duoClientDetails(clientHintUA string) (string, string, error) {
-	// Mimic owns the UA-brand ordering and greased brand. Reusing its actual
-	// sec-ch-ua value keeps this protocol field aligned with the HTTP/TLS
-	// transport instead of maintaining a second, brittle implementation.
-	matches := clientHintBrandPattern.FindAllStringSubmatch(clientHintUA, -1)
-	if len(matches) == 0 {
-		return "", "", errors.New("mimic did not provide valid sec-ch-ua client hints")
+// duoMacChromeFeatures is what Duo's prompt reports for Chrome on a MacBook.
+const duoMacChromeFeatures = `{"touch_supported":false,"platform_authenticator_status":"available","webauthn_supported":true,"screen_resolution_height":956,"screen_resolution_width":1470,"screen_color_depth":30,"is_uvpa_available":true,"client_capabilities_uvpa":true}`
+
+// duoClientDetails describes the browser to Duo, consistently with the
+// sec-ch-ua header the transport sends.
+func duoClientDetails(secCHUA string) (features, hints string, err error) {
+	brands, fullVersions, err := clientHintBrands(secCHUA)
+	if err != nil {
+		return "", "", err
 	}
-
-	majorVersion := strings.SplitN(chromeVersion, ".", 2)[0]
-	brands := make([]duoBrand, 0, len(matches))
-	fullVersionList := make([]duoBrand, 0, len(matches))
-	for _, match := range matches {
-		brand, version := match[1], match[2]
-		brands = append(brands, duoBrand{Brand: brand, Version: version})
-
-		fullVersion := version + ".0.0.0"
-		if version == majorVersion && (brand == "Chromium" || brand == "Google Chrome") {
-			fullVersion = chromeVersion
-		}
-		fullVersionList = append(fullVersionList, duoBrand{Brand: brand, Version: fullVersion})
-	}
-
-	// These runtime capabilities are not included in Mimic's transport API.
-	// They describe the supported macOS Chrome client used by that transport.
-	features := `{"touch_supported":false,"platform_authenticator_status":"available","webauthn_supported":true,"screen_resolution_height":956,"screen_resolution_width":1470,"screen_color_depth":30,"is_uvpa_available":true,"client_capabilities_uvpa":true}`
-	hints, err := json.Marshal(duoClientHints{
+	encoded, err := json.Marshal(duoClientHints{
 		Brands:          brands,
-		FullVersionList: fullVersionList,
+		FullVersionList: fullVersions,
 		Mobile:          false,
 		Platform:        "macOS",
 		PlatformVersion: "14.8.4",
@@ -138,7 +122,27 @@ func duoClientDetails(clientHintUA string) (string, string, error) {
 	if err != nil {
 		return "", "", fmt.Errorf("encode Duo client hints: %w", err)
 	}
-	return features, base64.StdEncoding.EncodeToString(hints), nil
+	return duoMacChromeFeatures, base64.StdEncoding.EncodeToString(encoded), nil
+}
+
+// clientHintBrands parses a sec-ch-ua header into its brands and the full
+// versions a browser would report for them.
+func clientHintBrands(secCHUA string) (brands, fullVersions []duoBrand, err error) {
+	matches := clientHintBrandPattern.FindAllStringSubmatch(secCHUA, -1)
+	if len(matches) == 0 {
+		return nil, nil, errors.New("mimic did not provide valid sec-ch-ua client hints")
+	}
+	majorVersion := strings.SplitN(chromeVersion, ".", 2)[0]
+	for _, match := range matches {
+		brand, version := match[1], match[2]
+		brands = append(brands, duoBrand{Brand: brand, Version: version})
+		fullVersion := version + ".0.0.0"
+		if version == majorVersion && (brand == "Chromium" || brand == "Google Chrome") {
+			fullVersion = chromeVersion
+		}
+		fullVersions = append(fullVersions, duoBrand{Brand: brand, Version: fullVersion})
+	}
+	return brands, fullVersions, nil
 }
 
 func jsonStrings(data []byte) map[string]string {

@@ -21,7 +21,6 @@ const (
 	leVersion = "1.67"
 )
 
-// errSessionInvalid reports that Brightspace stopped accepting the session.
 var errSessionInvalid = &auth.SiteError{Site: site.Brightspace, Err: auth.ErrSessionInvalid}
 
 // Doer is the HTTP surface the client needs. auth.Session satisfies it.
@@ -64,8 +63,6 @@ func (e *Error) Error() string {
 	return fmt.Sprintf("%s: HTTP %d: %s", e.Label, e.Status, e.Body)
 }
 
-// get decodes a JSON API response into destination. label names the request
-// in errors.
 func (c *Client) get(ctx context.Context, path string, query url.Values, label string, destination any) error {
 	target := baseURL + path
 	if len(query) > 0 {
@@ -82,7 +79,6 @@ func (c *Client) get(ctx context.Context, path string, query url.Values, label s
 	return nil
 }
 
-// do sends a GET and returns a successful response; the caller closes it.
 func (c *Client) do(ctx context.Context, target, accept, label string) (*http.Response, error) {
 	if c.http == nil {
 		return nil, errors.New("brightspace client has no HTTP session")
@@ -132,7 +128,6 @@ func (c *Client) Download(ctx context.Context, contentURL string) (io.ReadCloser
 	return response.Body, nil
 }
 
-// richText is Brightspace's paired plain-text and HTML rendering of a field.
 type richText struct {
 	Text string `json:"Text"`
 	HTML string `json:"Html"`

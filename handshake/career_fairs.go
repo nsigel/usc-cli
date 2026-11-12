@@ -146,8 +146,6 @@ func (c *Client) CareerFair(ctx context.Context, id int) (CareerFairDetail, erro
 	return detail, nil
 }
 
-// careerFairProps returns the JSON the page embeds for its React root, or ""
-// when the page has none.
 func careerFairProps(document []byte) string {
 	root := dom.FindFirst(dom.Parse(document), func(node *html.Node) bool {
 		class := dom.Attr(node, "data-react-class")
