@@ -1,0 +1,31 @@
+---
+interface Props {
+  code: string;
+}
+
+const { code } = Astro.props;
+---
+
+<div class="copy-code">
+  <code>{code}</code>
+  <button class="copy-button" data-copy={code}>Copy</button>
+</div>
+
+<style>
+  .copy-code {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 10px 10px 14px;
+    border: 1.5px solid var(--ink);
+    background: var(--panel);
+    min-width: 0;
+  }
+
+  code {
+    flex: 1;
+    font-size: 13px;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+</style>
