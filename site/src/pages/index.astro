@@ -8,40 +8,35 @@ import type { SpriteName } from "../sprites";
 
 const prompt = "Set up the USC CLI for me: https://usc.sh/install.md";
 
-const sites: { sprite: SpriteName; name: string; does: string; example: string; docs: string }[] = [
+const sites: { sprite: SpriteName; name: string; does: string; docs: string }[] = [
   {
     sprite: "brightspace",
     name: "Brightspace",
     does: "Courses, content, grades, announcements, assignments, and file downloads.",
-    example: "usc brightspace grades 150112",
     docs: "/docs/brightspace/",
   },
   {
     sprite: "webreg",
     name: "WebReg",
     does: "Section seats, your course bin and calendar, and checkout.",
-    example: "usc webreg courses --term 20271 --course CSCI-270",
     docs: "/docs/webreg/",
   },
   {
     sprite: "handshake",
     name: "Handshake",
     does: "Events and career fairs, filtered by category, host, date, or format.",
-    example: "usc handshake career-fairs --date next-30",
     docs: "/docs/handshake/",
   },
   {
     sprite: "libcal",
     name: "Leavey Library",
     does: "Study room availability by capacity, and booking.",
-    example: "usc libcal schedule --date tomorrow --min-capacity 4",
     docs: "/docs/libcal/",
   },
   {
     sprite: "classes",
     name: "Schedule of Classes",
     does: "Public sections, times, seats, and instructors. No sign-in.",
-    example: "usc classes 20271 BUAD-306",
     docs: "/docs/classes/",
   },
 ];
@@ -91,7 +86,6 @@ const sites: { sprite: SpriteName; name: string; does: string; example: string; 
             <Sprite name={site.sprite} scale={4} />
             <h2>{site.name}</h2>
             <p>{site.does}</p>
-            <code>{site.example}</code>
           </a>
         ))
       }
@@ -116,8 +110,8 @@ const sites: { sprite: SpriteName; name: string; does: string; example: string; 
         </li>
         <li>
           <span class="step">Add the skill</span>
-          <CopyCode code="mkdir -p ~/.claude/skills/usc-cli && usc skill > ~/.claude/skills/usc-cli/SKILL.md" />
-          <span class="note">Teaches your agent the commands. Use your agent's skills folder if it isn't Claude Code.</span>
+          <CopyCode code="Add the usc skill: save the output of `usc skill` as a skill named usc-cli." />
+          <span class="note">Paste this into your agent so it knows every command.</span>
         </li>
       </ol>
       <p class="more"><a href="/docs/">Read the docs</a> · <a href="/docs/library/">Use it as a Go library</a></p>
@@ -275,15 +269,6 @@ const sites: { sprite: SpriteName; name: string; does: string; example: string; 
     font-size: 13px;
     color: var(--muted);
     flex: 1;
-  }
-
-  .site code {
-    font-size: 11px;
-    padding: 6px 8px;
-    background: var(--bg);
-    border: 1px solid var(--line);
-    white-space: nowrap;
-    overflow-x: auto;
   }
 
   .setup h2 {

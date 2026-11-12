@@ -14,7 +14,7 @@ Paste this into Claude Code, Codex, or any agent that can run shell commands:
 Set up the USC CLI for me: https://usc.sh/install.md
 ```
 
-The agent installs `usc`, adds the skill, and asks you to run `usc auth login` yourself so your password never goes through the chat.
+The agent installs `usc` and adds the skill. To sign in, it either asks for your NetID, password, and Duo bypass code and runs the login for you, or has you run `usc auth login` in your own terminal, whichever you prefer.
 
 ## By hand
 

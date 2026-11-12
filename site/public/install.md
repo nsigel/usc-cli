@@ -25,19 +25,23 @@ mkdir -p ~/.claude/skills/usc-cli
 usc skill > ~/.claude/skills/usc-cli/SKILL.md
 ```
 
-## 3. Have the user sign in
+## 3. Sign in
 
-Run `usc auth status`. If it prints `"authenticated":true`, you're done.
+Run `usc auth status`. If it prints `"authenticated":true`, skip to step 4.
 
-Otherwise the user must sign in themselves. Don't ask for their password or bypass code in the chat. Ask them to run this in their own terminal:
+Otherwise ask the user which they prefer:
 
-```sh
-usc auth login
-```
+- **You sign them in.** Ask for their USC NetID, password, and a Duo bypass code (they can get one at https://account.usc.edu/2fa/duo-bypass-code). Then run:
 
-It prompts for their USC NetID, password, and a Duo bypass code, which they can get at https://account.usc.edu/2fa/duo-bypass-code. Credentials are saved locally and every later command signs itself in.
+  ```sh
+  USC_USERNAME='NETID' USC_PASSWORD='PASSWORD' USC_DUO_BYPASS='CODE' usc auth login
+  ```
 
-When they're done, run `usc auth status` again to confirm.
+  Don't repeat the credentials back or save them anywhere else; `usc` stores them in its own private file.
+
+- **They sign in themselves.** Ask them to run `usc auth login` in their own terminal. It prompts for the same three things.
+
+Either way, every later command signs itself in. Run `usc auth status` to confirm.
 
 ## 4. Finish
 
