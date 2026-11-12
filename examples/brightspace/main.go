@@ -1,4 +1,3 @@
-// Read enrollments using an existing session or explicit environment credentials.
 package main
 
 import (
@@ -10,21 +9,21 @@ import (
 
 	"github.com/nsigel/usc-cli/auth"
 	"github.com/nsigel/usc-cli/brightspace"
+	"github.com/nsigel/usc-cli/config"
 )
 
 func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	client, err := brightspace.OpenWithOptions(ctx, auth.Options{
-		Credentials: auth.Credentials{
-			Username: os.Getenv("USC_USERNAME"), Password: os.Getenv("USC_PASSWORD"),
-			BypassCode: os.Getenv("USC_DUO_BYPASS"),
-		},
-	})
+	credentials, err := config.CredentialsPath()
 	if err != nil {
 		log.Fatal(err)
 	}
-	courses, err := client.Courses(ctx, false)
+	client, err := brightspace.Open(ctx, auth.Options{CredentialsFile: credentials})
+	if err != nil {
+		log.Fatal(err)
+	}
+	courses, err := client.Courses(ctx)
 	if err != nil {
 		log.Fatal(err)
 	}

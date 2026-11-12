@@ -1,19 +1,14 @@
 package cli
 
 import (
-	"context"
-	"errors"
 	"fmt"
-	"strconv"
 
-	"github.com/nsigel/usc-cli/auth"
 	"github.com/nsigel/usc-cli/brightspace"
 	"github.com/spf13/cobra"
 )
 
 func brightspaceCommand() *cobra.Command {
-	cmd := &cobra.Command{Use: "brightspace", Short: "Read Brightspace course data"}
-	cmd.AddCommand(
+	return group("brightspace", "Read Brightspace course data",
 		brightspaceWhoAmICommand(),
 		coursesCommand(),
 		contentCommand(),
@@ -23,22 +18,21 @@ func brightspaceCommand() *cobra.Command {
 		submissionsCommand(),
 		downloadCommand(),
 	)
-	return cmd
 }
 
 func brightspaceWhoAmICommand() *cobra.Command {
 	return &cobra.Command{
 		Use: "whoami", Short: "Show the authenticated Brightspace user", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			client, err := openBrightspace(cmd.Context())
+			client, err := openBrightspace(cmd)
 			if err != nil {
 				return err
 			}
-			result, err := client.WhoAmI(cmd.Context())
+			user, err := client.WhoAmI(cmd.Context())
 			if err != nil {
 				return err
 			}
-			return writeJSON(cmd, result)
+			return writeJSON(cmd, user)
 		},
 	}
 }
@@ -48,18 +42,22 @@ func coursesCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use: "courses", Short: "List Brightspace enrollments", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			client, err := openBrightspace(cmd.Context())
+			client, err := openBrightspace(cmd)
 			if err != nil {
 				return err
 			}
-			courses, err := client.Courses(cmd.Context(), includeAll)
+			list := client.Courses
+			if includeAll {
+				list = client.Enrollments
+			}
+			courses, err := list(cmd.Context())
 			if err != nil {
 				return err
 			}
-			return writeJSON(cmd, map[string]any{"courses": courses})
+			return writeJSON(cmd, courses)
 		},
 	}
-	cmd.Flags().BoolVar(&includeAll, "all", false, "include non-course enrollments")
+	cmd.Flags().BoolVar(&includeAll, "all", false, "also list departments, semesters, and groups")
 	return cmd
 }
 
@@ -68,11 +66,11 @@ func contentCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use: "content COURSE_ID", Short: "Show a course's content table of contents", Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			courseID, err := courseID(args[0])
+			courseID, err := positiveID(args[0], "COURSE_ID")
 			if err != nil {
 				return err
 			}
-			client, err := openBrightspace(cmd.Context())
+			client, err := openBrightspace(cmd)
 			if err != nil {
 				return err
 			}
@@ -80,13 +78,13 @@ func contentCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if !flat {
-				return writeJSON(cmd, toc)
+			if flat {
+				return writeJSON(cmd, toc.Flatten())
 			}
-			return writeJSON(cmd, map[string]any{"course_id": courseID, "topics": flattenTopics(toc.Modules, "")})
+			return writeJSON(cmd, toc)
 		},
 	}
-	cmd.Flags().BoolVar(&flat, "flat", false, "flatten topics into a single list")
+	cmd.Flags().BoolVar(&flat, "flat", false, "list topics in one array, each with its module path")
 	return cmd
 }
 
@@ -95,28 +93,22 @@ func gradesCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use: "grades COURSE_ID", Short: "Show grades for a course", Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			courseID, err := courseID(args[0])
+			courseID, err := positiveID(args[0], "COURSE_ID")
 			if err != nil {
 				return err
 			}
-			client, err := openBrightspace(cmd.Context())
+			client, err := openBrightspace(cmd)
 			if err != nil {
 				return err
 			}
-			result, err := client.Grades(cmd.Context(), courseID)
+			grades, err := client.Grades(cmd.Context(), courseID)
 			if err != nil {
 				return err
 			}
 			if gradedOnly {
-				filtered := make([]brightspace.Grade, 0, len(result.Grades))
-				for _, grade := range result.Grades {
-					if grade.Score != nil {
-						filtered = append(filtered, grade)
-					}
-				}
-				result.Grades = filtered
+				grades = grades.Graded()
 			}
-			return writeJSON(cmd, result)
+			return writeJSON(cmd, grades)
 		},
 	}
 	cmd.Flags().BoolVar(&gradedOnly, "graded-only", false, "only include items with a score")
@@ -126,44 +118,28 @@ func gradesCommand() *cobra.Command {
 func announcementsCommand() *cobra.Command {
 	var since string
 	cmd := &cobra.Command{
-		Use: "announcements [COURSE_ID]", Short: "Show course announcements", Args: cobra.MaximumNArgs(1),
+		Use: "announcements [COURSE_ID]", Short: "Show announcements for one course or every enrolled course", Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client, err := openBrightspace(cmd.Context())
+			client, err := openBrightspace(cmd)
 			if err != nil {
 				return err
 			}
-			if len(args) == 1 {
-				courseID, err := courseID(args[0])
+			if len(args) == 0 {
+				feed, err := client.AllAnnouncements(cmd.Context(), since)
 				if err != nil {
 					return err
 				}
-				items, err := client.Announcements(cmd.Context(), courseID, since)
-				if err != nil {
-					return err
-				}
-				return writeJSON(cmd, map[string]any{"announcements": announcementsForCourse(courseID, nil, items)})
+				return writeJSON(cmd, feed)
 			}
-			courses, err := client.Courses(cmd.Context(), false)
+			courseID, err := positiveID(args[0], "COURSE_ID")
 			if err != nil {
 				return err
 			}
-			items := make([]any, 0)
-			errors := make([]map[string]any, 0)
-			for _, course := range courses {
-				announcements, err := client.Announcements(cmd.Context(), course.ID, since)
-				if err != nil {
-					errors = append(errors, map[string]any{"course_id": course.ID, "error": err.Error()})
-					continue
-				}
-				for _, announcement := range announcementsForCourse(course.ID, course.Code, announcements) {
-					items = append(items, announcement)
-				}
+			announcements, err := client.Announcements(cmd.Context(), courseID, since)
+			if err != nil {
+				return err
 			}
-			result := map[string]any{"announcements": items}
-			if len(errors) > 0 {
-				result["errors"] = errors
-			}
-			return writeJSON(cmd, result)
+			return writeJSON(cmd, brightspace.AnnouncementFeed{Announcements: announcements})
 		},
 	}
 	cmd.Flags().StringVar(&since, "since", "", "only include announcements on or after this ISO-8601 time")
@@ -172,13 +148,13 @@ func announcementsCommand() *cobra.Command {
 
 func assignmentsCommand() *cobra.Command {
 	return &cobra.Command{
-		Use: "assignments COURSE_ID", Aliases: []string{"dropbox"}, Short: "List assignment folders for a course", Args: cobra.ExactArgs(1),
+		Use: "assignments COURSE_ID", Short: "List assignment folders for a course", Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			courseID, err := courseID(args[0])
+			courseID, err := positiveID(args[0], "COURSE_ID")
 			if err != nil {
 				return err
 			}
-			client, err := openBrightspace(cmd.Context())
+			client, err := openBrightspace(cmd)
 			if err != nil {
 				return err
 			}
@@ -186,7 +162,7 @@ func assignmentsCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return writeJSON(cmd, map[string]any{"assignments": assignments})
+			return writeJSON(cmd, assignments)
 		},
 	}
 }
@@ -197,90 +173,65 @@ func submissionsCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use: "submissions COURSE_ID FOLDER_ID", Short: "List or download your submissions to an assignment folder", Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			course, err := courseID(args[0])
+			courseID, err := positiveID(args[0], "COURSE_ID")
 			if err != nil {
 				return err
 			}
-			folderID, err := courseID(args[1])
-			if err != nil {
-				return fmt.Errorf("FOLDER_ID must be a positive integer")
-			}
-			client, err := openBrightspace(cmd.Context())
+			folderID, err := positiveID(args[1], "FOLDER_ID")
 			if err != nil {
 				return err
 			}
-			submissions, err := client.Submissions(cmd.Context(), course, folderID)
+			client, err := openBrightspace(cmd)
+			if err != nil {
+				return err
+			}
+			submissions, err := client.Submissions(cmd.Context(), courseID, folderID)
 			if err != nil {
 				return err
 			}
 			if !download {
-				return writeJSON(cmd, map[string]any{"course_id": course, "folder_id": folderID, "submissions": submissions})
+				return writeJSON(cmd, submissions)
 			}
-			files := make([]map[string]any, 0)
-			names := map[string]bool{}
-			for _, submission := range submissions {
-				for _, file := range submission.Files {
-					name := safeFileName(file.Name)
-					// Resubmissions often reuse a file name; keep every version.
-					if names[name] {
-						name = fmt.Sprintf("%d_%s", submission.ID, name)
-					}
-					names[name] = true
-					body, err := client.DownloadSubmissionFile(cmd.Context(), course, folderID, submission.ID, file.ID)
-					if err != nil {
-						return err
-					}
-					path, err := saveDownload(output, name, body)
-					body.Close()
-					if err != nil {
-						return err
-					}
-					files = append(files, map[string]any{"submission_id": submission.ID, "file_id": file.ID, "date": submission.Date, "path": path})
-				}
+			files, err := downloadSubmissions(cmd, client, courseID, folderID, submissions, output)
+			if err != nil {
+				return err
 			}
-			return writeJSON(cmd, map[string]any{"course_id": course, "folder_id": folderID, "files": files})
+			return writeJSON(cmd, files)
 		},
 	}
 	cmd.Flags().BoolVar(&download, "download", false, "download every submitted file")
-	cmd.Flags().StringVarP(&output, "output", "o", ".", "directory for downloaded files")
+	cmd.Flags().StringVar(&output, "output", ".", "directory for downloaded files")
 	return cmd
 }
 
-func openBrightspace(ctx context.Context) (*brightspace.Client, error) {
-	client, err := brightspace.Open(ctx)
-	if errors.Is(err, auth.ErrCredentialsRequired) {
-		return nil, withAction(errors.New("authentication required"), "usc auth login")
-	}
-	return client, err
+type downloadedFile struct {
+	SubmissionID int     `json:"submission_id"`
+	FileID       int     `json:"file_id"`
+	Date         *string `json:"date"`
+	Path         string  `json:"path"`
 }
 
-func courseID(value string) (int, error) {
-	id, err := strconv.Atoi(value)
-	if err != nil || id < 1 {
-		return 0, fmt.Errorf("COURSE_ID must be a positive integer")
-	}
-	return id, nil
-}
-
-func flattenTopics(modules []brightspace.Module, parent string) []map[string]any {
-	topics := make([]map[string]any, 0)
-	for _, module := range modules {
-		path := module.Title
-		if parent != "" {
-			path = parent + " > " + path
+func downloadSubmissions(cmd *cobra.Command, client *brightspace.Client, courseID, folderID int, submissions []brightspace.Submission, directory string) ([]downloadedFile, error) {
+	files := []downloadedFile{}
+	used := make(map[string]bool)
+	for _, submission := range submissions {
+		for _, file := range submission.Files {
+			name := safeFileName(file.Name)
+			if used[name] {
+				name = fmt.Sprintf("%d_%s", submission.ID, name)
+			}
+			used[name] = true
+			body, err := client.DownloadSubmissionFile(cmd.Context(), courseID, folderID, submission.ID, file.ID)
+			if err != nil {
+				return nil, err
+			}
+			path, err := saveDownload(directory, name, body)
+			body.Close()
+			if err != nil {
+				return nil, err
+			}
+			files = append(files, downloadedFile{SubmissionID: submission.ID, FileID: file.ID, Date: submission.Date, Path: path})
 		}
-		for _, topic := range module.Topics {
-			topics = append(topics, map[string]any{"id": topic.ID, "title": topic.Title, "type": topic.Type, "url": topic.URL, "due_date": topic.DueDate, "last_modified": topic.LastModified, "module": path})
-		}
-		topics = append(topics, flattenTopics(module.Modules, path)...)
 	}
-	return topics
-}
-
-func announcementsForCourse(courseID int, code *string, announcements []brightspace.Announcement) []map[string]any {
-	items := make([]map[string]any, len(announcements))
-	for index, announcement := range announcements {
-		items[index] = map[string]any{"course_id": courseID, "course_code": code, "id": announcement.ID, "title": announcement.Title, "body": announcement.Body, "start_date": announcement.StartDate, "end_date": announcement.EndDate, "created_date": announcement.CreatedDate, "last_modified_date": announcement.LastModifiedDate, "is_pinned": announcement.IsPinned, "is_hidden": announcement.IsHidden, "attachments": announcement.Attachments}
-	}
-	return items
+	return files, nil
 }

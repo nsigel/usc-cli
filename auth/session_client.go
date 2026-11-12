@@ -6,51 +6,43 @@ import (
 	"errors"
 	"io"
 	"net/url"
-	"os"
 
 	http "github.com/saucesteals/fhttp"
 )
 
-// ErrSessionNotFound means no saved browser session is available.
-var ErrSessionNotFound = errors.New("no saved session")
-
 // Session sends requests with USC browser cookies. Do never reauthenticates;
-// Authenticate is an explicit handoff used by auth commands and site clients.
+// Authenticate is the explicit SSO handoff.
 type Session struct {
 	authenticator *authenticator
-	sessionFile   string
-	options       SessionOptions
+	options       Options
+	credentials   Credentials
+	policy        CookiePolicy
 }
 
-// SessionOptions controls how saved cookies are restored and persisted.
-// The zero value requires an existing session and restores all cookies.
-type SessionOptions struct {
-	Fresh           bool     // Start empty and replace the saved session after authentication.
-	AllowMissing    bool     // Treat a missing file as an empty session.
-	ResetDomains    []string // Omit these domains' cookies and replace them after authentication.
-	PreserveCookies []string // Retain these cookie names within ResetDomains on disk only.
+// CookiePolicy makes a session start over at some sites each time it is
+// opened. LibCal needs this: a stale checkout cookie breaks a new booking.
+type CookiePolicy struct {
+	ResetDomains    []string // Skip these domains' saved cookies; replace them on save.
+	PreserveCookies []string // Cookie names within ResetDomains to leave untouched on disk.
 }
 
-// OpenSession opens a cookie jar for a site client. It writes nothing until
-// Authenticate succeeds.
-func OpenSession(sessionFile string, options SessionOptions) (*Session, error) {
-	if !options.Fresh && !options.AllowMissing {
-		if _, err := os.Stat(sessionFile); errors.Is(err, os.ErrNotExist) {
-			return nil, ErrSessionNotFound
-		} else if err != nil {
-			return nil, err
-		}
+// OpenSession restores the cookies in options.SessionFile, if any. Nothing
+// is written until Authenticate succeeds.
+func OpenSession(options Options, policy CookiePolicy) (*Session, error) {
+	credentials, err := options.ResolveCredentials()
+	if err != nil {
+		return nil, err
 	}
 	authenticator, err := newAuthenticator()
 	if err != nil {
 		return nil, err
 	}
-	if !options.Fresh {
-		if err := loadSession(sessionFile, authenticator.jar, options.ResetDomains); err != nil {
+	if options.SessionFile != "" {
+		if err := loadSession(options.SessionFile, authenticator.jar, policy.ResetDomains); err != nil {
 			return nil, err
 		}
 	}
-	return &Session{authenticator: authenticator, sessionFile: sessionFile, options: options}, nil
+	return &Session{authenticator: authenticator, options: options, credentials: credentials, policy: policy}, nil
 }
 
 // Do implements the small HTTP contract used by site clients.
@@ -58,14 +50,10 @@ func (s *Session) Do(request *http.Request) (*http.Response, error) {
 	return s.authenticator.client.Do(request)
 }
 
-// Authenticate follows a site's SSO redirect using this session's existing
-// cookie jar. This is useful for applications such as LibCal that only create
-// a valid SSO redirect after a booking has been staged. The caller owns the
-// final response body, including when persisting the session returns an error.
-func (s *Session) Authenticate(ctx context.Context, target string, credentials Credentials, referer string) (*http.Response, error) {
-	if s == nil || s.authenticator == nil {
-		return nil, errors.New("USC session is unavailable")
-	}
+// Authenticate opens target, completing USC SSO with the session's
+// credentials if its cookies are not enough, then saves the cookies. The
+// caller owns the final response body, including when saving returns an error.
+func (s *Session) Authenticate(ctx context.Context, target, referer string) (*http.Response, error) {
 	var refererURL *url.URL
 	if referer != "" {
 		parsed, err := url.ParseRequestURI(referer)
@@ -74,8 +62,9 @@ func (s *Session) Authenticate(ctx context.Context, target string, credentials C
 		}
 		refererURL = parsed
 	}
-	page, err := s.authenticator.open(ctx, target, credentials, refererURL)
+	page, err := s.authenticator.open(ctx, target, s.credentials, refererURL)
 	if err != nil {
+		forgetRejected(s.options.CredentialsFile, err, s.credentials)
 		return nil, err
 	}
 	response := &http.Response{
@@ -84,10 +73,15 @@ func (s *Session) Authenticate(ctx context.Context, target string, credentials C
 		Body:       io.NopCloser(bytes.NewReader(page.Body)),
 		Request:    &http.Request{URL: page.URL},
 	}
-	if !s.options.Fresh && len(s.options.ResetDomains) > 0 {
-		err = saveSessionReplacingDomains(s.sessionFile, s.authenticator.jar, s.options.ResetDomains, s.options.PreserveCookies)
-	} else {
-		err = saveSession(s.sessionFile, s.authenticator.jar)
+	return response, s.save()
+}
+
+func (s *Session) save() error {
+	switch {
+	case s.options.SessionFile == "":
+		return nil
+	case len(s.policy.ResetDomains) > 0:
+		return saveSessionReplacingDomains(s.options.SessionFile, s.authenticator.jar, s.policy.ResetDomains, s.policy.PreserveCookies)
 	}
-	return response, err
+	return saveSession(s.options.SessionFile, s.authenticator.jar)
 }

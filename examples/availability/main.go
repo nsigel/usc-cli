@@ -1,4 +1,3 @@
-// Query live availability without credentials or the usc executable.
 package main
 
 import (

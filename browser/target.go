@@ -8,7 +8,8 @@ import (
 	"strings"
 )
 
-const defaultCDPTarget = "127.0.0.1:9222"
+// DefaultTarget is Chrome's conventional remote-debugging address.
+const DefaultTarget = "127.0.0.1:9222"
 
 // ResolveTarget normalizes a CDP target string into an HTTP endpoint or a
 // websocket debugger URL. Empty target defaults to 127.0.0.1:9222.
@@ -21,7 +22,7 @@ const defaultCDPTarget = "127.0.0.1:9222"
 func ResolveTarget(target string) (string, error) {
 	target = strings.TrimSpace(target)
 	if target == "" {
-		target = defaultCDPTarget
+		target = DefaultTarget
 	}
 
 	lower := strings.ToLower(target)
@@ -38,15 +39,9 @@ func ResolveTarget(target string) (string, error) {
 			return "", fmt.Errorf("invalid CDP HTTP URL %q", target)
 		}
 		parsed.Path = strings.TrimRight(parsed.Path, "/")
-		if parsed.Path == "" {
-			parsed.RawQuery = ""
-			parsed.Fragment = ""
-			return parsed.String(), nil
-		}
-		// Allow paths; callers append /json/version when needed.
 		parsed.RawQuery = ""
 		parsed.Fragment = ""
-		return strings.TrimRight(parsed.String(), "/"), nil
+		return parsed.String(), nil
 	}
 
 	if port, err := strconv.Atoi(target); err == nil {

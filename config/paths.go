@@ -1,4 +1,4 @@
-// Package config resolves the shared USC CLI configuration paths.
+// Package config locates the usc command's configuration files.
 package config
 
 import (
@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 )
 
-// Directory returns the directory containing USC credentials and sessions.
-// USC_CONFIG_DIR overrides the platform's standard user configuration path.
+// Directory returns the usc command's configuration directory: USC_CONFIG_DIR
+// when set, otherwise "usc" under the platform's user configuration directory.
 func Directory() (string, error) {
 	root := os.Getenv("USC_CONFIG_DIR")
 	if root == "" {
@@ -20,30 +20,20 @@ func Directory() (string, error) {
 	return filepath.Abs(root)
 }
 
-// SessionPath returns the path to the shared USC browser-cookie session.
-func SessionPath() (string, error) {
-	root, err := Directory()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(root, "session.json"), nil
-}
-
-// CredentialsPath returns the path to saved USC and Marshall credentials.
+// CredentialsPath returns the file where usc auth login saves credentials.
 func CredentialsPath() (string, error) {
-	root, err := Directory()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(root, "credentials.json"), nil
+	return path("credentials.json")
 }
 
-// LibCalReservationsPath returns the private local record of reservations
-// confirmed by this CLI. LibCal does not expose a patron booking-list API.
-func LibCalReservationsPath() (string, error) {
-	root, err := Directory()
+// SessionPath returns the usc command's own cookie session file.
+func SessionPath() (string, error) {
+	return path("session.json")
+}
+
+func path(name string) (string, error) {
+	directory, err := Directory()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(root, "libcal-reservations.json"), nil
+	return filepath.Join(directory, name), nil
 }

@@ -1,13 +1,1 @@
-__pycache__/
-*.py[cod]
-*.egg-info/
-dist/
-build/
-.eggs/
-*.egg
-.venv/
-.env
-.ruff_cache/
-.pytest_cache/
 /usc
-/coverage.out

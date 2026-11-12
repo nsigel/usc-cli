@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/url"
 	"os"
@@ -17,15 +18,18 @@ import (
 )
 
 // ErrBookingUnknown means submission may have succeeded. Never retry blindly.
-var ErrBookingUnknown = &Error{Code: "libcal_booking_unknown", Message: "LibCal booking outcome is unknown; check your confirmation email before retrying; run usc libcal release only after checking"}
+var ErrBookingUnknown = &Error{Code: "libcal_booking_unknown", Message: "LibCal booking outcome is unknown; check the confirmation email, then release the checkout before booking again"}
 
+// checkoutState is the recovery record. Session names a server-side checkout
+// to release. OutcomeUnknown is set before a reservation is submitted and
+// cleared only by a definite answer, so a lost response blocks retries.
 type checkoutState struct {
-	Session    string `json:"session,omitempty"`
-	Submitting bool   `json:"submitting,omitempty"`
+	Session        string `json:"session,omitempty"`
+	OutcomeUnknown bool   `json:"outcome_unknown,omitempty"`
 }
 
-// Keep the lock file separate from the atomically replaced recovery record.
-// Never unlink the lock file: another process may be using the same inode.
+// The lock file is separate from the atomically replaced record and is never
+// unlinked: another process may hold the same inode.
 type checkout struct {
 	client  *Client
 	file    *os.File
@@ -34,7 +38,28 @@ type checkout struct {
 	pending *pendingBooking
 }
 
-func (c *Client) beginCheckout(ctx context.Context, release bool) (*checkout, error) {
+// beginCheckout starts a booking attempt. It refuses while an earlier
+// submission's outcome is unknown, and otherwise releases whatever an earlier
+// attempt left held.
+func (c *Client) beginCheckout(ctx context.Context) (*checkout, error) {
+	tx, err := c.openCheckout()
+	if err != nil {
+		return nil, err
+	}
+	if tx.state.OutcomeUnknown {
+		tx.close()
+		return nil, ErrBookingUnknown
+	}
+	if err := tx.releaseEarlierAttempt(ctx); err != nil {
+		tx.close()
+		return nil, err
+	}
+	return tx, nil
+}
+
+// openCheckout takes the checkout lock and reads the recovery record. A
+// client without a checkout path keeps no record and takes no lock.
+func (c *Client) openCheckout() (*checkout, error) {
 	tx := &checkout{client: c}
 	if c.checkoutPath == "" {
 		return tx, nil
@@ -42,38 +67,45 @@ func (c *Client) beginCheckout(ctx context.Context, release bool) (*checkout, er
 	if err := os.MkdirAll(filepath.Dir(c.checkoutPath), 0700); err != nil {
 		return nil, err
 	}
-	f, err := os.OpenFile(c.checkoutPath+".lock", os.O_CREATE|os.O_RDWR, 0600)
+	lock, err := os.OpenFile(c.checkoutPath+".lock", os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return nil, err
 	}
-	if err := lockCheckout(f); err != nil {
-		f.Close()
+	if err := lockCheckout(lock); err != nil {
+		lock.Close()
 		return nil, &Error{Code: "libcal_checkout_busy", Message: "another LibCal checkout is running; wait for it to finish"}
 	}
-	tx.file = f
-	fail := func(err error) (*checkout, error) { f.Close(); return nil, err }
+	tx.file = lock
 	data, err := os.ReadFile(c.checkoutPath)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fail(err)
+		tx.close()
+		return nil, err
 	}
 	if len(data) > 0 {
 		if err := json.Unmarshal(data, &tx.state); err != nil {
-			return fail(errors.New("cannot read unfinished LibCal checkout state; do not start another booking"))
+			tx.close()
+			return nil, errors.New("cannot read unfinished LibCal checkout state; do not start another booking")
 		}
 	}
-	if tx.state.Submitting && !release {
-		return fail(ErrBookingUnknown)
-	}
+	return tx, nil
+}
+
+// releaseEarlierAttempt ends the server-side checkout a previous attempt
+// recorded and clears the record, including an unknown-outcome mark.
+func (tx *checkout) releaseEarlierAttempt(ctx context.Context) error {
 	if tx.state.Session != "" {
-		if err := c.endCheckout(ctx, tx.state.Session); err != nil {
-			return fail(&Error{Code: "libcal_cleanup_failed", Message: "could not release unfinished LibCal checkout; retry usc libcal release: " + err.Error(), Cause: err})
+		if err := tx.client.endCheckout(ctx, tx.state.Session); err != nil {
+			return &Error{Code: "libcal_cleanup_failed", Message: "could not release the unfinished LibCal checkout: " + err.Error(), Cause: err}
 		}
 	}
 	tx.state = checkoutState{}
-	if err := tx.save(); err != nil {
-		return fail(err)
+	return tx.save()
+}
+
+func (tx *checkout) close() {
+	if tx.file != nil {
+		tx.file.Close()
 	}
-	return tx, nil
 }
 
 func (tx *checkout) save() error {
@@ -104,12 +136,8 @@ func (tx *checkout) save() error {
 }
 
 func (tx *checkout) finish(resultErr *error) {
-	if tx.file != nil {
-		defer tx.file.Close()
-	}
-	// A request whose response was lost may still be executing on the server.
-	// Keep its marker and let the user reconcile the confirmation first.
-	if tx.state.Submitting {
+	defer tx.close()
+	if tx.state.OutcomeUnknown {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -118,10 +146,10 @@ func (tx *checkout) finish(resultErr *error) {
 	if tx.state.Session != "" {
 		cleanupErr = tx.client.endCheckout(ctx, tx.state.Session)
 	} else if tx.pending != nil {
-		cleanupErr = tx.client.removePendingBooking(ctx, tx.slot, *tx.pending)
+		cleanupErr = tx.client.removeHold(ctx, tx.slot, *tx.pending)
 	}
 	if cleanupErr != nil {
-		*resultErr = errors.Join(*resultErr, &Error{Code: "libcal_cleanup_failed", Message: "could not release LibCal checkout; retry usc libcal release: " + cleanupErr.Error(), Cause: cleanupErr})
+		*resultErr = errors.Join(*resultErr, &Error{Code: "libcal_cleanup_failed", Message: "could not release the LibCal checkout: " + cleanupErr.Error(), Cause: cleanupErr})
 		return
 	}
 	tx.state = checkoutState{}
@@ -130,17 +158,17 @@ func (tx *checkout) finish(resultErr *error) {
 
 // Release ends only an unfinished CLI checkout; it never cancels a confirmed
 // reservation. It also acknowledges a previously unknown submission outcome.
-func (c *Client) Release(ctx context.Context) (resultErr error) {
-	tx, err := c.beginCheckout(ctx, true)
+func (c *Client) Release(ctx context.Context) error {
+	tx, err := c.openCheckout()
 	if err != nil {
 		return err
 	}
-	defer tx.finish(&resultErr)
-	return nil
+	defer tx.close()
+	return tx.releaseEarlierAttempt(ctx)
 }
 
 func (c *Client) endCheckout(ctx context.Context, session string) error {
-	data, err := c.request(ctx, http.MethodPost, "/ajax/space/session/end", url.Values{"session": {session}}, "application/json")
+	data, err := c.request(ctx, http.MethodPost, "/ajax/space/session/end", url.Values{"session": {session}}, "application/json", "")
 	if err != nil {
 		return err
 	}
@@ -156,87 +184,145 @@ func (c *Client) endCheckout(ctx context.Context, session string) error {
 	return nil
 }
 
-// These fields are appended by LibCal's checkout submit handler, not present
-// as input elements in the HTML. Parse only the known literals, never execute JS.
+const equipmentCheckoutPath = "/ajax/equipment/checkout"
+
+// LibCal's checkout page appends these fields in its submit handler instead
+// of rendering them as inputs.
 var checkoutInputPattern = regexp.MustCompile(`appendHiddenInput\('(?P<name>returnUrl|logoutUrl|session)',\s*("(?:\\.|[^"\\])*"|[0-9]+),`)
 
 func (c *Client) checkoutForm(ctx context.Context, slot availableSlot, tx *checkout) (bookingForm, error) {
-	booking, err := c.addPendingBooking(ctx, slot)
+	hold, err := c.addHold(ctx, slot)
 	if err != nil {
 		return bookingForm{}, err
 	}
-	tx.slot, tx.pending = slot, &booking
-	updated, err := c.setPendingDuration(ctx, slot, booking)
+	tx.slot, tx.pending = slot, &hold
+	extended, err := c.extendHold(ctx, slot, hold)
 	if err != nil {
 		return bookingForm{}, err
 	}
-	tx.pending = &updated
-	booking = updated
-	page, err := c.bookingForm(ctx, slot, booking)
+	tx.pending = &extended
+	page, err := c.checkoutPage(ctx, slot, extended)
 	if err != nil {
-		return bookingForm{}, err // HTTP 400 is not an authentication challenge.
+		return bookingForm{}, err
 	}
-	referer := refererForSpace(slot.Space)
+	html, referer := page.HTML, refererFor(slot.Space)
+	var authErr error
 	if page.Redirect != "" {
-		if c.authenticate == nil {
-			return bookingForm{}, ErrAuthenticationRequired
-		}
-		response, authErr := c.authenticate(ctx, page.Redirect, referer)
-		if response != nil {
-			defer response.Body.Close()
-			data, readErr := io.ReadAll(io.LimitReader(response.Body, 10<<20))
-			if readErr != nil {
-				return bookingForm{}, errors.Join(authErr, readErr)
-			}
-			page.HTML = string(data)
-			referer = response.Request.URL.String()
-		}
-		// Capture the checkout ID even when saving authenticated cookies failed,
-		// so the server-side hold can still be released.
-		if response == nil {
-			return bookingForm{}, authErr
-		}
-		if err := tx.capture(page.HTML); err != nil {
-			return bookingForm{}, errors.Join(authErr, err)
-		}
-		if authErr != nil {
-			return bookingForm{}, authErr
-		}
-	} else if err := tx.capture(page.HTML); err != nil {
-		return bookingForm{}, err
+		html, referer, authErr = c.signIn(ctx, page.Redirect, referer)
 	}
-	form, err := parseBookingForm(page.HTML)
+	// Record the checkout ID before reporting a sign-in failure, so the hold
+	// it names is still released.
+	if err := tx.capture(html); err != nil || authErr != nil {
+		return bookingForm{}, errors.Join(authErr, err)
+	}
+	form, err := parseBookingForm(html)
 	if err != nil {
 		return bookingForm{}, err
 	}
 	form.Referer = referer
-	if form.Action == "/ajax/equipment/checkout" {
+	if form.Action == equipmentCheckoutPath {
 		if tx.state.Session == "" {
 			return bookingForm{}, errors.New("LibCal checkout is missing its session identifier")
 		}
-		fields := make(map[string]bool)
-		for _, match := range checkoutInputPattern.FindAllStringSubmatch(page.HTML, -1) {
-			value := match[2]
-			if strings.HasPrefix(value, `"`) {
-				value, err = strconv.Unquote(value)
-				if err != nil {
-					return bookingForm{}, errors.New("LibCal checkout has an invalid form value")
-				}
-			}
-			form.Fields = append(form.Fields, bookingFormField{Name: match[1], Type: "hidden", Value: value})
-			fields[match[1]] = value != ""
-		}
-		for _, name := range []string{"session", "returnUrl", "logoutUrl"} {
-			if !fields[name] {
-				return bookingForm{}, &Error{Code: "libcal_invalid_form", Message: "LibCal checkout is missing the required " + name + " field"}
-			}
+		if err := form.addScriptedFields(html); err != nil {
+			return bookingForm{}, err
 		}
 	}
 	return form, nil
 }
 
-func (tx *checkout) capture(body string) error {
-	for _, match := range checkoutInputPattern.FindAllStringSubmatch(body, -1) {
+type checkoutPage struct {
+	Redirect string `json:"redirect"`
+	HTML     string `json:"html"`
+	Error    string `json:"error"`
+}
+
+func (c *Client) checkoutPage(ctx context.Context, slot availableSlot, hold pendingBooking) (checkoutPage, error) {
+	category, err := categoryOf(slot.Space)
+	if err != nil {
+		return checkoutPage{}, err
+	}
+	values := url.Values{
+		"patron":     {""},
+		"patronHash": {""},
+		"returnUrl":  {category.returnPath()},
+		"method":     {bookingMethodID},
+	}
+	hold.echo(values)
+	data, err := c.request(ctx, http.MethodPost, "/ajax/space/times", values, ajaxAccept, refererFor(slot.Space))
+	if err != nil {
+		return checkoutPage{}, err
+	}
+	var page checkoutPage
+	if err := json.Unmarshal(data, &page); err != nil {
+		return checkoutPage{}, fmt.Errorf("decode LibCal booking form: %w", err)
+	}
+	switch {
+	case page.Redirect != "":
+		page.Redirect, err = authRedirect(page.Redirect)
+		return page, err
+	case page.Error != "":
+		return checkoutPage{}, libcalError(page.Error)
+	case page.HTML == "":
+		return checkoutPage{}, errors.New("LibCal returned no reservation form")
+	}
+	return page, nil
+}
+
+func authRedirect(value string) (string, error) {
+	base, _ := url.Parse(baseURL)
+	target, err := base.Parse(value)
+	if err != nil {
+		return "", fmt.Errorf("parse LibCal authentication redirect: %w", err)
+	}
+	if target.Scheme != "https" || !strings.EqualFold(target.Hostname(), base.Hostname()) || target.Path != "/spaces/auth" {
+		return "", errors.New("LibCal returned an unsupported authentication redirect")
+	}
+	return target.String(), nil
+}
+
+// signIn follows LibCal's SSO redirect and returns the checkout page it lands
+// on and that page's URL. When signing in worked but saving the session did
+// not, it returns the page together with the error.
+func (c *Client) signIn(ctx context.Context, target, referer string) (html, landed string, err error) {
+	if c.authenticate == nil {
+		return "", "", ErrAuthenticationRequired
+	}
+	response, err := c.authenticate(ctx, target, referer)
+	if response == nil {
+		return "", "", err
+	}
+	defer response.Body.Close()
+	data, readErr := io.ReadAll(io.LimitReader(response.Body, 10<<20))
+	if readErr != nil {
+		return "", "", errors.Join(err, readErr)
+	}
+	return string(data), response.Request.URL.String(), err
+}
+
+func (form *bookingForm) addScriptedFields(html string) error {
+	found := make(map[string]bool)
+	for _, match := range checkoutInputPattern.FindAllStringSubmatch(html, -1) {
+		name, value := match[1], match[2]
+		if strings.HasPrefix(value, `"`) {
+			var err error
+			if value, err = strconv.Unquote(value); err != nil {
+				return errors.New("LibCal checkout has an invalid form value")
+			}
+		}
+		form.Fields = append(form.Fields, bookingFormField{Name: name, Type: "hidden", Value: value})
+		found[name] = value != ""
+	}
+	for _, name := range []string{"session", "returnUrl", "logoutUrl"} {
+		if !found[name] {
+			return &Error{Code: "libcal_invalid_form", Message: "LibCal checkout is missing the required " + name + " field"}
+		}
+	}
+	return nil
+}
+
+func (tx *checkout) capture(html string) error {
+	for _, match := range checkoutInputPattern.FindAllStringSubmatch(html, -1) {
 		if match[1] == "session" {
 			tx.state.Session = strings.Trim(match[2], `"`)
 			return tx.save()

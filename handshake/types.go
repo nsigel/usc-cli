@@ -33,18 +33,17 @@ type Contact struct {
 	Photo string `json:"photo,omitempty"`
 }
 
-// EventSummary is one event-search result.
+// EventSummary is one event-search result. Event returns the full record,
+// including its type and contacts.
 type EventSummary struct {
 	ID                  string       `json:"id"`
 	Name                string       `json:"name"`
 	StartDate           string       `json:"start_date"`
 	EndDate             string       `json:"end_date"`
 	Medium              string       `json:"medium"`
-	EventType           string       `json:"event_type,omitempty"`
 	Categories          []Category   `json:"categories"`
 	Host                Organization `json:"host"`
 	Employers           []Employer   `json:"employers"`
-	Contacts            []Contact    `json:"contacts"`
 	Favorited           bool         `json:"favorited"`
 	Registered          bool         `json:"registered"`
 	SameSchoolHost      bool         `json:"same_school_host"`
@@ -173,20 +172,22 @@ type CareerFairDetail struct {
 	URL               string              `json:"url"`
 }
 
-// Search is shared by event and career-fair list operations.
+// Search filters and orders an event or career-fair list. The zero value is
+// the first 30 results by relevance.
 type Search struct {
-	Categories     []string
-	Organizer      string
+	Categories     []string // names, slugs, or IDs from Categories
+	Organizer      string   // host, employer, or contact name or email
 	Keyword        string
-	Medium         string
-	Date           string
-	Sort           string
+	Medium         string // all, virtual, or in-person
+	Date           string // all, today, next-10, next-30, or past-year
+	Sort           string // relevance, date, or posted-desc
 	PostedBySchool bool
-	Limit          int
-	After          string
+	Limit          int    // 1-100; 0 means 30
+	After          string // NextCursor of the previous page
 }
 
-// Page is one cursor-based result page.
+// Page is one result page. Pass NextCursor as Search.After, with the same
+// filters and sort, to read the next one.
 type Page[T any] struct {
 	Items      []T    `json:"items"`
 	HasMore    bool   `json:"has_more"`

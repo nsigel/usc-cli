@@ -1,7 +1,7 @@
 package handshake
 
 import (
-	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/nsigel/usc-cli/internal/dom"
 	"golang.org/x/net/html"
 )
 
@@ -66,13 +67,36 @@ type careerFairSessionWire struct {
 	WaitlistEnabled    bool   `json:"waitlist_enabled?"`
 }
 
+// careerFairPageWire covers both layouts of the career-fair page's embedded
+// data: in-person fairs nest it under "page", virtual fairs under "entities".
 type careerFairPageWire struct {
 	Page struct {
 		CareerFair careerFairWire `json:"career_fair"`
 		Sessions   []struct {
-			CareerFairSession careerFairSessionWire `json:"career_fair_session"`
+			Session careerFairSessionWire `json:"career_fair_session"`
 		} `json:"career_fair_sessions"`
 	} `json:"page"`
+	Entities struct {
+		CareerFair careerFairWire          `json:"career_fairs"`
+		Sessions   []careerFairSessionWire `json:"career_fair_sessions"`
+	} `json:"entities"`
+}
+
+func (p careerFairPageWire) fair() (careerFairWire, []careerFairSessionWire) {
+	if p.Page.CareerFair.ID == 0 {
+		return p.Entities.CareerFair, p.Entities.Sessions
+	}
+	sessions := make([]careerFairSessionWire, len(p.Page.Sessions))
+	for index, wrapped := range p.Page.Sessions {
+		sessions[index] = wrapped.Session
+	}
+	return p.Page.CareerFair, sessions
+}
+
+// CareerFairs returns one page of career fairs.
+func (c *Client) CareerFairs(ctx context.Context, search Search) (Page[CareerFairSummary], error) {
+	page, err := c.search(ctx, search, "CareerFair")
+	return convertPage(page, normalizeCareerFairSummary), err
 }
 
 // CareerFair returns the complete student-facing career-fair page by ID.
@@ -80,26 +104,26 @@ func (c *Client) CareerFair(ctx context.Context, id int) (CareerFairDetail, erro
 	if id < 1 {
 		return CareerFairDetail{}, errors.New("career fair ID must be a positive integer")
 	}
-	body, err := c.getHTML(ctx, "/stu/career_fairs/"+strconv.Itoa(id), "GetCareerFair")
+	body, err := c.getHTML(ctx, "/stu/career_fairs/"+strconv.Itoa(id), "career fair "+strconv.Itoa(id))
 	if err != nil {
 		return CareerFairDetail{}, err
 	}
-	encoded, err := reactProps(body, "CareerFairsShowRoot")
-	if err != nil {
-		return CareerFairDetail{}, fmt.Errorf("career fair %d: %w", id, err)
+	encoded := careerFairProps(body)
+	if encoded == "" {
+		return CareerFairDetail{}, fmt.Errorf("career fair %d: page has no career-fair data", id)
 	}
 	var props careerFairPageWire
 	if err := json.Unmarshal([]byte(encoded), &props); err != nil {
 		return CareerFairDetail{}, fmt.Errorf("career fair %d: decode page data: %w", id, err)
 	}
-	fair := props.Page.CareerFair
+	fair, sessions := props.fair()
 	if fair.ID == 0 {
 		return CareerFairDetail{}, fmt.Errorf("career fair %d was not found", id)
 	}
 	detail := CareerFairDetail{
 		ID: fair.ID, Name: fair.Name, Description: plainText(fair.Description), DescriptionHTML: fair.Description,
 		CreatedAt: fair.CreatedAt, UpdatedAt: fair.UpdatedAt, StartDate: fair.StartDate, EndDate: fair.EndDate,
-		TimeZone: firstNonempty(fair.TimeZone, fair.MomentTimeZone), Medium: strings.ToLower(fair.Medium),
+		TimeZone: cmp.Or(fair.TimeZone, fair.MomentTimeZone), Medium: strings.ToLower(fair.Medium),
 		Location: Location{Name: fair.Location.Name, City: fair.Location.City, State: fair.Location.State,
 			Country: fair.Location.Country, Latitude: fair.Location.Latitude, Longitude: fair.Location.Longitude},
 		Institution:       Organization{ID: strconv.Itoa(fair.InstitutionID), Name: fair.InstitutionName, Type: "school", Logo: fair.InstitutionLogo},
@@ -109,10 +133,9 @@ func (c *Client) CareerFair(ctx context.Context, id int) (CareerFairDetail, erro
 		CheckedInCount: fair.CheckedInCount, EmployerCount: fair.EmployerCount,
 		AvailableSpace: fair.AvailableSpace, WaitlistEnabled: fair.WaitlistEnabled, InviteOnly: fair.InviteOnly,
 		Public: fair.Public, Status: fair.Status, ExternalLink: fair.ExternalLink, Logo: fair.Logo,
-		Sessions: make([]CareerFairSession, len(props.Page.Sessions)), URL: baseURL + "/stu/career_fairs/" + strconv.Itoa(fair.ID),
+		Sessions: make([]CareerFairSession, len(sessions)), URL: baseURL + "/stu/career_fairs/" + strconv.Itoa(fair.ID),
 	}
-	for index, wrapped := range props.Page.Sessions {
-		session := wrapped.CareerFairSession
+	for index, session := range sessions {
 		detail.Sessions[index] = CareerFairSession{
 			ID: session.ID, Name: session.Name, StartDate: session.StartDate, EndDate: session.EndDate,
 			TimeZone: session.TimeZone, Type: session.Type, LocationType: session.LocationType,
@@ -123,46 +146,10 @@ func (c *Client) CareerFair(ctx context.Context, id int) (CareerFairDetail, erro
 	return detail, nil
 }
 
-func reactProps(document []byte, reactClass string) (string, error) {
-	root, err := html.Parse(bytes.NewReader(document))
-	if err != nil {
-		return "", err
-	}
-	var visit func(*html.Node) string
-	visit = func(node *html.Node) string {
-		if node.Type == html.ElementNode {
-			matched := false
-			props := ""
-			for _, attribute := range node.Attr {
-				switch attribute.Key {
-				case "data-react-class":
-					matched = attribute.Val == reactClass
-				case "data-react-props":
-					props = attribute.Val
-				}
-			}
-			if matched && props != "" {
-				return props
-			}
-		}
-		for child := node.FirstChild; child != nil; child = child.NextSibling {
-			if value := visit(child); value != "" {
-				return value
-			}
-		}
-		return ""
-	}
-	if props := visit(root); props != "" {
-		return props, nil
-	}
-	return "", errors.New("page did not contain CareerFairsShowRoot data")
-}
-
-func firstNonempty(values ...string) string {
-	for _, value := range values {
-		if value != "" {
-			return value
-		}
-	}
-	return ""
+func careerFairProps(document []byte) string {
+	root := dom.FindFirst(dom.Parse(document), func(node *html.Node) bool {
+		class := dom.Attr(node, "data-react-class")
+		return class == "CareerFairsShowRoot" || class == "StudentCareerFairsShowRoot"
+	})
+	return dom.Attr(root, "data-react-props")
 }

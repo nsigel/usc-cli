@@ -3,6 +3,7 @@
 package auth
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -14,10 +15,17 @@ import (
 
 var (
 	// ErrCredentialsRequired means the saved session cannot reach the target
-	// without a fresh USC login.
-	ErrCredentialsRequired = errors.New("credentials are required")
+	// and no complete credentials were supplied for a fresh USC login.
+	ErrCredentialsRequired = errors.New("USC sign-in is required")
+	// ErrPasswordRejected means USC did not accept the username and password.
+	ErrPasswordRejected = errors.New("USC rejected the username or password")
 	// ErrBypassRejected means Duo did not accept the supplied bypass code.
-	ErrBypassRejected = errors.New("bypass code was rejected")
+	ErrBypassRejected = errors.New("Duo rejected the bypass code")
+	// ErrSessionInvalid means a site stopped accepting its session after the
+	// client was opened. Open a new client.
+	ErrSessionInvalid = errors.New("session expired")
+	// ErrSessionNotFound means there is no saved session file.
+	ErrSessionNotFound = errors.New("no saved session")
 )
 
 // Credentials are used only when an existing session cannot reach the target.
@@ -27,10 +35,13 @@ type Credentials struct {
 	BypassCode string // current Duo bypass code
 }
 
-// Complete reports whether a fresh SSO login can proceed without prompting.
+// Complete reports whether a fresh SSO login can proceed.
 func (c Credentials) Complete() bool {
 	return c.Username != "" && c.Password != "" && c.BypassCode != ""
 }
+
+// maxProtocolSteps turns an identity-provider redirect loop into an error.
+const maxProtocolSteps = 40
 
 type authenticator struct {
 	client          *http.Client
@@ -40,128 +51,52 @@ type authenticator struct {
 	microsoft       map[string]string
 }
 
-// Login restores the cookies in sessionFile and opens target. If USC requests
-// a fresh login, Login submits credentials through the USC, Microsoft, and Duo
-// flow. A successful call atomically persists the resulting cookie jar.
-//
-// Target must be an absolute HTTPS URL. A missing session file is treated as
-// an empty session. Login returns ErrCredentialsRequired when the session is
-// insufficient and credentials is incomplete, and ErrBypassRejected when Duo
-// rejects the bypass code.
-func Login(ctx context.Context, target, sessionFile string, credentials Credentials) error {
-	return login(ctx, target, sessionFile, credentials, false)
-}
-
-// LoginFresh ignores the saved session before authenticating and replaces it
-// only after the requested application has been reached successfully.
-func LoginFresh(ctx context.Context, target, sessionFile string, credentials Credentials) error {
-	return login(ctx, target, sessionFile, credentials, true)
-}
-
-func login(ctx context.Context, target, sessionFile string, credentials Credentials, fresh bool) error {
-	session, err := OpenSession(sessionFile, SessionOptions{Fresh: fresh, AllowMissing: true})
-	if err != nil {
-		return err
-	}
-	response, err := session.Authenticate(ctx, target, credentials, "")
-	if response != nil {
-		response.Body.Close()
-	}
-	return err
-}
-
+// open navigates to target, taking one sign-in step per page until it gets
+// there. Every step is explicit so that credentials are only ever sent to
+// the exact pages that ask for them.
 func (a *authenticator) open(ctx context.Context, target string, credentials Credentials, initialReferer *url.URL) (*page, error) {
 	targetURL, err := url.ParseRequestURI(target)
-	if err != nil || targetURL.Scheme != "https" || targetURL.Host == "" {
+	if err != nil {
 		return nil, errors.New("target must be an absolute HTTPS URL")
 	}
-
-	current, err := a.do(ctx, http.MethodGet, targetURL.String(), nil, "", initialReferer, "")
-	if err != nil {
-		return nil, err
-	}
-	// Keeping the protocol explicit makes credential submission auditable. The
-	// bound turns an identity-provider redirect loop into a useful error.
-	for range 40 {
-		switch {
-		case current.Status >= 300 && current.Status < 400:
-			current, err = a.follow(ctx, current)
-
-		case isUSCLogin(current):
-			if !credentials.Complete() {
-				return nil, ErrCredentialsRequired
-			}
-			// Credentials are only injected into USC's exact login endpoint, never
-			// into a generic form discovered elsewhere in the chain.
-			form, formErr := firstForm(current)
-			if formErr != nil {
-				return nil, fmt.Errorf("USC login form: %w", formErr)
-			}
-			setField(&form, "j_username", credentials.Username)
-			setField(&form, "j_password", credentials.Password)
-			current, err = a.submit(ctx, current, form)
-
-		case isUSCSAMLBootstrap(current):
-			// USC splits its SAML request across two visits, so the value must
-			// survive the intervening credential and Duo pages.
-			loginURL := elementValue(current.Body, "loginUrl")
-			a.saml2Request = elementValue(current.Body, "saml2Request")
-			if a.saml2Request == "" {
-				return nil, errors.New("USC SAML redirect page is missing saml2Request")
-			}
-			current, err = a.do(ctx, http.MethodGet, loginURL, nil, "", current.URL, "")
-
-		case isUSCSAMLContinuation(current):
-			form, formErr := firstForm(current)
-			if formErr != nil {
-				return nil, fmt.Errorf("USC SAML continuation form: %w", formErr)
-			}
-			setField(&form, "saml2Request", a.saml2Request)
-			if secondVisitURL := current.URL.Query().Get("secondVisitUrl"); secondVisitURL != "" {
-				form.Action = secondVisitURL
-			}
-			current, err = a.submit(ctx, current, form)
-
-		case isDuoPrompt(current):
-			current, err = a.duo(ctx, current, credentials.BypassCode)
-
-		case current.URL.Host == targetURL.Host && current.Status >= 200 && current.Status < 300:
-			// Salesforce serves a successful 200 trampoline before authentication.
-			// A real browser follows it, so host and status alone are insufficient.
-			if destination, ok := htmlNavigation(current); ok {
-				current, err = a.do(ctx, http.MethodGet, destination.String(), nil, "", current.URL, "")
-			} else {
-				return current, nil
-			}
-
-		case needsMicrosoftReload(current):
-			// Microsoft's first pass probes ambient Windows SSO. sso_reload asks it
-			// to continue into USC federation when that probe has no browser state.
-			reloadURL := *current.URL
-			query := reloadURL.Query()
-			query.Set("sso_reload", "true")
-			reloadURL.RawQuery = query.Encode()
-			current, err = a.do(ctx, http.MethodGet, reloadURL.String(), nil, "", current.URL, "")
-
-		case isMicrosoftPage(current):
-			current, err = a.continueMicrosoft(ctx, current)
-
-		default:
-			// SAML handoffs often use an auto-post form or a static HTML redirect
-			// instead of an HTTP redirect.
-			if form, ok := autoForm(current); ok {
-				current, err = a.submit(ctx, current, form)
-			} else if destination, ok := htmlNavigation(current); ok {
-				current, err = a.do(ctx, http.MethodGet, destination.String(), nil, "", current.URL, "")
-			} else {
-				return nil, noContinuation(current)
-			}
-		}
+	current, err := a.get(ctx, targetURL.String(), initialReferer)
+	for range maxProtocolSteps {
 		if err != nil {
 			return nil, err
 		}
+		switch {
+		case current.Status >= 300 && current.Status < 400:
+			current, err = a.follow(ctx, current)
+		case isUSCLogin(current):
+			current, err = a.submitUSCLogin(ctx, current, credentials)
+		case isUSCLoginRejected(current):
+			return nil, ErrPasswordRejected
+		case isUSCSAMLBootstrap(current):
+			current, err = a.beginUSCSAML(ctx, current)
+		case isUSCSAMLContinuation(current):
+			current, err = a.continueUSCSAML(ctx, current)
+		case isDuoPrompt(current):
+			current, err = a.duo(ctx, current, credentials.BypassCode)
+		case current.URL.Host == targetURL.Host && current.Status >= 200 && current.Status < 300:
+			// Salesforce serves a successful 200 trampoline before authentication.
+			// A real browser follows it, so host and status alone are insufficient.
+			destination, ok := staticRedirect(current)
+			if !ok {
+				return current, nil
+			}
+			current, err = a.get(ctx, destination.String(), current.URL)
+		case needsMicrosoftReload(current):
+			current, err = a.reloadMicrosoft(ctx, current)
+		case isMicrosoftPage(current):
+			current, err = a.continueMicrosoft(ctx, current)
+		default:
+			current, err = a.continueHandoff(ctx, current)
+		}
 	}
-	return nil, errors.New("authentication exceeded 40 protocol steps")
+	if err != nil {
+		return nil, err
+	}
+	return nil, fmt.Errorf("authentication exceeded %d protocol steps", maxProtocolSteps)
 }
 
 func (a *authenticator) follow(ctx context.Context, current *page) (*page, error) {
@@ -173,14 +108,81 @@ func (a *authenticator) follow(ctx context.Context, current *page) (*page, error
 	if err != nil {
 		return nil, err
 	}
+	// 307 and 308 repeat the original request at the new address.
 	if current.Status == http.StatusTemporaryRedirect || current.Status == http.StatusPermanentRedirect {
-		return a.do(ctx, current.RedirectMethod, destination.String(), current.RedirectBody, current.RedirectContentType, current.RedirectReferer, "")
+		replay := current.request
+		replay.url = destination.String()
+		replay.duoTraceGroup = ""
+		return a.do(ctx, replay)
 	}
-	return a.do(ctx, http.MethodGet, destination.String(), nil, "", current.URL, "")
+	return a.get(ctx, destination.String(), current.URL)
+}
+
+// submitUSCLogin is the only place the username and password are sent.
+func (a *authenticator) submitUSCLogin(ctx context.Context, current *page, credentials Credentials) (*page, error) {
+	if !credentials.Complete() {
+		return nil, ErrCredentialsRequired
+	}
+	form, ok := firstForm(current)
+	if !ok {
+		return nil, errors.New("USC login page has no form")
+	}
+	setField(&form, "j_username", credentials.Username)
+	setField(&form, "j_password", credentials.Password)
+	return a.submit(ctx, current, form)
+}
+
+// beginUSCSAML remembers the SAML request. USC splits it across two visits,
+// so it must survive the credential and Duo pages in between.
+func (a *authenticator) beginUSCSAML(ctx context.Context, current *page) (*page, error) {
+	a.saml2Request = elementValue(current.Body, "saml2Request")
+	if a.saml2Request == "" {
+		return nil, errors.New("USC SAML redirect page is missing saml2Request")
+	}
+	return a.get(ctx, elementValue(current.Body, "loginUrl"), current.URL)
+}
+
+func (a *authenticator) continueUSCSAML(ctx context.Context, current *page) (*page, error) {
+	form, ok := firstForm(current)
+	if !ok {
+		return nil, errors.New("USC SAML continuation page has no form")
+	}
+	setField(&form, "saml2Request", a.saml2Request)
+	if secondVisitURL := current.URL.Query().Get("secondVisitUrl"); secondVisitURL != "" {
+		form.Action = secondVisitURL
+	}
+	return a.submit(ctx, current, form)
+}
+
+// reloadMicrosoft moves Microsoft past its first pass, which probes ambient
+// Windows SSO. sso_reload continues into USC federation without it.
+func (a *authenticator) reloadMicrosoft(ctx context.Context, current *page) (*page, error) {
+	reload := *current.URL
+	query := reload.Query()
+	query.Set("sso_reload", "true")
+	reload.RawQuery = query.Encode()
+	return a.get(ctx, reload.String(), current.URL)
+}
+
+// continueHandoff advances a page no provider claims: SAML handoffs use an
+// auto-posting form or a static redirect instead of an HTTP redirect.
+func (a *authenticator) continueHandoff(ctx context.Context, current *page) (*page, error) {
+	if form, ok := firstForm(current); ok {
+		return a.submit(ctx, current, form)
+	}
+	if destination, ok := staticRedirect(current); ok {
+		return a.get(ctx, destination.String(), current.URL)
+	}
+	return nil, noContinuation(current)
 }
 
 func isUSCLogin(page *page) bool {
 	return page.URL.Hostname() == "login.usc.edu" && page.URL.Path == "/login/login"
+}
+
+func isUSCLoginRejected(page *page) bool {
+	return page.URL.Hostname() == "login.usc.edu" && page.URL.Path == "/login/authuserpassword" &&
+		bytes.Contains(page.Body, []byte(`id="loginform"`))
 }
 
 func isUSCSAMLBootstrap(page *page) bool {
@@ -200,7 +202,11 @@ func isDuoPrompt(page *page) bool {
 }
 
 func isMicrosoftPage(page *page) bool {
-	return page.URL.Host == "login.microsoftonline.com"
+	return isMicrosoftHost(page.URL)
+}
+
+func isMicrosoftHost(target *url.URL) bool {
+	return target.Hostname() == "login.microsoftonline.com"
 }
 
 func needsMicrosoftReload(page *page) bool {
@@ -212,9 +218,6 @@ func needsMicrosoftReload(page *page) bool {
 func noContinuation(page *page) error {
 	if isMicrosoftPage(page) {
 		return fmt.Errorf("microsoft page has no form or supported redirect (title: %q)", pageTitle(page.Body))
-	}
-	if page.URL.Hostname() == "libcal.usc.edu" {
-		return fmt.Errorf("no safe continuation for %s%s (HTTP %d, content type %q, %d-byte body)", page.URL.Host, page.URL.Path, page.Status, page.Header.Get("Content-Type"), len(page.Body))
 	}
 	return fmt.Errorf("no safe continuation for %s%s (HTTP %d)", page.URL.Host, page.URL.Path, page.Status)
 }

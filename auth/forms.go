@@ -1,12 +1,11 @@
 package auth
 
 import (
-	"bytes"
-	"errors"
 	"net/url"
 	"regexp"
 	"strings"
 
+	"github.com/nsigel/usc-cli/internal/dom"
 	"golang.org/x/net/html"
 )
 
@@ -21,47 +20,20 @@ type form struct {
 	Fields []field
 }
 
-func firstForm(page *page) (form, error) {
-	form, ok := autoForm(page)
-	if !ok {
-		return form, errors.New("no form found")
-	}
-	return form, nil
-}
-
-func autoForm(page *page) (form, bool) {
-	document := parseHTML(page.Body)
-	if document == nil {
+func firstForm(page *page) (form, bool) {
+	node := dom.FindFirst(dom.Parse(page.Body), dom.Tag("form"))
+	if node == nil {
 		return form{}, false
 	}
-
-	// SSO handoff pages make the first form their continuation. Restricting the
-	// choice avoids submitting unrelated account or recovery forms.
-	var formNode *html.Node
-	walkHTML(document, func(node *html.Node) bool {
-		if node.Type == html.ElementNode && node.Data == "form" {
-			formNode = node
-			return true
-		}
-		return false
-	})
-	if formNode == nil {
-		return form{}, false
-	}
-
-	result := form{Method: "GET", Action: htmlAttribute(formNode, "action")}
-	if method := htmlAttribute(formNode, "method"); method != "" {
+	result := form{Method: "GET", Action: dom.Attr(node, "action")}
+	if method := dom.Attr(node, "method"); method != "" {
 		result.Method = method
 	}
-	walkHTML(formNode, func(node *html.Node) bool {
-		if node.Type != html.ElementNode || (node.Data != "input" && node.Data != "button") {
-			return false
+	for _, input := range dom.FindAll(node, func(node *html.Node) bool { return node.Data == "input" || node.Data == "button" }) {
+		if name := dom.Attr(input, "name"); name != "" {
+			result.Fields = append(result.Fields, field{Name: name, Value: dom.Attr(input, "value")})
 		}
-		if name := htmlAttribute(node, "name"); name != "" {
-			result.Fields = append(result.Fields, field{Name: name, Value: htmlAttribute(node, "value")})
-		}
-		return false
-	})
+	}
 	return result, len(result.Fields) > 0
 }
 
@@ -71,121 +43,53 @@ var (
 	scriptURLPattern        = regexp.MustCompile(`(?is)(?:var|let|const)\s+url\s*=\s*["']([^"']+)["']`)
 )
 
-// htmlNavigation recognizes only static browser redirects used by the known
-// providers. It is intentionally not a general JavaScript evaluator.
-func htmlNavigation(page *page) (*url.URL, bool) {
-	document := parseHTML(page.Body)
-	if document == nil {
+func staticRedirect(page *page) (*url.URL, bool) {
+	document := dom.Parse(page.Body)
+	destination := metaRefresh(document)
+	if destination == "" {
+		destination = scriptNavigation(document)
+	}
+	if destination == "" {
 		return nil, false
 	}
-	var rawDestination string
-	walkHTML(document, func(node *html.Node) bool {
-		if node.Type != html.ElementNode || node.Data != "meta" || !strings.EqualFold(htmlAttribute(node, "http-equiv"), "refresh") {
-			return false
-		}
-		match := metaRefreshPattern.FindStringSubmatch(htmlAttribute(node, "content"))
-		if len(match) == 2 {
-			rawDestination = match[1]
-			return true
-		}
-		return false
-	})
-	if rawDestination == "" {
-		walkHTML(document, func(node *html.Node) bool {
-			if node.Type != html.ElementNode || node.Data != "script" {
-				return false
-			}
-			script := htmlText(node)
-			match := scriptNavigationPattern.FindStringSubmatch(script)
-			if len(match) != 2 && strings.Contains(script, "location") {
-				// Salesforce stores its destination in a local `url` variable before
-				// calling location.replace rather than using a string literal.
-				match = scriptURLPattern.FindStringSubmatch(script)
-			}
-			if len(match) == 2 {
-				rawDestination = match[1]
-				return true
-			}
-			return false
-		})
-	}
-	if rawDestination == "" {
-		return nil, false
-	}
-	destination, err := page.URL.Parse(rawDestination)
-	return destination, err == nil
+	target, err := page.URL.Parse(destination)
+	return target, err == nil
 }
 
-func pageTitle(body []byte) string {
-	document := parseHTML(body)
-	if document == nil {
-		return ""
-	}
-	var title string
-	walkHTML(document, func(node *html.Node) bool {
-		if node.Type == html.ElementNode && node.Data == "title" {
-			title = strings.TrimSpace(htmlText(node))
-			return true
+func metaRefresh(document *html.Node) string {
+	for _, meta := range dom.FindAll(document, dom.Tag("meta")) {
+		if !strings.EqualFold(dom.Attr(meta, "http-equiv"), "refresh") {
+			continue
 		}
-		return false
-	})
-	return title
-}
-
-func elementValue(body []byte, id string) string {
-	document := parseHTML(body)
-	if document == nil {
-		return ""
-	}
-	var value string
-	walkHTML(document, func(node *html.Node) bool {
-		if node.Type == html.ElementNode && htmlAttribute(node, "id") == id {
-			value = htmlAttribute(node, "value")
-			return true
-		}
-		return false
-	})
-	return value
-}
-
-func parseHTML(body []byte) *html.Node {
-	document, err := html.Parse(bytes.NewReader(body))
-	if err != nil {
-		return nil
-	}
-	return document
-}
-
-func walkHTML(node *html.Node, visit func(*html.Node) bool) bool {
-	if visit(node) {
-		return true
-	}
-	for child := node.FirstChild; child != nil; child = child.NextSibling {
-		if walkHTML(child, visit) {
-			return true
-		}
-	}
-	return false
-}
-
-func htmlAttribute(node *html.Node, name string) string {
-	for _, attribute := range node.Attr {
-		if attribute.Key == name {
-			return attribute.Val
+		if match := metaRefreshPattern.FindStringSubmatch(dom.Attr(meta, "content")); match != nil {
+			return match[1]
 		}
 	}
 	return ""
 }
 
-func htmlText(node *html.Node) string {
-	var text strings.Builder
-	walkHTML(node, func(child *html.Node) bool {
-		if child.Type == html.TextNode {
-			text.WriteString(child.Data)
+func scriptNavigation(document *html.Node) string {
+	for _, node := range dom.FindAll(document, dom.Tag("script")) {
+		script := dom.RawText(node)
+		match := scriptNavigationPattern.FindStringSubmatch(script)
+		if match == nil && strings.Contains(script, "location") {
+			// Salesforce stores its destination in a local `url` variable before
+			// calling location.replace rather than using a string literal.
+			match = scriptURLPattern.FindStringSubmatch(script)
 		}
-		return false
-	})
-	return text.String()
+		if match != nil {
+			return match[1]
+		}
+	}
+	return ""
+}
+
+func pageTitle(body []byte) string {
+	return strings.TrimSpace(dom.RawText(dom.FindFirst(dom.Parse(body), dom.Tag("title"))))
+}
+
+func elementValue(body []byte, id string) string {
+	return dom.Attr(dom.FindFirst(dom.Parse(body), dom.ID(id)), "value")
 }
 
 func setField(form *form, name, value string) {
