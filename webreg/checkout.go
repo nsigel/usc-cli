@@ -7,7 +7,6 @@ import (
 	"errors"
 	"github.com/nsigel/usc-cli/internal/dom"
 	"net/url"
-	"reflect"
 	"strings"
 
 	"golang.org/x/net/html"
@@ -32,7 +31,8 @@ type CheckoutGroup struct {
 }
 
 // CheckoutResult preserves the response without inferring enrollment from prose.
-// Outcome remains unknown until the result can be verified against enrollment.
+// WebReg wording is not a reliable success signal. Confirm registration by
+// reading CourseBin and checking each section's Registered state.
 type CheckoutResult struct {
 	Term     string          `json:"term"`
 	Outcome  CheckoutOutcome `json:"outcome"`
@@ -149,6 +149,59 @@ func checkoutAction(heading string) CheckoutAction {
 	}
 }
 
+// ErrCheckoutChanged reports that the pending actions or submitted form no longer
+// match the approved checkout preview.
+var ErrCheckoutChanged = errors.New("WebReg pending changes differ from the approved checkout preview")
+
+// sameCheckoutChanges deliberately excludes presentation and live enrollment
+// counts. Neither changes the action the student approved.
+func sameCheckoutChanges(current, expected Checkout) bool {
+	if current.Term != expected.Term || current.FormFingerprint != expected.FormFingerprint {
+		return false
+	}
+
+	type sectionChange struct {
+		Action    CheckoutAction
+		SectionID int
+	}
+
+	collectChanges := func(checkout Checkout) (map[sectionChange]bool, bool) {
+		changes := make(map[sectionChange]bool)
+		for _, group := range checkout.Groups {
+			if group.Action != Register && group.Action != Drop {
+				return nil, false
+			}
+
+			for _, course := range group.Courses {
+				for _, section := range course.Sections {
+					change := sectionChange{Action: group.Action, SectionID: section.ID}
+					if section.ID <= 0 || changes[change] {
+						return nil, false
+					}
+
+					changes[change] = true
+				}
+			}
+		}
+
+		return changes, true
+	}
+
+	currentChanges, currentValid := collectChanges(current)
+	expectedChanges, expectedValid := collectChanges(expected)
+	if !currentValid || !expectedValid || len(currentChanges) != len(expectedChanges) {
+		return false
+	}
+
+	for change := range expectedChanges {
+		if !currentChanges[change] {
+			return false
+		}
+	}
+
+	return true
+}
+
 // Submit registers and drops the sections Checkout lists. This is the same
 // irreversible action as WebReg's Submit button. Callers should show the
 // preview from Checkout and obtain the student's confirmation first.
@@ -169,8 +222,8 @@ func (c *Client) Submit(ctx context.Context, expected Checkout) (*CheckoutResult
 	if err != nil {
 		return nil, err
 	}
-	if !reflect.DeepEqual(*checkout, expected) {
-		return nil, errors.New("WebReg pending changes differ from the approved checkout preview")
+	if !sameCheckoutChanges(*checkout, expected) {
+		return nil, ErrCheckoutChanged
 	}
 	if !checkout.Ready {
 		message := "WebReg has no pending registration changes for term " + term

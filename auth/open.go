@@ -24,7 +24,9 @@ type Options struct {
 	CredentialsFile string
 	// SessionFile stores the session's cookies. Empty keeps them in memory.
 	SessionFile string
-	// SessionStore owns persistence for one user. Mutually exclusive with SessionFile.
+	// SessionStore owns persistence for one user and one running client.
+	// Load returns ErrSessionNotFound when nothing has been stored.
+	// Mutually exclusive with SessionFile.
 	SessionStore SessionStore
 }
 

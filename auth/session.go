@@ -170,22 +170,31 @@ func hostMatchesDomains(host string, domains []string) bool {
 
 // SessionStore persists one user's cookies. Load returns ErrSessionNotFound
 // when no session exists. Implementations must not log cookie values.
-// Separate users must have separate stores; concurrent writers need external coordination.
+// One store belongs to one user and one running client; do not share it
+// between concurrent clients.
 type SessionStore interface {
 	Load() ([]StoredCookie, error)
 	Save([]StoredCookie) error
 }
 
 // FileSessionStore uses the same private, versioned file as SessionFile.
-type FileSessionStore struct{ Path string }
+type FileSessionStore struct {
+	Path string
+}
 
-func (s FileSessionStore) Load() ([]StoredCookie, error) { return LoadStoredCookies(s.Path) }
-func (s FileSessionStore) Save(cookies []StoredCookie) error {
+// Load restores the stored cookies, or returns ErrSessionNotFound when the
+// file does not exist.
+func (store FileSessionStore) Load() ([]StoredCookie, error) {
+	return LoadStoredCookies(store.Path)
+}
+
+// Save writes cookies using the private, versioned session file format.
+func (store FileSessionStore) Save(cookies []StoredCookie) error {
 	data, err := json.MarshalIndent(savedSession{Version: sessionVersion, Cookies: cookies}, "", "  ")
 	if err != nil {
 		return err
 	}
-	return writePrivateFile(s.Path, append(data, '\n'))
+	return writePrivateFile(store.Path, append(data, '\n'))
 }
 
 func loadStoredSession(store SessionStore, jar *sessionJar, ignoredDomains []string) error {

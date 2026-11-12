@@ -118,8 +118,10 @@ an approved preview. It compares the fresh preview, including a fingerprint
 of non-CSRF form fields, before posting. Unknown actions are rejected.
 `CheckoutAction` has `Register` and `Drop` values. Consumers allowing only
 registration must reject every group whose action is not `Register` and
-compare every section against their requested IDs. Comparison is conservative:
-even a changed displayed seat count requires a fresh approval. USC has no
+compare every section against their requested IDs. Comparison uses the set of
+(action, section ID) pairs and non-token form fields; changes to live seat
+counts or display text do not invalidate approval. Differences return
+`webreg.ErrCheckoutChanged`. USC has no
 verified conditional-submit primitive, so another writer can race the final
 read and POST. Own the session exclusively. Never retry an uncertain POST
 without checking enrollment. `CheckoutResult.Outcome` is `CheckoutUnknown`;
