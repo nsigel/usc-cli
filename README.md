@@ -115,6 +115,10 @@ See [Go library](https://usc.sh/docs/library/) and [`examples/`](examples/).
 
 The site at [usc.sh](https://usc.sh) is in [`site/`](site/): `npm install && npm run dev` to work on it.
 
+## Contributing
+
+Issues and pull requests are welcome.
+
 ## License
 
 MIT. Not affiliated with USC.
