@@ -29,19 +29,15 @@ usc skill > ~/.claude/skills/usc-cli/SKILL.md
 
 Run `usc auth status`. If it prints `"authenticated":true`, skip to step 4.
 
-Otherwise ask the user which they prefer:
+Otherwise, tell the user they can sign in themselves by running `usc auth login` in their own terminal. If they don't, ask for their USC NetID, password, and a Duo bypass code (from https://account.usc.edu/2fa/duo-bypass-code) and sign them in:
 
-- **You sign them in.** Ask for their USC NetID, password, and a Duo bypass code (they can get one at https://account.usc.edu/2fa/duo-bypass-code). Then run:
+```sh
+USC_USERNAME='NETID' USC_PASSWORD='PASSWORD' USC_DUO_BYPASS='CODE' usc auth login
+```
 
-  ```sh
-  USC_USERNAME='NETID' USC_PASSWORD='PASSWORD' USC_DUO_BYPASS='CODE' usc auth login
-  ```
+Don't repeat the credentials back or save them anywhere else; `usc` stores them in its own private file.
 
-  Don't repeat the credentials back or save them anywhere else; `usc` stores them in its own private file.
-
-- **They sign in themselves.** Ask them to run `usc auth login` in their own terminal. It prompts for the same three things.
-
-Either way, every later command signs itself in. Run `usc auth status` to confirm.
+After that, every later command signs itself in. Run `usc auth status` to confirm.
 
 ## 4. Finish
 
