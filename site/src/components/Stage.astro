@@ -107,12 +107,13 @@ const first = scenarios[0];
     return node;
   };
 
-  function moveCursor(target: Element | null, wait = false) {
+  // Points at a spot inside target, or just past its right edge with beside.
+  function moveCursor(target: Element | null, wait = false, beside = false) {
     cursor.classList.toggle("waiting", wait);
     if (!target) return;
     const box = target.getBoundingClientRect();
     const frame = viewport.getBoundingClientRect();
-    const x = box.left - frame.left + box.width * 0.6;
+    const x = box.left - frame.left + (beside ? box.width + 16 : box.width * 0.6);
     const y = box.top - frame.top + box.height * 0.55;
     cursor.style.transform = `translate(${x}px, ${y}px)`;
   }
@@ -161,7 +162,7 @@ const first = scenarios[0];
     at(1200, click);
     at(1400, () => {
       viewport.dataset.screen = "duo";
-      moveCursor(viewport.querySelector(".duo-text"), true);
+      moveCursor(viewport.querySelector(".phone"), true, true);
     });
     at(3900, () => {
       viewport.dataset.screen = "home";
@@ -171,7 +172,7 @@ const first = scenarios[0];
     at(5200, click);
     at(5400, () => {
       viewport.dataset.screen = "loading";
-      moveCursor(viewport.querySelector(".loading-text"), true);
+      moveCursor(viewport.querySelector(".progress"), true);
       progress.style.width = "34%";
     });
 
