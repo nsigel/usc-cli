@@ -1,12 +1,12 @@
 # usc
 
-A command-line client for USC's Brightspace, Web Registration, Handshake, Leavey Library rooms, and the public Schedule of Classes. Every command prints JSON, so Claude Code, Codex, or any agent with a terminal can run it for you.
+A command-line client for USC's Brightspace, Web Registration, Handshake, Leavey Library rooms, and the public Schedule of Classes. Every command prints JSON, so Claude Code, Codex, Grok, or any agent with a terminal can run it for you.
 
 Docs: [usc.sh/docs](https://usc.sh/docs/)
 
 ## Install
 
-Paste this into your agent:
+Ask your agent:
 
 ```text
 Set up the USC CLI for me: https://usc.sh/install.md
@@ -34,7 +34,7 @@ It asks for your NetID, password, and a [Duo bypass code](https://account.usc.ed
 
 ## Give your agent the skill
 
-`usc skill` prints a SKILL.md that teaches an agent every command. For Claude Code:
+`usc skill` prints a SKILL.md that teaches an agent every command. Ask your agent to "add the usc skill: save the output of `usc skill` as a skill named usc-cli", or for Claude Code:
 
 ```sh
 mkdir -p ~/.claude/skills/usc-cli
@@ -113,7 +113,7 @@ See [Go library](https://usc.sh/docs/library/) and [`examples/`](examples/).
 
 ## Website
 
-The site at [usc.sh](https://usc.sh) is in [`site/`](site/): `npm install && npm run dev` to work on it.
+The site at [usc.sh](https://usc.sh) is in [`web/`](web/): `npm install && npm run dev` to work on it.
 
 ## Contributing
 

@@ -15,7 +15,7 @@ skill/               embedded agent skill definition
 internal/cli/        Cobra commands: parse flags, call a package, print JSON
 internal/dom/        HTML helpers shared by the clients
 examples/            runnable library examples
-site/                usc.sh website and docs (Astro), with the install script
+web/                 usc.sh website and docs (Astro), with the install script
 ```
 
 ## Conventions

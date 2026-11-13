@@ -8,7 +8,7 @@ description: Install the usc command, sign in once, and give your agent the skil
 
 ## With an agent
 
-Paste this into Claude Code, Codex, or any agent that can run shell commands:
+Ask Claude Code, Codex, Grok, or any agent that can run shell commands:
 
 ```text
 Set up the USC CLI for me: https://usc.sh/install.md
@@ -46,7 +46,13 @@ It asks for your NetID, password, and a Duo bypass code, then saves them on your
 
 ### 3. Add the skill
 
-The skill is a short Markdown file that teaches an agent the commands and their arguments. Save it where your agent loads skills. For Claude Code:
+The skill is a short Markdown file that teaches an agent the commands and their arguments. Ask your agent:
+
+```text
+Add the usc skill: save the output of `usc skill` as a skill named usc-cli.
+```
+
+Or save it yourself. For Claude Code:
 
 ```sh
 mkdir -p ~/.claude/skills/usc-cli
