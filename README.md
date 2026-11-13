@@ -369,6 +369,8 @@ usc handshake career-fair 65867
 | `usc classes terms` | List the terms the Schedule of Classes publishes. |
 | `usc classes schools TERM_CODE` | List a term's schools with their programs. |
 | `usc classes program TERM_CODE SCHOOL_PREFIX PROGRAM_PREFIX` | List every course and section a program offers. |
+| `usc classes general-education TERM_CODE` | List a term's general education requirements and their categories. |
+| `usc classes general-education-category TERM_CODE REQUIREMENT_PREFIX CATEGORY_PREFIX` | List every course and section in a general education category. |
 | `usc classes course TERM_CODE COURSE_CODE` | Show one course and all of its sections. |
 | `usc classes search TERM_CODE TEXT` | Search courses by code, title, description, or instructor. |
 | `usc skill` | Print the bundled `SKILL.md` for use with agent skill systems. |

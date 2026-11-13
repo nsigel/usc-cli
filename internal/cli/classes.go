@@ -8,6 +8,7 @@ import (
 func classesCommand() *cobra.Command {
 	return group("classes", "Read the public USC Schedule of Classes",
 		classesTermsCommand(), classesSchoolsCommand(), classesProgramCommand(),
+		classesGeneralEducationCommand(), classesGeneralEducationCategoryCommand(),
 		classesCourseCommand(), classesSearchCommand(),
 	)
 }
@@ -43,6 +44,32 @@ func classesProgramCommand() *cobra.Command {
 		Use: "program TERM_CODE SCHOOL_PREFIX PROGRAM_PREFIX", Short: "List every course and section a program offers", Args: cobra.ExactArgs(3),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			courses, err := classes.New().ProgramCourses(cmd.Context(), args[0], args[1], args[2])
+			if err != nil {
+				return err
+			}
+			return writeJSON(cmd, courses)
+		},
+	}
+}
+
+func classesGeneralEducationCommand() *cobra.Command {
+	return &cobra.Command{
+		Use: "general-education TERM_CODE", Short: "List a term's general education requirements and their categories", Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			requirements, err := classes.New().GeneralEducationRequirements(cmd.Context(), args[0])
+			if err != nil {
+				return err
+			}
+			return writeJSON(cmd, requirements)
+		},
+	}
+}
+
+func classesGeneralEducationCategoryCommand() *cobra.Command {
+	return &cobra.Command{
+		Use: "general-education-category TERM_CODE REQUIREMENT_PREFIX CATEGORY_PREFIX", Short: "List every course and section in a general education category", Args: cobra.ExactArgs(3),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			courses, err := classes.New().GeneralEducationCourses(cmd.Context(), args[0], args[1], args[2])
 			if err != nil {
 				return err
 			}

@@ -77,8 +77,10 @@ usc libcal book --space 31391 --start 2026-10-02T15:00:00-07:00 --end 2026-10-02
 usc classes terms
 usc classes schools TERM_CODE
 usc classes program TERM_CODE SCHOOL_PREFIX PROGRAM_PREFIX
+usc classes general-education TERM_CODE
+usc classes general-education-category TERM_CODE REQUIREMENT_PREFIX CATEGORY_PREFIX
 usc classes course TERM_CODE COURSE_CODE
 usc classes search TERM_CODE TEXT
 ```
 
-Public, no sign-in: section meetings, seats, instructors, link codes, prerequisites, restrictions, and syllabus links, for example `usc classes course 20271 BUAD-306`. `program` needs the school the program is listed under, from `schools`. Meeting locations are only in `usc webreg courses`.
+Public, no sign-in: section meetings, seats, instructors, link codes, prerequisites, restrictions, and syllabus links, for example `usc classes course 20271 BUAD-306`. `program` needs the school the program is listed under, from `schools`; `general-education-category` needs the requirement the category belongs to, from `general-education`. Meeting locations are only in `usc webreg courses`.
