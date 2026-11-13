@@ -1,7 +1,6 @@
 ---
 import "../styles/global.css";
 import Sprite from "../components/Sprite.astro";
-import { spriteSVG } from "../sprites";
 
 interface Props {
   title: string;
@@ -9,7 +8,6 @@ interface Props {
 }
 
 const { title, description } = Astro.props;
-const favicon = `data:image/svg+xml,${encodeURIComponent(spriteSVG("trojan", 1))}`;
 const path = Astro.url.pathname;
 ---
 
@@ -24,7 +22,9 @@ const path = Astro.url.pathname;
     <meta property="og:description" content={description} />
     <meta property="og:url" content={new URL(path, "https://usc.sh")} />
     <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="usc.sh" />
     <meta property="og:image" content="https://usc.sh/og.png" />
+    <meta property="og:image:type" content="image/png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta property="og:video" content="https://usc.sh/og.mp4" />
@@ -33,7 +33,8 @@ const path = Astro.url.pathname;
     <meta property="og:video:width" content="1200" />
     <meta property="og:video:height" content="630" />
     <meta name="twitter:card" content="summary_large_image" />
-    <link rel="icon" href={favicon} />
+    <link rel="icon" type="image/png" sizes="96x96" href="/favicon.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
