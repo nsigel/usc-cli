@@ -40,7 +40,7 @@ type Doer interface {
 // client is sequential: WebReg's active term is shared session state. It
 // remembers the term it made active, so a session needs exactly one client.
 type Client struct {
-	http Doer
+	http       Doer
 	activeTerm string
 	// ASP.NET Core accepts any of a session's tokens.
 	requestVerificationToken string
