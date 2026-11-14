@@ -8,6 +8,13 @@ description: Access USC Brightspace, Handshake events and career fairs, Leavey L
 Every command prints JSON to stdout and signs itself in. Errors are JSON on
 stderr with exit status 1; the `error` text says what went wrong and what to do.
 
+## Duo bypass codes
+
+`usc bypass create` creates a code and saves it for later commands. It may
+invalidate previous codes. Its JSON contains the secret `code`; never include
+that output in logs or conversation. The command does not schedule renewal.
+If `USC_DUO_BYPASS` is set, update or unset it because it overrides the saved code.
+
 ## Brightspace
 
 ```sh
