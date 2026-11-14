@@ -48,3 +48,11 @@ Outside a terminal, `usc auth login` reads these variables instead of prompting 
 ## Rejected passwords and codes
 
 If USC rejects the password or Duo rejects the bypass code, the command stops after that one attempt and deletes the rejected value from `credentials.json`. The next `usc auth login` asks for a new one. Secrets are never retried automatically and are never accepted as command-line flags.
+
+## Mobile ordering
+
+Mobile-order commands reuse USC SSO, then exchange its callback for a
+Transact token. That token stays in memory and is never printed. If sign-in
+requires fresh Duo credentials, run `usc auth login` again. Adding or changing
+payment cards is handled in the official app; `usc mobileorder payments`
+lists the methods already on the account.

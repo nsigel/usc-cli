@@ -1,6 +1,6 @@
 # usc
 
-A command-line client for USC's Brightspace, Web Registration, Handshake, Leavey Library rooms, and the public Schedule of Classes. Every command prints JSON, so Claude Code, Codex, Grok, or any agent with a terminal can run it for you.
+A command-line client for USC's Brightspace, Web Registration, Handshake, Leavey Library rooms, USC mobile ordering, and the public Schedule of Classes. Every command prints JSON, so Claude Code, Codex, Grok, or any agent with a terminal can run it for you.
 
 Docs: [usc.sh/docs](https://usc.sh/docs/)
 
@@ -85,6 +85,12 @@ usc classes 20271 CSCI-270
 | `usc libcal schedule [FILTERS]` | Open and taken times for each space |
 | `usc libcal book --space ID --start TIME --end TIME --accept-terms` | Book exactly that space and time |
 | `usc libcal release` | Clear an interrupted booking |
+| `usc mobileorder locations\|payments` | Dining locations and existing payment methods |
+| `usc mobileorder menu\|item\|checkout [FLAGS]` | Items, modifiers, and checkout requirements |
+| `usc mobileorder cart [FLAGS]` | Build cart JSON from item and modifier choices |
+| `usc mobileorder quote --cart FILE` | Price a cart without purchasing |
+| `usc mobileorder orders [--pending]` | Past or pending orders |
+| `usc mobileorder order place\|continue\|cancel\|check-in [ARGS]` | Explicit purchase and order actions |
 | `usc classes TERM_CODE COURSE_CODE` | Public course and sections, no sign-in |
 | `usc browser sync [--cdp TARGET]` | Copy the session into Chrome |
 | `usc skill` | Print the agent skill |
@@ -114,6 +120,44 @@ See [Go library](https://usc.sh/docs/library/) and [`examples/`](examples/).
 ## Website
 
 The site at [usc.sh](https://usc.sh) is in [`web/`](web/): `npm install && npm run dev` to work on it.
+
+## Mobile ordering
+
+Browse locations and menus, then build a cart using flags:
+
+```sh
+usc mobileorder locations
+usc mobileorder payments
+usc mobileorder menu --location LOCATION_ID --fulfillment pickup --payment-method PAYMENT_ID
+usc mobileorder item ITEM_ID --location LOCATION_ID --fulfillment pickup --payment-method PAYMENT_ID
+usc mobileorder checkout --location LOCATION_ID --fulfillment pickup --payment-method PAYMENT_ID
+usc mobileorder cart --location LOCATION_ID --fulfillment pickup \
+  --payment-method PAYMENT_ID --tender TENDER_ID --asap \
+  --item ITEM_ID --select ITEM_ID:VALUE_ID > cart.json
+usc mobileorder quote --cart cart.json
+```
+
+Repeat `--item` for quantities and `--select` for modifier choices. Use
+`--tender` for campus payment, and choose `--asap` or an explicit date/time.
+`menu` shows items and prices; `item` shows modifiers; `checkout` shows slots,
+tenders and questions. Prices are cents. Fulfillment is `pickup`, `delivery`,
+or `address`; pickup is the verified flow.
+
+`order place --cart cart.json --expected-total CENTS` submits a purchase.
+`order continue ORDER_ID` advances staged payment; only stage `success`
+confirms checkout. `orders [--pending]` reads orders, and `order cancel` and
+`order check-in` act on an existing order. These mutations are implemented
+but have not been verified with a real purchase; no money was spent during
+implementation. Browsing, cart building, quotes and order reads passed live
+checks. The client rejects changed totals and checkout selections before
+submission and never automatically retries a purchase.
+
+See the [website guide](https://usc.sh/docs/mobileorder/),
+[local command guide](docs/mobileorder-usage.md), and
+[API integration notes](docs/mobileorder-integration.md).
+Library callers use `mobileorder.Open(ctx, auth.Options)`; public USC campus
+information is available through `mobileorder.New().USC(ctx)` or
+`usc mobileorder campus`. Transact tokens stay in memory.
 
 ## Contributing
 

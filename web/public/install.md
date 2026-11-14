@@ -1,6 +1,6 @@
 # Set up the USC CLI
 
-`usc` gives you access to the user's USC accounts: Brightspace, Web Registration, Handshake, Leavey Library rooms, and the public Schedule of Classes. Every command prints JSON. Follow these steps in order.
+`usc` gives you access to the user's USC accounts: Brightspace, Web Registration, Handshake, Leavey Library rooms, USC mobile ordering, and the public Schedule of Classes. Every command prints JSON. Follow these steps in order.
 
 ## 1. Install
 

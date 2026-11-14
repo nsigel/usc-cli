@@ -25,7 +25,7 @@ func New() *cobra.Command {
 	root.PersistentFlags().Bool("compact", false, "emit single-line JSON")
 	root.PersistentFlags().Bool("pretty", false, "pretty-print JSON")
 	root.MarkFlagsMutuallyExclusive("compact", "pretty")
-	root.AddCommand(authCommand(), browserCommand(), brightspaceCommand(), handshakeCommand(), libcalCommand(), webregCommand(), classesCommand(), skillCommand(), versionCommand())
+	root.AddCommand(authCommand(), browserCommand(), brightspaceCommand(), handshakeCommand(), libcalCommand(), webregCommand(), classesCommand(), mobileorderCommand(), skillCommand(), versionCommand())
 	return root
 }
 
