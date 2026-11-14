@@ -57,6 +57,7 @@ usc classes 20271 CSCI-270
 | Command | |
 | --- | --- |
 | `usc auth login` / `status` / `logout` | Sign in, check the session, or delete it |
+| `usc bypass create` | Create and save a replacement Duo bypass code (secret JSON output) |
 | `usc brightspace whoami` | Your Brightspace user |
 | `usc brightspace courses [--all]` | Enrolled classes; `--all` adds departments, semesters, and groups |
 | `usc brightspace content COURSE_ID [--flat]` | A course's content tree |

@@ -16,6 +16,27 @@ usc auth logout   # deletes the session and the saved credentials
 
 `usc` can't approve a Duo push, so it uses a bypass code instead. Get one from the [USC Duo bypass code page](https://account.usc.edu/2fa/duo-bypass-code) and paste it when `usc auth login` asks.
 
+After signing in, create a replacement from the terminal:
+
+```sh
+usc bypass create
+```
+
+The command reuses the USC session or signs in with saved credentials, then
+saves the new code in `credentials.json`. JSON output contains `code`, USC's
+`validity` description, and `credentials_saved`. The code is a secret: do not
+send this output to logs or chat transcripts. Creating a code may invalidate
+previous codes, including copies on other devices. It does not schedule renewal
+or guarantee that future issuance will work without interactive verification.
+An existing `USC_DUO_BYPASS` environment variable still overrides the saved code;
+update or unset it after replacement.
+
+Library callers use `auth.CreateBypassCode(ctx, auth.Options)`. The call only
+persists credentials or cookies when their respective file paths are supplied.
+Without `CredentialsFile`, the caller must retain the returned code. A result
+can accompany a persistence error if USC already issued the code; retain that
+result instead of blindly retrying issuance.
+
 ## What's saved
 
 Two files, readable only by you (`0600`):
