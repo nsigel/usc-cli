@@ -158,8 +158,6 @@ func (c *Client) SetGradeOption(ctx context.Context, term string, sectionID stri
 	return text(dom.Parse(data)), nil
 }
 
-// token returns a request verification token, reading a page for one only
-// when no page this client read has served one yet.
 func (c *Client) token(ctx context.Context) (string, error) {
 	if c.requestVerificationToken != "" {
 		return c.requestVerificationToken, nil
