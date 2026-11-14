@@ -1,6 +1,6 @@
 ---
 name: usc-cli
-description: Access USC Brightspace, Handshake events and career fairs, Leavey Library room availability and bookings, Web Registration (course bin, calendar, and checkout), and the public Schedule of Classes with the Go-based `usc` CLI. Use when retrieving authorized course data, searching career events, booking or checking study spaces, planning or submitting registration, or checking current sections.
+description: Access USC Brightspace, Handshake events and career fairs, Leavey Library room availability and bookings, Web Registration (course bin, calendar, and checkout), USC mobile ordering, and the public Schedule of Classes with the Go-based `usc` CLI. Use when retrieving authorized course data, searching career events, booking or checking study spaces, planning or submitting registration, checking current sections, or browsing dining menus and preparing mobile orders.
 ---
 
 # USC CLI
@@ -78,3 +78,40 @@ usc classes TERM_CODE COURSE_CODE
 ```
 
 Public section times, seats, instructors, and syllabus links, for example `usc classes 20271 BUAD-306`.
+
+## Mobile ordering
+
+```sh
+usc mobileorder locations
+usc mobileorder payments
+usc mobileorder menu --location ID --fulfillment pickup --payment-method ID
+usc mobileorder item ITEM_ID --location ID --fulfillment pickup --payment-method ID
+usc mobileorder checkout --location ID --fulfillment pickup --payment-method ID
+usc mobileorder cart --location ID --fulfillment pickup --payment-method ID --tender ID --asap --item ITEM_ID --select ITEM_ID:VALUE_ID
+usc mobileorder quote --cart FILE
+usc mobileorder order place --cart FILE --expected-total CENTS
+usc mobileorder order continue ORDER_ID
+usc mobileorder orders [--pending]
+usc mobileorder order cancel ORDER_ID
+usc mobileorder order check-in ORDER_ID --barcode BARCODE
+```
+
+`menu` shows item summaries; `item` shows required modifier choices; `checkout`
+shows scheduling, tenders and checkout questions. All money is integer cents.
+Fulfillment accepts pickup, delivery or address; only pickup has been checked
+live. Payment 0 is campus card (choose a location tender), 1/2 are saved cards.
+
+Use `cart` to generate JSON instead of hand-writing it. Repeat `--item` for
+quantities and `--select ITEM_ID:VALUE_ID` for explicit modifiers. Combo child
+choices use the child item ID. Copies of one item share selections; use JSON
+for differently customized copies. Choose `--asap` or both `--date` and
+`--time`. Additional inputs: `--checkout-choice ID`, `--pickup-spot ID`,
+`--comment TEXT`, and `--secondary-tender ID`. Do not choose answers for the
+user. `--cart -` reads stdin; files are caller-owned, not client state.
+
+Quote first and review payment/tender, pickup and total. `place` checks these
+again and submits once. `continue` may charge payment; it is not read-only.
+Only stage `success` confirms checkout. For `mobileorder_order_unknown`,
+inspect pending/past orders before any new submission. Do not automatically
+retry purchases. Purchase, continuation, cancellation and check-in have not
+been live-verified; read calls, cart construction and quoting have.

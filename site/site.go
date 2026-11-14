@@ -7,6 +7,7 @@ import "fmt"
 type Name string
 
 const (
+	MobileOrder Name = "mobileorder"
 	Brightspace Name = "brightspace"
 	Handshake   Name = "handshake"
 	LibCal      Name = "libcal"

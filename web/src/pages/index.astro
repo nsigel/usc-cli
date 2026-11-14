@@ -10,6 +10,12 @@ const prompt = "Set up the USC CLI for me: https://usc.sh/install.md";
 
 const sites: { sprite: SpriteName; name: string; does: string; docs: string }[] = [
   {
+    sprite: "trojan",
+    name: "Mobile ordering",
+    does: "USC dining menus, cart quotes, and mobile-order commands.",
+    docs: "/docs/mobileorder/",
+  },
+  {
     sprite: "brightspace",
     name: "Brightspace",
     does: "Courses, content, grades, announcements, assignments, and file downloads.",
@@ -44,14 +50,14 @@ const sites: { sprite: SpriteName; name: string; does: string; docs: string }[] 
 
 <Base
   title="usc.sh: USC for your agent"
-  description="A command-line client for Brightspace, WebReg, Handshake, and Leavey Library rooms that Claude Code, Codex, Grok, or any agent with a terminal can use."
+  description="A command-line client for Brightspace, WebReg, Handshake, Leavey Library rooms, and USC dining that Claude Code, Codex, Grok, or any agent with a terminal can use."
 >
   <main>
     <section class="wrap hero">
       <div class="pitch">
         <h1>Ask your agent instead of opening Brightspace.</h1>
         <p class="lede">
-          A command-line client for Brightspace, WebReg, Handshake, and Leavey Library rooms that any agent with a
+          A command-line client for Brightspace, WebReg, Handshake, Leavey Library rooms, and USC dining that any agent with a
           terminal can use.
         </p>
 

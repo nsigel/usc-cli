@@ -4,7 +4,7 @@ title: Install
 description: Install the usc command, sign in once, and give your agent the skill.
 ---
 
-`usc` is a command-line client for USC's Brightspace, Web Registration, Handshake, Leavey Library room booking, and the public Schedule of Classes. Every command prints JSON, so an agent can run it and read the result.
+`usc` is a command-line client for USC's Brightspace, Web Registration, Handshake, Leavey Library room booking, USC mobile ordering, and the public Schedule of Classes. Every command prints JSON, so an agent can run it and read the result.
 
 ## With an agent
 
@@ -65,8 +65,11 @@ usc skill > ~/.claude/skills/usc-cli/SKILL.md
 usc brightspace courses
 usc libcal schedule --date tomorrow --category rooms --min-capacity 4
 usc classes 20271 CSCI-270
+usc mobileorder locations
 ```
 
 ## Update
 
 Run the install command again. `usc version` prints the version you have.
+
+For dining, [browse menus, build a cart, and quote an order](/docs/mobileorder/).
