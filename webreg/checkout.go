@@ -68,14 +68,16 @@ var ErrCheckoutChanged = errors.New("WebReg's pending changes differ from the ch
 
 // Checkout previews the changes Submit would make. It changes nothing.
 func (c *Client) Checkout(ctx context.Context, term string) (*Checkout, error) {
-	if err := c.SelectTerm(ctx, term); err != nil {
+	if err := c.useTerm(ctx, term); err != nil {
 		return nil, err
 	}
 	data, err := c.page(ctx, "/Checkout", "/CourseBin")
 	if err != nil {
 		return nil, err
 	}
-	wrapper := dom.FindFirst(dom.Parse(data), dom.Class("div", "content-wrapper-regconfirm"))
+	document := dom.Parse(data)
+	c.rememberRequestToken(document)
+	wrapper := dom.FindFirst(document, dom.Class("div", "content-wrapper-regconfirm"))
 	if wrapper == nil {
 		return nil, errors.New("WebReg checkout page has an unexpected layout")
 	}
@@ -174,14 +176,33 @@ func (c *Client) Submit(ctx context.Context, preview *Checkout) (*CheckoutResult
 	if !current.sameChangesAs(preview) {
 		return nil, ErrCheckoutChanged
 	}
-	if current.submitForm.Get(tokenField) == "" {
+	return c.postCheckout(ctx, current)
+}
+
+// SubmitWithoutRereading makes exactly the changes in preview by posting the
+// form its checkout page held, without the second read Submit makes. It
+// registers and drops real classes and cannot be undone. Use it only with a
+// preview this client read a moment ago, when that read costs more than it
+// protects: whatever was added to checkout since is submitted too.
+func (c *Client) SubmitWithoutRereading(ctx context.Context, preview *Checkout) (*CheckoutResult, error) {
+	if preview == nil || len(preview.Changes) == 0 {
+		return nil, errors.New("the checkout preview has no changes to submit")
+	}
+	if preview.submitForm == nil {
+		return nil, errors.New("the checkout preview has no form to submit; read it with Checkout")
+	}
+	return c.postCheckout(ctx, preview)
+}
+
+func (c *Client) postCheckout(ctx context.Context, checkout *Checkout) (*CheckoutResult, error) {
+	if checkout.submitForm.Get(tokenField) == "" {
 		return nil, errors.New("WebReg checkout did not provide a request verification token")
 	}
-	data, err := c.postForm(ctx, "/CheckoutResponse", current.submitForm, "/Checkout")
+	data, err := c.postForm(ctx, "/CheckoutResponse", checkout.submitForm, "/Checkout")
 	if err != nil {
 		return nil, err
 	}
-	return parseCheckoutResult(preview.Term, data)
+	return parseCheckoutResult(checkout.Term, data)
 }
 
 func (checkout *Checkout) sameChangesAs(other *Checkout) bool {
