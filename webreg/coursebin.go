@@ -11,6 +11,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	http "github.com/saucesteals/fhttp"
+	"golang.org/x/net/html"
 )
 
 // CourseBin is a term's myCourseBin: courses the student is planning or
@@ -25,7 +28,7 @@ type CourseBin struct {
 
 // CourseBin reads a term's course bin.
 func (c *Client) CourseBin(ctx context.Context, term string) (*CourseBin, error) {
-	if err := c.SelectTerm(ctx, term); err != nil {
+	if err := c.useTerm(ctx, term); err != nil {
 		return nil, err
 	}
 	data, err := c.page(ctx, "/CourseBin", "/Departments")
@@ -33,6 +36,7 @@ func (c *Client) CourseBin(ctx context.Context, term string) (*CourseBin, error)
 		return nil, err
 	}
 	document := dom.Parse(data)
+	c.rememberRequestToken(document)
 	courses, err := parseCourses(document)
 	if err != nil {
 		return nil, err
@@ -67,15 +71,25 @@ func (b *CourseBin) Section(id string) (*Section, error) {
 // Add places a section in the course bin. It does not register; schedule the
 // section and submit checkout to register.
 func (c *Client) Add(ctx context.Context, term string, sectionID string) error {
-	if err := c.SelectTerm(ctx, term); err != nil {
+	if err := c.useTerm(ctx, term); err != nil {
 		return err
 	}
-	token, err := c.token(ctx)
-	if err != nil {
+	add := func() error {
+		token, err := c.token(ctx)
+		if err != nil {
+			return err
+		}
+		form := url.Values{"submit": {"Add"}, tokenField: {token}, "X-Requested-With": {"XMLHttpRequest"}}
+		_, err = c.postAJAX(ctx, sectionPath(term, sectionID, "add"), form, "/Courses")
 		return err
 	}
-	form := url.Values{"submit": {"Add"}, tokenField: {token}, "X-Requested-With": {"XMLHttpRequest"}}
-	_, err = c.postAJAX(ctx, sectionPath(term, sectionID, "add"), form, "/Courses")
+	err := add()
+	var rejected *Error
+	if errors.As(err, &rejected) && rejected.Status == http.StatusBadRequest {
+		// ASP.NET Core answers a token it no longer accepts with 400.
+		c.requestVerificationToken = ""
+		err = add()
+	}
 	return err
 }
 
@@ -97,7 +111,7 @@ func (c *Client) Remove(ctx context.Context, term string, sectionID string) erro
 }
 
 func (c *Client) sectionAction(ctx context.Context, term string, sectionID string, action string) error {
-	if err := c.SelectTerm(ctx, term); err != nil {
+	if err := c.useTerm(ctx, term); err != nil {
 		return err
 	}
 	_, err := c.postAJAX(ctx, sectionPath(term, sectionID, action), url.Values{"X-Requested-With": {"XMLHttpRequest"}}, "/CourseBin")
@@ -144,18 +158,31 @@ func (c *Client) SetGradeOption(ctx context.Context, term string, sectionID stri
 	return text(dom.Parse(data)), nil
 }
 
-// ASP.NET Core accepts any of the session's tokens.
+// token returns a request verification token, reading a page for one only
+// when no page this client read has served one yet.
 func (c *Client) token(ctx context.Context) (string, error) {
+	if c.requestVerificationToken != "" {
+		return c.requestVerificationToken, nil
+	}
 	for _, path := range []string{"/CourseBin", "/Checkout"} {
 		data, err := c.page(ctx, path, "/Departments")
 		if err != nil {
 			return "", err
 		}
-		if token := requestToken(dom.Parse(data)); token != "" {
-			return token, nil
+		if c.rememberRequestToken(dom.Parse(data)) {
+			return c.requestVerificationToken, nil
 		}
 	}
 	return "", errors.New("WebReg did not provide a request verification token")
+}
+
+func (c *Client) rememberRequestToken(document *html.Node) bool {
+	token := requestToken(document)
+	if token == "" {
+		return false
+	}
+	c.requestVerificationToken = token
+	return true
 }
 
 // calendarDataMarker precedes the events embedded in the calendar page's
@@ -176,7 +203,7 @@ type CalendarEvent struct {
 // Calendar returns a term's weekly calendar of scheduled, registered, and
 // conflicting meetings. Dates are a representative week, not term dates.
 func (c *Client) Calendar(ctx context.Context, term string) ([]CalendarEvent, error) {
-	if err := c.SelectTerm(ctx, term); err != nil {
+	if err := c.useTerm(ctx, term); err != nil {
 		return nil, err
 	}
 	data, err := c.page(ctx, "/Calendar", "/CourseBin")

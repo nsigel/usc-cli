@@ -37,9 +37,16 @@ type Doer interface {
 }
 
 // Client reads and changes WebReg state with an authenticated session. A
-// client is sequential: WebReg's active term is shared session state.
+// client is sequential: WebReg's active term is shared session state. It
+// remembers the term it made active, so a session needs exactly one client.
 type Client struct {
 	http Doer
+	// activeTerm is the term this client last made WebReg's active term, so
+	// term-scoped calls select a term only when it changes.
+	activeTerm string
+	// requestVerificationToken is the last token a WebReg page served this
+	// session. ASP.NET Core accepts any of a session's tokens.
+	requestVerificationToken string
 }
 
 // New creates a WebReg client from an authenticated HTTP client.
@@ -78,8 +85,20 @@ func (c *Client) SelectTerm(ctx context.Context, term string) error {
 	if err := validTerm(term); err != nil {
 		return err
 	}
-	_, err := c.page(ctx, "/Terms?term="+url.QueryEscape(term)+"&handler=TermSelect", "/Terms")
-	return err
+	c.activeTerm = ""
+	if _, err := c.page(ctx, "/Terms?term="+url.QueryEscape(term)+"&handler=TermSelect", "/Terms"); err != nil {
+		return err
+	}
+	c.activeTerm = term
+	return nil
+}
+
+// useTerm selects term unless this client already made it the active term.
+func (c *Client) useTerm(ctx context.Context, term string) error {
+	if c.activeTerm == term {
+		return nil
+	}
+	return c.SelectTerm(ctx, term)
 }
 
 func validTerm(term string) error {

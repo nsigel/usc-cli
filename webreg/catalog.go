@@ -60,7 +60,7 @@ type Program struct {
 
 // Programs lists a term's schools and their programs.
 func (c *Client) Programs(ctx context.Context, term string) ([]School, error) {
-	if err := c.SelectTerm(ctx, term); err != nil {
+	if err := c.useTerm(ctx, term); err != nil {
 		return nil, err
 	}
 	data, err := c.page(ctx, "/Departments", "/Terms")
@@ -119,7 +119,7 @@ func (c *Client) Course(ctx context.Context, term string, code classes.CourseCod
 }
 
 func (c *Client) courses(ctx context.Context, term string, query url.Values) ([]Course, error) {
-	if err := c.SelectTerm(ctx, term); err != nil {
+	if err := c.useTerm(ctx, term); err != nil {
 		return nil, err
 	}
 	courses := []Course{}
