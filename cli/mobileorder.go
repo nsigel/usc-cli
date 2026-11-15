@@ -50,6 +50,7 @@ func mobileorderCommand() *cobra.Command {
 
 func mobileMenuCommand(kind string) *cobra.Command {
 	var fulfillment string
+	var flat bool
 	var o mobileorder.MenuOptions
 	cmd := &cobra.Command{Use: kind, Short: map[string]string{"menu": "List menu sections, items and prices", "item": "Show an item and its modifier choices", "checkout": "Show pickup slots, tender rules and checkout questions"}[kind], Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
 		options, err := signIn()
@@ -71,13 +72,21 @@ func mobileMenuCommand(kind string) *cobra.Command {
 		} else if kind == "checkout" {
 			r, err = c.CheckoutOptions(cmd.Context(), o)
 		} else {
-			r, err = c.Menu(cmd.Context(), o)
+			menu, menuErr := c.Menu(cmd.Context(), o)
+			err = menuErr
+			r = menu
+			if err == nil && flat {
+				r = menu.Flatten()
+			}
 		}
 		if err != nil {
 			return err
 		}
 		return writeJSON(cmd, r)
 	}}
+	if kind == "menu" {
+		cmd.Flags().BoolVar(&flat, "flat", false, "list items in one array with section context; preserve venue status")
+	}
 	cmd.Flags().IntVar(&o.LocationID, "location", 0, "location ID")
 	if kind == "item" {
 		cmd.Use = "item ITEM_ID"

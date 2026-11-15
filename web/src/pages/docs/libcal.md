@@ -11,9 +11,13 @@ usc libcal categories
 usc libcal spaces [rooms|pods|all|lvl1|lvl2|lvl3]
 usc libcal space SPACE_ID
 usc libcal schedule [--date DATE] [--end-date DATE] [--category CATEGORY] [--min-capacity N] [--max-capacity N]
+usc libcal availability --start TIMESTAMP --end TIMESTAMP [--category CATEGORY] [--min-capacity N] [--max-capacity N]
 usc libcal book --space SPACE_ID --start TIMESTAMP --end TIMESTAMP --accept-terms [--field NAME=VALUE]
 usc libcal release
 ```
+
+`availability` returns `start`, `end`, `timezone`, `matches` (space records), and `window_end` (server flags by category). Every match covers the exact requested span, up to two hours, with adjacent available intervals and matching slot boundaries. Missing intervals never count as available. This reads availability without holding, booking or ranking spaces. For flexible times, use the full `schedule`. An empty match list does not establish a booking horizon.
+
 
 ## Schedule
 
