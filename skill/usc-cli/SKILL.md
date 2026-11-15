@@ -1,6 +1,6 @@
 ---
 name: usc-cli
-description: Access USC Brightspace, Handshake events and career fairs, Leavey Library room availability and bookings, Web Registration (course bin, calendar, and checkout), USC mobile ordering, and the public Schedule of Classes with the Go-based `usc` CLI. Use when retrieving authorized course data, searching career events, booking or checking study spaces, planning or submitting registration, checking current sections, or browsing dining menus and preparing mobile orders.
+description: Access USC Brightspace, Handshake events and career-fair registration, Leavey Library room availability and bookings, Web Registration (course bin, calendar, and checkout), USC mobile ordering, and the public Schedule of Classes with the Go-based `usc` CLI. Use when retrieving authorized course data, searching career events, registering for career fairs, booking or checking study spaces, planning or submitting registration, checking current sections, or browsing dining menus and preparing mobile orders.
 ---
 
 # USC CLI
@@ -39,10 +39,13 @@ usc handshake events [--category NAME_OR_ID] [--organizer NAME_OR_EMAIL] [--keyw
 usc handshake event EVENT_ID
 usc handshake career-fairs [SAME_FLAGS_AS_EVENTS]
 usc handshake career-fair CAREER_FAIR_ID
+usc handshake career-fair-register SESSION_ID
+usc handshake career-fair-cancel SESSION_ID
 ```
 
 - Lists return `items`, `has_more`, and `next_cursor`; pass `next_cursor` to `--after` with the same flags for the next page.
 - `--sort posted-desc` lists the most recently posted first.
+- `SESSION_ID` is a `sessions[].id` from `career-fair`; register only for the session the user names. Both commands return the attendance record with `registered` and `waitlisted`. Fairs with a required attendee form must be finished on Handshake.
 
 ## Web Registration
 

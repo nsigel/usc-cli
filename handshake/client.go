@@ -1,5 +1,5 @@
 // Package handshake reads events and career fairs from USC Handshake's
-// student site.
+// student site and registers for career-fair sessions.
 package handshake
 
 import (

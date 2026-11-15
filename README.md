@@ -80,6 +80,8 @@ usc classes 20271 CSCI-270
 | `usc handshake event EVENT_ID` | One event |
 | `usc handshake career-fairs [FILTERS]` | Search career fairs |
 | `usc handshake career-fair CAREER_FAIR_ID` | One career fair, with sessions |
+| `usc handshake career-fair-register SESSION_ID` | Register for a career-fair session |
+| `usc handshake career-fair-cancel SESSION_ID` | Cancel a career-fair session registration |
 | `usc libcal categories` | Leavey room and pod categories |
 | `usc libcal spaces [rooms\|pods\|all\|lvl1\|lvl2\|lvl3]` | Leavey spaces |
 | `usc libcal space SPACE_ID` | One space |

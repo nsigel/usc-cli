@@ -195,3 +195,13 @@ type Page[T any] struct {
 	CursorKind string `json:"cursor_kind"`
 	Sort       string `json:"sort"`
 }
+
+// CareerFairRegistration is the current user's attendance record for one
+// career-fair session.
+type CareerFairRegistration struct {
+	AttendeeID  int    `json:"attendee_id"`
+	SessionID   int    `json:"session_id"`
+	SessionName string `json:"session_name"`
+	Registered  bool   `json:"registered"`
+	Waitlisted  bool   `json:"waitlisted"`
+}
