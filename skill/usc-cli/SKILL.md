@@ -72,6 +72,8 @@ usc libcal spaces [rooms|pods|all|lvl1|lvl2|lvl3]
 usc libcal schedule [--date today|tomorrow|YYYY-MM-DD] [--end-date YYYY-MM-DD] [--category CATEGORY] [--min-capacity N] [--max-capacity N]
 usc libcal availability --start TIMESTAMP --end TIMESTAMP [--category CATEGORY] [--min-capacity N] [--max-capacity N]
 usc libcal book --space SPACE_ID --start TIMESTAMP --end TIMESTAMP --accept-terms [--field NAME=VALUE]
+usc libcal bookings CANCEL_LINK
+usc libcal cancel CANCEL_LINK --booking BOOKING_ID
 ```
 
 `availability` returns `start`, `end`, `timezone`, `matches` (space records), and `window_end` (server flags by category). Every match covers the exact requested span, up to two hours, with adjacent available intervals and matching slot boundaries. Missing intervals never count as available. This reads availability without holding, booking or ranking spaces. For flexible times, use the full `schedule`. An empty match list does not establish a booking horizon.
@@ -79,6 +81,7 @@ usc libcal book --space SPACE_ID --start TIMESTAMP --end TIMESTAMP --accept-term
 
 - `schedule` lists each space's `intervals` with `start`, `end`, and `available`. To book, take `--start` from the start of an available interval and `--end` from the end of the same or a later adjacent available interval, at most two hours apart, copied as printed.
 - `--accept-terms` accepts the reservation terms at https://libcal.usc.edu/reserve/lvl1.
+- To cancel, take the cancellation link from the confirmation email, list its bookings, and pass the `id` of a booking whose `cancelable` is true to `--booking`. `cancel` cancels only that booking and cannot be undone.
 
 ```sh
 usc libcal schedule --date 2026-10-02 --category rooms --min-capacity 6

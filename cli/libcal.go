@@ -14,6 +14,7 @@ func libcalCommand() *cobra.Command {
 	return group("libcal", "Check and reserve Leavey Library spaces",
 		libcalCategoriesCommand(), libcalSpacesCommand(), libcalSpaceCommand(),
 		libcalScheduleCommand(), libcalAvailabilityCommand(), libcalBookCommand(), libcalReleaseCommand(),
+		libcalBookingsCommand(), libcalCancelCommand(),
 	)
 }
 
@@ -206,4 +207,42 @@ func libcalReleaseCommand() *cobra.Command {
 			return writeJSON(cmd, map[string]bool{"released": true})
 		},
 	}
+}
+
+func libcalBookingsCommand() *cobra.Command {
+	return &cobra.Command{
+		Use: "bookings CANCEL_LINK", Short: "List the bookings under a confirmation email's cancellation link", Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			code, err := libcal.CancelCode(args[0])
+			if err != nil {
+				return err
+			}
+			bookings, err := libcal.NewPublic().Bookings(cmd.Context(), code)
+			if err != nil {
+				return err
+			}
+			return writeJSON(cmd, bookings)
+		},
+	}
+}
+
+func libcalCancelCommand() *cobra.Command {
+	var bookingID int
+	cmd := &cobra.Command{
+		Use: "cancel CANCEL_LINK", Short: "Cancel one booking listed under a cancellation link", Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			code, err := libcal.CancelCode(args[0])
+			if err != nil {
+				return err
+			}
+			cancellation, err := libcal.NewPublic().Cancel(cmd.Context(), code, bookingID)
+			if err != nil {
+				return err
+			}
+			return writeJSON(cmd, cancellation)
+		},
+	}
+	cmd.Flags().IntVar(&bookingID, "booking", 0, "booking ID from usc libcal bookings")
+	_ = cmd.MarkFlagRequired("booking")
+	return cmd
 }
