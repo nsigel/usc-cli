@@ -1,7 +1,7 @@
 ---
 layout: ../../layouts/Docs.astro
 title: Handshake
-description: Search Handshake events and career fairs and read their details.
+description: Search Handshake events and career fairs, read their details, and register for fair sessions.
 ---
 
 ```sh
@@ -10,6 +10,8 @@ usc handshake events [FILTERS]
 usc handshake event EVENT_ID
 usc handshake career-fairs [FILTERS]
 usc handshake career-fair CAREER_FAIR_ID
+usc handshake career-fair-register SESSION_ID
+usc handshake career-fair-cancel SESSION_ID
 ```
 
 ## Filters
@@ -34,6 +36,10 @@ Lists return `items`, `has_more`, and `next_cursor`. For the next page, pass `ne
 
 Handshake doesn't expose when an event was posted. `--sort posted-desc` orders by event ID, newest first, which tracks posting order closely enough to watch for new events.
 
+## Registration
+
+`career-fair-register` and `career-fair-cancel` take a session `id` from `career-fair`. Both return the session's attendance record with `registered` and `waitlisted`. Cancelling a session you aren't registered for succeeds and returns `registered: false`. Fairs that require an attendee form have to be finished on Handshake.
+
 ## Examples
 
 ```sh
@@ -41,4 +47,5 @@ usc handshake events --category employers --category networking --date next-30
 usc handshake events --organizer vcareers@usc.edu --medium virtual
 usc handshake career-fairs --keyword engineering
 usc handshake career-fair 65867
+usc handshake career-fair-register 80258
 ```

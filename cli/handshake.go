@@ -1,17 +1,21 @@
 package cli
 
 import (
+	"context"
+
 	"github.com/nsigel/usc-cli/handshake"
 	"github.com/spf13/cobra"
 )
 
 func handshakeCommand() *cobra.Command {
-	return group("handshake", "Read Handshake events and career fairs",
+	return group("handshake", "Search Handshake events and career fairs and register for fairs",
 		handshakeCategoriesCommand(),
 		handshakeEventsCommand(),
 		handshakeEventCommand(),
 		handshakeCareerFairsCommand(),
 		handshakeCareerFairCommand(),
+		handshakeCareerFairRegisterCommand(),
+		handshakeCareerFairCancelCommand(),
 	)
 }
 
@@ -110,6 +114,35 @@ func handshakeCareerFairCommand() *cobra.Command {
 				return err
 			}
 			return writeJSON(cmd, fair)
+		},
+	}
+}
+
+func handshakeCareerFairRegisterCommand() *cobra.Command {
+	return handshakeSessionCommand("career-fair-register", "Register for a career-fair session", (*handshake.Client).RegisterCareerFairSession)
+}
+
+func handshakeCareerFairCancelCommand() *cobra.Command {
+	return handshakeSessionCommand("career-fair-cancel", "Cancel a career-fair session registration", (*handshake.Client).CancelCareerFairSession)
+}
+
+func handshakeSessionCommand(use, short string, change func(*handshake.Client, context.Context, int) (handshake.CareerFairRegistration, error)) *cobra.Command {
+	return &cobra.Command{
+		Use: use + " SESSION_ID", Short: short, Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id, err := positiveID(args[0], "SESSION_ID")
+			if err != nil {
+				return err
+			}
+			client, err := openHandshake(cmd)
+			if err != nil {
+				return err
+			}
+			registration, err := change(client, cmd.Context(), id)
+			if err != nil {
+				return err
+			}
+			return writeJSON(cmd, registration)
 		},
 	}
 }
