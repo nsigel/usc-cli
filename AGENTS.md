@@ -12,7 +12,7 @@ browser/             Chrome DevTools Protocol cookie sync
 site/                site names and their sign-in pages
 config/              the usc command's configuration file paths
 skill/               embedded agent skill definition
-internal/cli/        Cobra commands: parse flags, call a package, print JSON
+cli/                 Cobra commands: parse flags, call a package, print JSON
 internal/dom/        HTML helpers shared by the clients
 examples/            runnable library examples
 web/                 usc.sh website and docs (Astro), with the install script
@@ -22,18 +22,18 @@ web/                 usc.sh website and docs (Astro), with the install script
 
 - Every feature is a library call first. A command only parses flags, calls
   the package, and prints exactly what it returns; neither logic nor output
-  shapes live in `internal/cli`. Commands with nothing to return print a
+  shapes live in `cli`. Commands with nothing to return print a
   one-field acknowledgement.
 - The library holds no ambient state. A program signs in with `auth.Options`
   (explicit credentials or a credentials file) and owns its session,
-  which stays in memory unless it names a `SessionFile`. Only `internal/cli`
+  which stays in memory unless it names a `SessionFile`. Only `cli`
   knows about the usc configuration directory and the `USC_*` environment
-  variables (`signIn` in `internal/cli/open.go`).
+  variables (`signIn` in `cli/open.go`).
 - Each service package has a `client.go` (construction, `Open`, HTTP, errors)
   and one file per resource or step. Wire types stay unexported.
 - Authentication failures are `*auth.SiteError`; do not add per-package
   session errors. The library never names a `usc` command; `WriteError` in
-  `internal/cli` adds the CLI's `action` hint.
+  `cli` adds the CLI's `action` hint.
 - Commands emit JSON to stdout, except `usc skill`, which emits raw Markdown.
   JSON output is pretty in a terminal and single-line when piped; `--compact`
   and `--pretty` override detection.

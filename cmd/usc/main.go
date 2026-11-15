@@ -6,7 +6,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/nsigel/usc-cli/internal/cli"
+	"github.com/nsigel/usc-cli/cli"
 )
 
 func main() {
