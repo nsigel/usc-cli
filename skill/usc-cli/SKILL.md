@@ -67,8 +67,12 @@ usc webreg submit --term TERM --confirm
 ```sh
 usc libcal spaces [rooms|pods|all|lvl1|lvl2|lvl3]
 usc libcal schedule [--date today|tomorrow|YYYY-MM-DD] [--end-date YYYY-MM-DD] [--category CATEGORY] [--min-capacity N] [--max-capacity N]
+usc libcal availability --start TIMESTAMP --end TIMESTAMP [--category CATEGORY] [--min-capacity N] [--max-capacity N]
 usc libcal book --space SPACE_ID --start TIMESTAMP --end TIMESTAMP --accept-terms [--field NAME=VALUE]
 ```
+
+`availability` returns `start`, `end`, `timezone`, `matches` (space records), and `window_end` (server flags by category). Every match covers the exact requested span, up to two hours, with adjacent available intervals and matching slot boundaries. Missing intervals never count as available. This reads availability without holding, booking or ranking spaces. For flexible times, use the full `schedule`. An empty match list does not establish a booking horizon.
+
 
 - `schedule` lists each space's `intervals` with `start`, `end`, and `available`. To book, take `--start` from the start of an available interval and `--end` from the end of the same or a later adjacent available interval, at most two hours apart, copied as printed.
 - `--accept-terms` accepts the reservation terms at https://libcal.usc.edu/reserve/lvl1.
@@ -91,7 +95,7 @@ Public section times, seats, instructors, and syllabus links, for example `usc c
 ```sh
 usc mobileorder locations
 usc mobileorder payments
-usc mobileorder menu --location ID --fulfillment pickup --payment-method ID
+usc mobileorder menu --location ID --fulfillment pickup --payment-method ID [--flat]
 usc mobileorder item ITEM_ID --location ID --fulfillment pickup --payment-method ID
 usc mobileorder checkout --location ID --fulfillment pickup --payment-method ID
 usc mobileorder cart --location ID --fulfillment pickup --payment-method ID --tender ID --asap --item ITEM_ID --select ITEM_ID:VALUE_ID
@@ -122,3 +126,6 @@ Only stage `success` confirms checkout. For `mobileorder_order_unknown`,
 inspect pending/past orders before any new submission. Do not automatically
 retry purchases. Purchase, continuation, cancellation and check-in have not
 been live-verified; read calls, cart construction and quoting have.
+
+
+`menu --flat` returns `{"location_id":123,"status":"Closed","items":[{"id":456,"name":"Latte","price":450,"available":true,"section_id":7,"section":"Coffee","section_available":true}]}`. It uses the same menu request, retains all visible items in source order, and preserves venue status and section context. Item availability alone does not mean the venue is open; prices remain integer cents.

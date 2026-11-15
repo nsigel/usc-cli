@@ -12,7 +12,7 @@ the Transact bearer token in memory. They do not save carts or order history.
 ```sh
 usc mobileorder locations
 usc mobileorder payments
-usc mobileorder menu --location LOCATION_ID --fulfillment pickup --payment-method PAYMENT_ID
+usc mobileorder menu --location LOCATION_ID --fulfillment pickup --payment-method PAYMENT_ID [--flat]
 usc mobileorder orders
 usc mobileorder orders --pending
 ```
@@ -147,3 +147,6 @@ Not live-verified: successful purchase/continuation, cancellation, check-in,
 combo purchases, split payments, or scheduled fulfillment. These operations
 are implemented from the app contract but need a user-selected real order
 for end-to-end verification. No purchase was made during implementation.
+
+
+`menu --flat` returns `{"location_id":123,"status":"Closed","items":[{"id":456,"name":"Latte","price":450,"available":true,"section_id":7,"section":"Coffee","section_available":true}]}`. It uses the same menu request, retains all visible items in source order, and preserves venue status and section context. Item availability alone does not mean the venue is open; prices remain integer cents.

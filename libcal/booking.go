@@ -34,14 +34,21 @@ func (s Selection) Validate() error {
 	if s.SpaceID < 1 || s.Start.IsZero() || s.End.IsZero() {
 		return errors.New("an explicit space, start, and end are required")
 	}
-	if !s.End.After(s.Start) {
+	return validateInterval(s.Start, s.End)
+}
+
+func validateInterval(start, end time.Time) error {
+	if start.IsZero() || end.IsZero() {
+		return errors.New("explicit start and end are required")
+	}
+	if !end.After(start) {
 		return errors.New("end must be after start")
 	}
-	if s.End.Sub(s.Start) > 2*time.Hour {
+	if end.Sub(start) > 2*time.Hour {
 		return &Error{Code: "libcal_duration_limit", Message: "a LibCal reservation cannot exceed 2 hours; choose a shorter interval from the schedule"}
 	}
-	if s.Start.Second() != 0 || s.Start.Nanosecond() != 0 ||
-		(s.End.Second() != 0 || s.End.Nanosecond() != 0) {
+	if start.Second() != 0 || start.Nanosecond() != 0 ||
+		(end.Second() != 0 || end.Nanosecond() != 0) {
 		return errors.New("start and end must use whole minutes")
 	}
 	return nil

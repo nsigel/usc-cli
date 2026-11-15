@@ -13,7 +13,7 @@ import (
 func libcalCommand() *cobra.Command {
 	return group("libcal", "Check and reserve Leavey Library spaces",
 		libcalCategoriesCommand(), libcalSpacesCommand(), libcalSpaceCommand(),
-		libcalScheduleCommand(), libcalBookCommand(), libcalReleaseCommand(),
+		libcalScheduleCommand(), libcalAvailabilityCommand(), libcalBookCommand(), libcalReleaseCommand(),
 	)
 }
 
@@ -88,6 +88,37 @@ func libcalScheduleCommand() *cobra.Command {
 	cmd.Flags().StringVar(&category, "category", "all", "rooms, pods, all, lvl1, lvl2, or lvl3")
 	cmd.Flags().IntVar(&options.MinCapacity, "min-capacity", 0, "minimum space capacity")
 	cmd.Flags().IntVar(&options.MaxCapacity, "max-capacity", 0, "maximum space capacity")
+	return cmd
+}
+
+func libcalAvailabilityCommand() *cobra.Command {
+	var start, end, category string
+	var options libcal.AvailabilityOptions
+	cmd := &cobra.Command{
+		Use: "availability", Short: "List spaces available for an exact continuous time window; does not reserve", Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			var err error
+			if options.Start, err = parseTimestamp("--start", start); err != nil {
+				return err
+			}
+			if options.End, err = parseTimestamp("--end", end); err != nil {
+				return err
+			}
+			options.Category = libcal.Category(strings.ToLower(category))
+			result, err := libcal.NewPublic().Availability(cmd.Context(), options)
+			if err != nil {
+				return err
+			}
+			return writeJSON(cmd, result)
+		},
+	}
+	cmd.Flags().StringVar(&start, "start", "", "start of requested window, RFC3339 with UTC offset")
+	cmd.Flags().StringVar(&end, "end", "", "end of requested window, at most two hours after start")
+	cmd.Flags().StringVar(&category, "category", "all", "rooms, pods, all, lvl1, lvl2, or lvl3")
+	cmd.Flags().IntVar(&options.MinCapacity, "min-capacity", 0, "minimum space capacity")
+	cmd.Flags().IntVar(&options.MaxCapacity, "max-capacity", 0, "maximum space capacity")
+	cmd.MarkFlagRequired("start")
+	cmd.MarkFlagRequired("end")
 	return cmd
 }
 

@@ -37,6 +37,29 @@ type MenuItem struct {
 	Available bool   `json:"available"`
 }
 
+// FlatMenu preserves venue status and section context alongside item summaries.
+type FlatMenu struct {
+	Status     string         `json:"status"`
+	LocationID int            `json:"location_id"`
+	Items      []FlatMenuItem `json:"items"`
+}
+type FlatMenuItem struct {
+	MenuItem
+	SectionID        int    `json:"section_id"`
+	Section          string `json:"section"`
+	SectionAvailable bool   `json:"section_available"`
+}
+
+func (m Menu) Flatten() FlatMenu {
+	result := FlatMenu{Status: m.Status, LocationID: m.LocationID, Items: []FlatMenuItem{}}
+	for _, section := range m.Sections {
+		for _, item := range section.Items {
+			result.Items = append(result.Items, FlatMenuItem{item, section.ID, section.Name, section.Available})
+		}
+	}
+	return result
+}
+
 // Item includes the selections needed to construct a cart item.
 type Item struct {
 	MenuItem
