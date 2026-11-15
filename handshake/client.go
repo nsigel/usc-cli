@@ -88,20 +88,28 @@ func (c *Client) send(request *http.Request, label string) ([]byte, error) {
 	return body, nil
 }
 
-func (c *Client) graphQL(ctx context.Context, path, operation, query string, variables map[string]any, destination any) error {
-	payload, err := json.Marshal(map[string]any{"operationName": operation, "query": query, "variables": variables})
+// sendJSON sends a JSON request; csrfToken is required only by Rails endpoints that change state.
+func (c *Client) sendJSON(ctx context.Context, method, path string, payload []byte, label, csrfToken string) ([]byte, error) {
+	request, err := http.NewRequestWithContext(ctx, method, baseURL+path, bytes.NewReader(payload))
 	if err != nil {
-		return err
-	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+path, bytes.NewReader(payload))
-	if err != nil {
-		return err
+		return nil, err
 	}
 	request.Header.Set("Accept", "application/json")
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Origin", baseURL)
 	request.Header.Set("Referer", baseURL+"/stu/events")
-	body, err := c.send(request, operation)
+	if csrfToken != "" {
+		request.Header.Set("X-CSRF-Token", csrfToken)
+	}
+	return c.send(request, label)
+}
+
+func (c *Client) graphQL(ctx context.Context, path, operation, query string, variables map[string]any, destination any) error {
+	payload, err := json.Marshal(map[string]any{"operationName": operation, "query": query, "variables": variables})
+	if err != nil {
+		return err
+	}
+	body, err := c.sendJSON(ctx, http.MethodPost, path, payload, operation, "")
 	if err != nil {
 		return err
 	}
