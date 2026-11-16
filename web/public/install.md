@@ -2,6 +2,8 @@
 
 `usc` gives you access to the user's USC accounts: Brightspace, Web Registration, Handshake, Leavey Library rooms, USC mobile ordering, and the public Schedule of Classes. Every command prints JSON. Follow these steps in order.
 
+`usc` runs on this machine and sends requests only to official USC services. It has no telemetry and keeps credentials in a private local file.
+
 ## 1. Install
 
 On macOS or Linux:
@@ -29,13 +31,11 @@ usc skill > ~/.claude/skills/usc-cli/SKILL.md
 
 Run `usc auth status`. If it prints `"authenticated":true`, skip to step 4.
 
-Otherwise, tell the user they can sign in themselves by running `usc auth login` in their own terminal. If they don't, ask for their USC NetID, password, and a Duo bypass code (from https://account.usc.edu/2fa/duo-bypass-code) and sign them in:
+Otherwise, sign-in needs the user's NetID, password, and a Duo bypass code (from https://account.usc.edu/2fa/duo-bypass-code). Never ask for these in chat:
 
-```sh
-USC_USERNAME='NETID' USC_PASSWORD='PASSWORD' USC_DUO_BYPASS='CODE' usc auth login
-```
-
-Don't repeat the credentials back or save them anywhere else; `usc` stores them in its own private file.
+- If you have a secure secret prompt (like T3 Code's `request_secret`), request each value and pass them to `usc auth login` as `USC_USERNAME`, `USC_PASSWORD`, and `USC_DUO_BYPASS`.
+- If the user can type into your terminal (like Gemini CLI or Cursor), run `usc auth login` and have them answer its prompts.
+- Otherwise (like Claude Code or Codex), ask the user to run `usc auth login` in their own terminal.
 
 After that, every later command signs itself in. Run `usc auth status` to confirm.
 

@@ -14,7 +14,7 @@ Ask Claude Code, Codex, Grok, or any agent that can run shell commands:
 Set up the USC CLI for me: https://usc.sh/install.md
 ```
 
-The agent installs `usc` and adds the skill. It signs you in with your NetID, password, and Duo bypass code, unless you run `usc auth login` in your own terminal first.
+The agent installs `usc` and adds the skill. To sign in, it never asks for your password in chat: it uses your agent's secure secret prompt if it has one, or asks you to run `usc auth login` in your own terminal.
 
 ## By hand
 
