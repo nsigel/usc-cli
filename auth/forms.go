@@ -88,20 +88,6 @@ func pageTitle(body []byte) string {
 	return strings.TrimSpace(dom.RawText(dom.FindFirst(dom.Parse(body), dom.Tag("title"))))
 }
 
-func elementValue(body []byte, id string) string {
-	return dom.Attr(dom.FindFirst(dom.Parse(body), dom.ID(id)), "value")
-}
-
-func setField(form *form, name, value string) {
-	for index := range form.Fields {
-		if form.Fields[index].Name == name {
-			form.Fields[index].Value = value
-			return
-		}
-	}
-	form.Fields = append(form.Fields, field{Name: name, Value: value})
-}
-
 func encodeFields(fields []field) string {
 	encoded := make([]string, 0, len(fields))
 	for _, field := range fields {

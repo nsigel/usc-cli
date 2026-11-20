@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"maps"
@@ -295,4 +296,112 @@ func firstValue(values map[string]string, names ...string) string {
 		}
 	}
 	return ""
+}
+
+// microsoftStep advances any Microsoft page. Only the sign-in page receives
+// credentials; the rest carry Microsoft's own state forward.
+func (a *authenticator) microsoftStep(ctx context.Context, current *page, credentials Credentials) (*page, error) {
+	if needsMicrosoftReload(current) {
+		return a.reloadMicrosoft(ctx, current)
+	}
+	config := microsoftConfig(microsoftScript(current.Body))
+	switch pageID, _ := config["pgid"].(string); pageID {
+	case "ConvergedSignIn":
+		return a.submitMicrosoftSignIn(ctx, current, config, credentials)
+	case "ConvergedTFA":
+		return a.beginExternalVerification(ctx, current, config, credentials)
+	}
+	return a.continueMicrosoft(ctx, current)
+}
+
+// submitMicrosoftSignIn is the only place the username and password are
+// sent: USC accounts sign in on Microsoft's own page, which posts both at once.
+func (a *authenticator) submitMicrosoftSignIn(ctx context.Context, current *page, config map[string]any, credentials Credentials) (*page, error) {
+	if !credentials.Complete() {
+		return nil, ErrCredentialsRequired
+	}
+	if a.passwordSent {
+		// Microsoft answers a failed password with the sign-in page again.
+		code, _ := config["sErrorCode"].(string)
+		if code == "50126" {
+			return nil, ErrPasswordRejected
+		}
+		return nil, fmt.Errorf("microsoft sign-in failed (AADSTS%s)", code)
+	}
+	action, _ := config["urlPost"].(string)
+	destination, err := current.URL.Parse(action)
+	if action == "" || err != nil || !isMicrosoftHost(destination) || !strings.HasSuffix(destination.Path, "/login") {
+		return nil, errors.New("microsoft sign-in page has no credential form")
+	}
+	state, err := microsoftState(current, configStrings(config), a.microsoft)
+	if err != nil {
+		return nil, err
+	}
+	a.passwordSent = true
+	username := microsoftUsername(credentials.Username)
+	// The fields mirror the browser's post, empty ones included.
+	return a.submit(ctx, current, form{Method: http.MethodPost, Action: destination.String(), Fields: []field{
+		{Name: "i13", Value: "0"},
+		{Name: "login", Value: username},
+		{Name: "loginfmt", Value: username},
+		{Name: "type", Value: "11"},
+		{Name: "LoginOptions", Value: "3"},
+		{Name: "lrt"}, {Name: "lrtPartition"}, {Name: "hisRegion"}, {Name: "hisScaleUnit"},
+		{Name: "passwd", Value: credentials.Password},
+		{Name: "ps", Value: "2"},
+		{Name: "psRNGCDefaultType"}, {Name: "psRNGCEntropy"}, {Name: "psRNGCSLK"},
+		state.canary, state.ctx, state.requestID, state.flowToken,
+	}})
+}
+
+// microsoftUsername is the account name Microsoft expects: a NetID alone
+// becomes the NetID's usc.edu address.
+func microsoftUsername(username string) string {
+	if strings.Contains(username, "@") {
+		return username
+	}
+	return username + "@usc.edu"
+}
+
+// beginExternalVerification picks USC Duo, which Microsoft runs as an
+// external authentication method, on Microsoft's verification page.
+func (a *authenticator) beginExternalVerification(ctx context.Context, current *page, config map[string]any, credentials Credentials) (*page, error) {
+	if credentials.BypassCode == "" {
+		return nil, ErrCredentialsRequired
+	}
+	if a.duoStarted {
+		return nil, errors.New("microsoft asked for verification again after Duo")
+	}
+	proofs, _ := config["arrUserProofs"].([]any)
+	var methodID string
+	for _, proof := range proofs {
+		if method, _ := proof.(map[string]any); method != nil && method["authMethodId"] == "ExternalAuth" {
+			methodID, _ = method["externalAuthenticationMethodId"].(string)
+		}
+	}
+	action, _ := config["urlExternalAuthRedirect"].(string)
+	destination, err := current.URL.Parse(action)
+	if methodID == "" || action == "" || err != nil || !isMicrosoftHost(destination) {
+		return nil, errors.New("microsoft asked for a verification method other than USC Duo")
+	}
+	state, err := microsoftState(current, configStrings(config), a.microsoft)
+	if err != nil {
+		return nil, err
+	}
+	a.duoStarted = true
+	return a.submit(ctx, current, form{Method: http.MethodPost, Action: destination.String(), Fields: []field{
+		state.ctx, state.flowToken, {Name: "externalAuthenticationMethodId", Value: methodID}, state.canary,
+	}})
+}
+
+// configStrings is a page config's own top-level values, which take
+// precedence over anything remembered from earlier pages.
+func configStrings(config map[string]any) map[string]string {
+	values := make(map[string]string, len(config))
+	for key, value := range config {
+		if text, ok := value.(string); ok {
+			values[key] = text
+		}
+	}
+	return values
 }
