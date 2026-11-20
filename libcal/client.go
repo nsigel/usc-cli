@@ -114,7 +114,7 @@ func (c *Client) request(ctx context.Context, method, path string, form url.Valu
 	}
 	if response.StatusCode >= 300 && response.StatusCode < 400 {
 		location, err := url.Parse(response.Header.Get("Location"))
-		if err == nil && (strings.Contains(location.Path, "/spaces/auth") || strings.Contains(location.Host, "login.usc.edu")) {
+		if err == nil && strings.Contains(location.Path, "/spaces/auth") {
 			return nil, ErrAuthenticationRequired
 		}
 		return nil, responseError(method+" "+path, response.StatusCode, nil)
