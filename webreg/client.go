@@ -63,18 +63,25 @@ func Open(ctx context.Context, options auth.Options) (*Client, error) {
 }
 
 // Error describes a WebReg request the server rejected. Message is a short
-// server explanation when one was safe to include.
+// server explanation when one was safe to include. RedirectPath is the
+// WebReg page a rejected POST was sent to, such as /Acknowledgement, without
+// its query string, which can carry tokens.
 type Error struct {
-	Operation string
-	Status    int
-	Message   string
+	Operation    string
+	Status       int
+	Message      string
+	RedirectPath string
 }
 
 func (e *Error) Error() string {
-	if e.Message != "" {
-		return fmt.Sprintf("WebReg %s: HTTP %d: %s", e.Operation, e.Status, e.Message)
+	description := fmt.Sprintf("WebReg %s: HTTP %d", e.Operation, e.Status)
+	if e.RedirectPath != "" {
+		description += " to " + e.RedirectPath
 	}
-	return fmt.Sprintf("WebReg %s: HTTP %d", e.Operation, e.Status)
+	if e.Message != "" {
+		description += ": " + e.Message
+	}
+	return description
 }
 
 // SelectTerm makes term WebReg's active term for this session.
@@ -166,16 +173,21 @@ func (c *Client) post(ctx context.Context, path string, form url.Values, referer
 	if err != nil {
 		return nil, err
 	}
+	redirectPath := ""
 	if response.StatusCode >= 300 && response.StatusCode < 400 {
-		if next, err := response.Request.URL.Parse(response.Header.Get("Location")); err == nil && signInURL(next) {
+		next, err := response.Request.URL.Parse(response.Header.Get("Location"))
+		if err == nil && signInURL(next) {
 			return nil, errSessionInvalid
+		}
+		if err == nil {
+			redirectPath = next.Path
 		}
 	}
 	if response.StatusCode == http.StatusUnauthorized {
 		return nil, errSessionInvalid
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, &Error{Operation: "POST " + path, Status: response.StatusCode, Message: safeServerMessage(data)}
+		return nil, &Error{Operation: "POST " + path, Status: response.StatusCode, Message: safeServerMessage(data), RedirectPath: redirectPath}
 	}
 	return data, nil
 }
