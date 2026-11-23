@@ -13,12 +13,14 @@ const (
 	Handshake   Name = "handshake"
 	LibCal      Name = "libcal"
 	WebReg      Name = "webreg"
+	Directory   Name = "directory"
 )
 
 // loginURLs are the pages that enter USC SSO for each site. LibCal has none:
 // its SSO entry only exists once a booking is staged.
 var loginURLs = map[Name]string{
 	Brightspace: "https://brightspace.usc.edu/",
+	Directory:   "https://uscdirectory.usc.edu/web/directory/student/",
 	Handshake:   "https://usc.joinhandshake.com/auth/saml/70/session/new?redirect_to_idp=true",
 	// WebReg's /auth/login forces a new OIDC round trip on every visit, and
 	// Microsoft rejects rapid repeats as a request loop. An app page reaches

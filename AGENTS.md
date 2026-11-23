@@ -7,6 +7,7 @@ brightspace/         Brightspace client, one file per resource
 handshake/           Handshake events and career fairs
 libcal/              Leavey Library availability and booking
 webreg/              Web Registration
+directory/           USC Student Directory
 classes/             public Schedule of Classes
 browser/             Chrome DevTools Protocol cookie sync
 site/                site names and their sign-in pages

@@ -28,6 +28,7 @@ Errors are JSON on stderr, and the command exits with status 1. When another com
 | `usc brightspace ...` | Courses, content, grades, announcements, assignments, downloads. [Brightspace](/docs/brightspace/) |
 | `usc webreg ...` | Terms, catalog, course bin, calendar, checkout. [WebReg](/docs/webreg/) |
 | `usc handshake ...` | Events, career fairs, and fair registration. [Handshake](/docs/handshake/) |
+| `usc directory ...` | Student Directory search. [Student Directory](/docs/directory/) |
 | `usc libcal ...` | Leavey rooms, schedules, booking. [Leavey Library](/docs/libcal/) |
 | `usc classes TERM COURSE` | Public course sections. [Schedule of Classes](/docs/classes/) |
 | `usc browser sync` | Copy the session into Chrome. [Browser sync](/docs/browser/) |

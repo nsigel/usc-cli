@@ -1,6 +1,6 @@
 # usc
 
-A command-line client for USC's Brightspace, Web Registration, Handshake, Leavey Library rooms, USC mobile ordering, and the public Schedule of Classes. Every command prints JSON, so Claude Code, Codex, Grok, or any agent with a terminal can run it for you.
+A command-line client for USC's Brightspace, Web Registration, Handshake, the Student Directory, Leavey Library rooms, USC mobile ordering, and the public Schedule of Classes. Every command prints JSON, so Claude Code, Codex, Grok, or any agent with a terminal can run it for you.
 
 Docs: [usc.sh/docs](https://usc.sh/docs/)
 
@@ -49,6 +49,7 @@ usc brightspace announcements --since 2026-11-09T00:00:00-08:00
 usc webreg courses --term 20271 --course BUAD-306
 usc handshake career-fairs --date next-30
 usc libcal schedule --date tomorrow --category rooms --min-capacity 4
+usc directory students --last-name smith --school Viterbi
 usc classes 20271 CSCI-270
 ```
 
@@ -75,6 +76,8 @@ usc classes 20271 CSCI-270
 | `usc webreg grade-option SECTION_ID CODE --term TERM` | Change a grade option |
 | `usc webreg checkout --term TERM` | Preview what would be registered and dropped |
 | `usc webreg submit --term TERM --confirm` | Register and drop what checkout shows |
+| `usc directory students [FILTERS]` | Search the Student Directory |
+| `usc directory student STUDENT_ID` | One student |
 | `usc handshake categories` | Event categories |
 | `usc handshake events [FILTERS]` | Search events |
 | `usc handshake event EVENT_ID` | One event |

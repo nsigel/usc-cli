@@ -6,6 +6,7 @@ import (
 	"github.com/nsigel/usc-cli/auth"
 	"github.com/nsigel/usc-cli/brightspace"
 	"github.com/nsigel/usc-cli/config"
+	"github.com/nsigel/usc-cli/directory"
 	"github.com/nsigel/usc-cli/handshake"
 	"github.com/nsigel/usc-cli/libcal"
 	"github.com/nsigel/usc-cli/webreg"
@@ -62,4 +63,12 @@ func openLibCal() (*libcal.Client, error) {
 		return nil, err
 	}
 	return libcal.Open(options)
+}
+
+func openDirectory(cmd *cobra.Command) (*directory.Client, error) {
+	options, err := signIn()
+	if err != nil {
+		return nil, err
+	}
+	return directory.Open(cmd.Context(), options)
 }
