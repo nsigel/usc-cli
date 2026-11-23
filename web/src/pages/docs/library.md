@@ -15,6 +15,7 @@ go get github.com/nsigel/usc-cli
 | `brightspace` | `Open(ctx, auth.Options)` |
 | `webreg` | `Open(ctx, auth.Options)` |
 | `handshake` | `Open(ctx, auth.Options)` |
+| `directory` | `Open(ctx, auth.Options)` |
 | `libcal` | `NewPublic()` for schedules, `Open(auth.Options)` for booking |
 | `mobileorder` | `Open(ctx, auth.Options)` for authenticated calls; `New().USC(ctx)` for public campus information |
 | `classes` | `New()` |

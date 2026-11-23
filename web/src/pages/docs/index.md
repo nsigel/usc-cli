@@ -4,7 +4,7 @@ title: Install
 description: Install the usc command, sign in once, and give your agent the skill.
 ---
 
-`usc` is a command-line client for USC's Brightspace, Web Registration, Handshake, Leavey Library room booking, USC mobile ordering, and the public Schedule of Classes. Every command prints JSON, so an agent can run it and read the result.
+`usc` is a command-line client for USC's Brightspace, Web Registration, Handshake, the Student Directory, Leavey Library room booking, USC mobile ordering, and the public Schedule of Classes. Every command prints JSON, so an agent can run it and read the result.
 
 ## With an agent
 

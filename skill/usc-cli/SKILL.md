@@ -1,6 +1,6 @@
 ---
 name: usc-cli
-description: Access USC Brightspace, Handshake events and career-fair registration, Leavey Library room availability and bookings, Web Registration (course bin, calendar, and checkout), USC mobile ordering, and the public Schedule of Classes with the Go-based `usc` CLI. Use when retrieving authorized course data, searching career events, registering for career fairs, booking or checking study spaces, planning or submitting registration, checking current sections, or browsing dining menus and preparing mobile orders.
+description: Access USC Brightspace, Handshake events and career-fair registration, Leavey Library room availability and bookings, Web Registration (course bin, calendar, and checkout), the USC Student Directory, USC mobile ordering, and the public Schedule of Classes with the Go-based `usc` CLI. Use when retrieving authorized course data, searching career events, registering for career fairs, booking or checking study spaces, planning or submitting registration, checking current sections, looking up USC students, or browsing dining menus and preparing mobile orders.
 ---
 
 # USC CLI
@@ -64,6 +64,18 @@ usc webreg submit --term TERM --confirm
 - `TERM` is a `code` from `terms`; `SECTION_ID` is a section `id` from `courses` or `bin`.
 - `add`, `schedule`, `unschedule`, and `remove` only edit the course bin. `submit` is what registers scheduled sections and drops registered sections that were unscheduled; `checkout` previews exactly that.
 - `calendar` marks conflicting meetings as `Conflicted`.
+
+## Student Directory
+
+```sh
+usc directory students --query TEXT
+usc directory students [--first-name NAME] [--last-name NAME] [--major TEXT] [--school TEXT] [--email TEXT] [--phone TEXT]
+usc directory student STUDENT_ID
+```
+
+- Search with `--query` (name, major, or email) or with the field flags, not both. Every value matches as a substring, e.g. `--school Viterbi`.
+- Returns `students` and `truncated`. The directory stops at 100 matches; when `truncated` is true, narrow the search instead of treating the list as complete.
+- `STUDENT_ID` is a `students[].id`. Employment fields (`title`, `department`, `division`) appear only for students with a USC job.
 
 ## Leavey Library rooms
 
