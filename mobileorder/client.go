@@ -1,4 +1,3 @@
-// Package mobileorder provides Transact Mobile Ordering discovery and authenticated reads.
 package mobileorder
 
 import (
@@ -10,7 +9,6 @@ import (
 	"time"
 )
 
-// Client accesses Transact Mobile Ordering. Its authentication token stays private.
 type Client struct {
 	http      *http.Client
 	token     string
@@ -18,7 +16,6 @@ type Client struct {
 	sessionID string
 }
 
-// New constructs a client without credentials or persistent state.
 func New() *Client { return &Client{http: &http.Client{Timeout: 30 * time.Second}} }
 
 func (c *Client) campuses(ctx context.Context) ([]Campus, error) {

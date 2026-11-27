@@ -73,8 +73,7 @@ func scriptNavigation(document *html.Node) string {
 		script := dom.RawText(node)
 		match := scriptNavigationPattern.FindStringSubmatch(script)
 		if match == nil && strings.Contains(script, "location") {
-			// Salesforce stores its destination in a local `url` variable before
-			// calling location.replace rather than using a string literal.
+
 			match = scriptURLPattern.FindStringSubmatch(script)
 		}
 		if match != nil {

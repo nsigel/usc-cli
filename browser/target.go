@@ -8,17 +8,8 @@ import (
 	"strings"
 )
 
-// DefaultTarget is Chrome's conventional remote-debugging address.
 const DefaultTarget = "127.0.0.1:9222"
 
-// ResolveTarget normalizes a CDP target string into an HTTP endpoint or a
-// websocket debugger URL. Empty target defaults to 127.0.0.1:9222.
-//
-// Accepted forms:
-//   - port: "9224"
-//   - host:port: "127.0.0.1:9224"
-//   - http(s) CDP endpoint: "http://127.0.0.1:9224"
-//   - websocket debugger URL: "ws://127.0.0.1:9224/devtools/browser/..."
 func ResolveTarget(target string) (string, error) {
 	target = strings.TrimSpace(target)
 	if target == "" {

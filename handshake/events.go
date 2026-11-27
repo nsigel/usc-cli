@@ -8,7 +8,6 @@ import (
 	"strings"
 )
 
-// Categories returns Handshake's live event category vocabulary.
 func (c *Client) Categories(ctx context.Context) ([]Category, error) {
 	var response struct {
 		Categories []categoryWire `json:"eventAbstractionCategories"`
@@ -19,7 +18,6 @@ func (c *Client) Categories(ctx context.Context) ([]Category, error) {
 	return normalizeCategories(response.Categories), nil
 }
 
-// Events returns one page of student events.
 func (c *Client) Events(ctx context.Context, search Search) (Page[EventSummary], error) {
 	page, err := c.search(ctx, search, "Event")
 	return convertPage(page, normalizeEventSummary), err
@@ -72,7 +70,6 @@ type eventDetailWire struct {
 	Employers  []employerWire `json:"employers"`
 }
 
-// Event returns one complete event record by ID.
 func (c *Client) Event(ctx context.Context, id int) (EventDetail, error) {
 	if id < 1 {
 		return EventDetail{}, errors.New("event ID must be a positive integer")

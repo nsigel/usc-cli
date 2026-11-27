@@ -1,5 +1,3 @@
-// Package auth implements USC's shared SSO flow without exposing
-// secret-bearing values.
 package auth
 
 import (
@@ -13,50 +11,54 @@ import (
 )
 
 var (
-	// ErrCredentialsRequired means the saved session cannot reach the target
-	// and no complete credentials were supplied for a fresh USC login.
+	ErrDuoSMSRejected      = errors.New("Duo rejected the SMS code")
 	ErrCredentialsRequired = errors.New("USC sign-in is required")
-	// ErrPasswordRejected means USC did not accept the username and password.
+
 	ErrPasswordRejected = errors.New("USC rejected the username or password")
-	// ErrBypassRejected means Duo did not accept the supplied bypass code.
+
 	ErrBypassRejected = errors.New("Duo rejected the bypass code")
-	// ErrSessionInvalid means a site stopped accepting its session after the
-	// client was opened. Open a new client.
+
+	ErrDuoPasscodeRejected = errors.New("Duo rejected the mobile passcode")
+
+	ErrDuoPushRejected = errors.New("Duo push was not approved")
+
 	ErrSessionInvalid = errors.New("session expired")
-	// ErrSessionNotFound means there is no saved session file.
+
 	ErrSessionNotFound = errors.New("no saved session")
 )
 
-// Credentials are used only when an existing session cannot reach the target.
 type Credentials struct {
-	Username   string // USC NetID
-	Password   string // USC NetID password
-	BypassCode string // current Duo bypass code
+	DuoDeviceID   string
+	Username      string
+	Password      string
+	BypassCode    string
+	DuoTOTPSecret string
 }
 
-// Complete reports whether a fresh SSO login can proceed.
 func (c Credentials) Complete() bool {
-	return c.Username != "" && c.Password != "" && c.BypassCode != ""
+	return c.Username != "" && c.Password != "" && (c.BypassCode != "" || c.DuoTOTPSecret != "")
 }
 
-// maxProtocolSteps turns an identity-provider redirect loop into an error.
 const maxProtocolSteps = 40
 
 type authenticator struct {
-	client          *http.Client
-	jar             *sessionJar
-	duoClientHintUA string
-	microsoft       map[string]string
-	passwordSent    bool // the password went out during this open
-	duoStarted      bool // Duo was chosen during this open
+	duoSMSDevice       string
+	requestDuoPasscode func() (string, error)
+	duoPasscode        string
+	duoPushDevice      string
+	duoPushStarted     func(string)
+	duoFactors         []DuoMethod
+	client             *http.Client
+	jar                *sessionJar
+	duoClientHintUA    string
+	microsoft          map[string]string
+	passwordSent       bool
+	duoStarted         bool
 }
 
-// open navigates to target, taking one sign-in step per page until it gets
-// there. Every step is explicit so that credentials are only ever sent to
-// the exact pages that ask for them.
 func (a *authenticator) open(ctx context.Context, target string, credentials Credentials, initialReferer *url.URL) (*page, error) {
 	targetURL, err := url.ParseRequestURI(target)
-	if err != nil {
+	if err != nil || targetURL.Scheme != "https" || targetURL.Host == "" {
 		return nil, errors.New("target must be an absolute HTTPS URL")
 	}
 	a.passwordSent, a.duoStarted = false, false
@@ -66,13 +68,16 @@ func (a *authenticator) open(ctx context.Context, target string, credentials Cre
 			return nil, err
 		}
 		switch {
+		case targetURL.Host == "account.usc.edu" && targetURL.Path == "/2fa/enroll" &&
+			current.URL.Scheme == "https" && current.URL.Host == "uw1.devicemanagement.duosecurity.com" &&
+			current.URL.Path == "/frame/device-management/portal" && current.Status == 200:
+			return current, nil
 		case current.Status >= 300 && current.Status < 400:
 			current, err = a.follow(ctx, current)
 		case isDuoPrompt(current):
-			current, err = a.duo(ctx, current, credentials.BypassCode)
+			current, err = a.duo(ctx, current, credentials)
 		case current.URL.Host == targetURL.Host && current.Status >= 200 && current.Status < 300:
-			// Salesforce serves a successful 200 trampoline before authentication.
-			// A real browser follows it, so host and status alone are insufficient.
+
 			destination, ok := staticRedirect(current)
 			if !ok {
 				return current, nil
@@ -99,8 +104,7 @@ func (a *authenticator) follow(ctx context.Context, current *page) (*page, error
 	if err != nil {
 		return nil, err
 	}
-	// 307 and 308 repeat the original request at the new address. A form
-	// posted to Microsoft can hold the password, so it stays with Microsoft.
+
 	if current.Status == http.StatusTemporaryRedirect || current.Status == http.StatusPermanentRedirect {
 		if len(current.request.body) > 0 && isMicrosoftHost(current.URL) && !isMicrosoftHost(destination) {
 			return nil, fmt.Errorf("refusing to repeat a form from %s to %s", current.URL.Host, destination.Host)
@@ -113,8 +117,6 @@ func (a *authenticator) follow(ctx context.Context, current *page) (*page, error
 	return a.get(ctx, destination.String(), current.URL)
 }
 
-// reloadMicrosoft moves Microsoft past its first pass, which probes ambient
-// Windows SSO. sso_reload continues to the sign-in page without it.
 func (a *authenticator) reloadMicrosoft(ctx context.Context, current *page) (*page, error) {
 	reload := *current.URL
 	query := reload.Query()
@@ -123,8 +125,6 @@ func (a *authenticator) reloadMicrosoft(ctx context.Context, current *page) (*pa
 	return a.get(ctx, reload.String(), current.URL)
 }
 
-// continueHandoff advances a page no provider claims: SAML handoffs use an
-// auto-posting form or a static redirect instead of an HTTP redirect.
 func (a *authenticator) continueHandoff(ctx context.Context, current *page) (*page, error) {
 	if form, ok := firstForm(current); ok {
 		return a.submit(ctx, current, form)
@@ -136,8 +136,9 @@ func (a *authenticator) continueHandoff(ctx context.Context, current *page) (*pa
 }
 
 func isDuoPrompt(page *page) bool {
-	return strings.HasPrefix(page.URL.Host, "api-") &&
-		strings.Contains(page.URL.Host, ".duosecurity.com") &&
+	host := strings.ToLower(page.URL.Hostname())
+	return strings.HasPrefix(host, "api-") &&
+		strings.HasSuffix(host, ".duosecurity.com") &&
 		strings.HasPrefix(page.URL.Path, "/prompt/")
 }
 

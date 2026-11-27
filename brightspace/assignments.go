@@ -6,7 +6,6 @@ import (
 	"io"
 )
 
-// Assignment is a Brightspace dropbox folder.
 type Assignment struct {
 	ID             int      `json:"id"`
 	Name           string   `json:"name"`
@@ -16,7 +15,6 @@ type Assignment struct {
 	Points         *float64 `json:"points"`
 }
 
-// Assignments returns Brightspace dropbox folders for courseID.
 func (c *Client) Assignments(ctx context.Context, courseID int) ([]Assignment, error) {
 	var folders []dropboxFolder
 	path := fmt.Sprintf("/d2l/api/le/%s/%d/dropbox/folders/", leVersion, courseID)
@@ -47,7 +45,6 @@ type dropboxFolder struct {
 	} `json:"Assessment"`
 }
 
-// Submission is one of the current user's submissions to a dropbox folder.
 type Submission struct {
 	ID          int              `json:"id"`
 	SubmittedBy string           `json:"submitted_by"`
@@ -56,16 +53,12 @@ type Submission struct {
 	Files       []SubmissionFile `json:"files"`
 }
 
-// SubmissionFile is a file attached to a dropbox submission.
 type SubmissionFile struct {
 	ID   int    `json:"id"`
 	Name string `json:"name"`
 	Size int64  `json:"size"`
 }
 
-// Submissions returns the current user's submissions to a dropbox folder,
-// oldest first. For students Brightspace scopes this list to their own entity;
-// the mysubmissions route is not authorized for browser sessions.
 func (c *Client) Submissions(ctx context.Context, courseID, folderID int) ([]Submission, error) {
 	var entities []entityDropbox
 	path := fmt.Sprintf("/d2l/api/le/%s/%d/dropbox/folders/%d/submissions/", leVersion, courseID, folderID)
@@ -87,8 +80,6 @@ func (c *Client) Submissions(ctx context.Context, courseID, folderID int) ([]Sub
 	return result, nil
 }
 
-// DownloadSubmissionFile returns the body of a file from one of the current
-// user's dropbox submissions.
 func (c *Client) DownloadSubmissionFile(ctx context.Context, courseID, folderID, submissionID, fileID int) (io.ReadCloser, error) {
 	return c.Download(ctx, fmt.Sprintf("/d2l/api/le/%s/%d/dropbox/folders/%d/submissions/%d/files/%d", leVersion, courseID, folderID, submissionID, fileID))
 }

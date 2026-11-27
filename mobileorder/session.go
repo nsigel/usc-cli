@@ -22,7 +22,6 @@ import (
 
 const apiOrigin = "https://mobileorderprodapi.transactcampus.com"
 
-// Open completes USC SSO and keeps the Transact identity in memory.
 func Open(ctx context.Context, options auth.Options) (*Client, error) {
 	s, err := auth.OpenSession(options, auth.CookiePolicy{})
 	if err != nil {

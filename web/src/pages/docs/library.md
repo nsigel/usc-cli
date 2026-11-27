@@ -59,6 +59,7 @@ Every sign-in failure is an `*auth.SiteError` naming the site. Check the cause w
 | `auth.ErrCredentialsRequired` | No credentials were given and there's no valid session |
 | `auth.ErrPasswordRejected` | USC rejected the password |
 | `auth.ErrBypassRejected` | Duo rejected the bypass code |
+| `auth.ErrDuoPasscodeRejected` | Duo rejected the generated mobile passcode |
 | `auth.ErrSessionInvalid` | The site dropped the session after the client opened |
 
 A rejected secret is submitted once. If it came from `CredentialsFile`, it's also removed from that file.

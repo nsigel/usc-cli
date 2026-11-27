@@ -13,8 +13,6 @@ import (
 	"time"
 )
 
-// CourseBin is a term's myCourseBin: courses the student is planning or
-// registered in, each section with its schedule/registration state.
 type CourseBin struct {
 	Term               string   `json:"term"`
 	RegisteredSections int      `json:"registered_sections"`
@@ -23,7 +21,6 @@ type CourseBin struct {
 	Courses            []Course `json:"courses"`
 }
 
-// CourseBin reads a term's course bin.
 func (c *Client) CourseBin(ctx context.Context, term string) (*CourseBin, error) {
 	if err := c.SelectTerm(ctx, term); err != nil {
 		return nil, err
@@ -47,8 +44,6 @@ func (c *Client) CourseBin(ctx context.Context, term string) (*CourseBin, error)
 	return bin, nil
 }
 
-// Section returns the course-bin section with id, or an error if it is not
-// in the bin.
 func (b *CourseBin) Section(id int) (*Section, error) {
 	for courseIndex := range b.Courses {
 		for sectionIndex := range b.Courses[courseIndex].Sections {
@@ -60,8 +55,6 @@ func (b *CourseBin) Section(id int) (*Section, error) {
 	return nil, fmt.Errorf("section %d is not in the %s course bin", id, b.Term)
 }
 
-// Add places a section in the course bin. It does not register; schedule the
-// section and submit checkout to register.
 func (c *Client) Add(ctx context.Context, term string, sectionID int) error {
 	if err := c.SelectTerm(ctx, term); err != nil {
 		return err
@@ -75,19 +68,14 @@ func (c *Client) Add(ctx context.Context, term string, sectionID int) error {
 	return err
 }
 
-// Schedule marks a course-bin section to be registered at checkout, or keeps
-// a registered section from being dropped.
 func (c *Client) Schedule(ctx context.Context, term string, sectionID int) error {
 	return c.sectionAction(ctx, term, sectionID, "schedule")
 }
 
-// Unschedule removes a section from the planned schedule. A registered
-// section that is unscheduled is dropped when checkout is submitted.
 func (c *Client) Unschedule(ctx context.Context, term string, sectionID int) error {
 	return c.sectionAction(ctx, term, sectionID, "un-schedule")
 }
 
-// Remove deletes an unscheduled, unregistered section from the course bin.
 func (c *Client) Remove(ctx context.Context, term string, sectionID int) error {
 	return c.sectionAction(ctx, term, sectionID, "remove")
 }
@@ -104,11 +92,6 @@ func sectionPath(term string, sectionID int, action string) string {
 	return "/api/section/" + url.PathEscape(term) + "/" + strconv.Itoa(sectionID) + "/" + action
 }
 
-// SetGradeOption changes a course-bin section's grade option to code, one of
-// the section's GradeOption.Choices (for example L, PN, or V). Unregistered
-// sections change immediately; registered sections submit a change request
-// that takes effect when checkout is submitted. It returns WebReg's response,
-// such as "Updated-PN".
 func (c *Client) SetGradeOption(ctx context.Context, term string, sectionID int, code string) (string, error) {
 	bin, err := c.CourseBin(ctx, term)
 	if err != nil {
@@ -140,7 +123,6 @@ func (c *Client) SetGradeOption(ctx context.Context, term string, sectionID int,
 	return text(dom.Parse(data)), nil
 }
 
-// ASP.NET Core accepts any of the session's tokens.
 func (c *Client) token(ctx context.Context) (string, error) {
 	for _, path := range []string{"/CourseBin", "/Checkout"} {
 		data, err := c.page(ctx, path, "/Departments")
@@ -154,12 +136,8 @@ func (c *Client) token(ctx context.Context) (string, error) {
 	return "", errors.New("WebReg did not provide a request verification token")
 }
 
-// calendarDataMarker precedes the events embedded in the calendar page's
-// scheduler widget configuration.
 const calendarDataMarker = `"data":{"Data":`
 
-// CalendarEvent is one meeting or blocked time on myCalendar. Status is
-// Scheduled, Registered, Blocked, or Conflicted.
 type CalendarEvent struct {
 	ID        string    `json:"id"`
 	Title     string    `json:"title"`
@@ -169,8 +147,6 @@ type CalendarEvent struct {
 	End       time.Time `json:"end"`
 }
 
-// Calendar returns a term's weekly calendar of scheduled, registered, and
-// conflicting meetings. Dates are a representative week, not term dates.
 func (c *Client) Calendar(ctx context.Context, term string) ([]CalendarEvent, error) {
 	if err := c.SelectTerm(ctx, term); err != nil {
 		return nil, err

@@ -11,8 +11,7 @@ import (
 
 const (
 	defaultLimit = 30
-	// organizerFetchSize is the smallest page fetched under an organizer
-	// filter, which discards most results.
+
 	organizerFetchSize = 30
 )
 
@@ -104,8 +103,6 @@ func (c *Client) searchByCursor(ctx context.Context, q query) (Page[abstractionW
 	}
 }
 
-// Handshake exposes no posting timestamp and rejects every posting sort,
-// but IDs are monotonic, so this is the order in which results were posted.
 func (c *Client) searchByNewestID(ctx context.Context, q query) (Page[abstractionWire], error) {
 	before := int64(0)
 	if q.after != "" {
@@ -117,7 +114,7 @@ func (c *Client) searchByNewestID(ctx context.Context, q query) (Page[abstractio
 	items := []abstractionWire{}
 	after := ""
 	for {
-		// The schema's complexity limit rejects this projection at 100 records.
+
 		connection, err := c.fetchAbstractions(ctx, q.params, 50, after)
 		if err != nil {
 			return Page[abstractionWire]{}, err
@@ -150,8 +147,7 @@ func (c *Client) searchByNewestID(ctx context.Context, q query) (Page[abstractio
 }
 
 func (c *Client) fetchAbstractions(ctx context.Context, params map[string]any, first int, after string) (abstractionConnectionWire, error) {
-	// The student site requests three employer previews per search card. Matching
-	// that limit also keeps large pages under GraphQL's complexity cap.
+
 	variables := map[string]any{"params": params, "first": first, "maxEmployersCount": 3}
 	if after != "" {
 		variables["after"] = after
@@ -163,7 +159,6 @@ func (c *Client) fetchAbstractions(ctx context.Context, params map[string]any, f
 	return response.Connection, err
 }
 
-// matchesOrganizer reports whether the organizer filter accepts a result.
 func (c *Client) matchesOrganizer(ctx context.Context, node abstractionWire, q query) (bool, error) {
 	if q.organizer == "" || cardNamesOrganizer(node, q.organizer) {
 		return true, nil
@@ -177,8 +172,6 @@ func (c *Client) matchesOrganizer(ctx context.Context, node abstractionWire, q q
 	return false, err
 }
 
-// cardNamesOrganizer checks what a search result already carries: its host
-// and employers.
 func cardNamesOrganizer(node abstractionWire, organizer string) bool {
 	if containsFold(node.Host.Name, organizer) {
 		return true
@@ -191,8 +184,6 @@ func cardNamesOrganizer(node abstractionWire, organizer string) bool {
 	return false
 }
 
-// fetchContacts requests a result's detail record, the only place its
-// contacts are listed.
 func (c *Client) fetchContacts(ctx context.Context, id, model string) ([]Contact, error) {
 	number, err := strconv.Atoi(id)
 	if err != nil {
@@ -289,8 +280,6 @@ func searchDate(value string) (string, error) {
 
 const sortPosted = "posted-desc"
 
-// serverSort is the order requested from Handshake. posted-desc has no
-// server equivalent: everything is read by date and reordered by ID here.
 func serverSort(value string) (string, error) {
 	switch normalizedSort(value) {
 	case "relevance":

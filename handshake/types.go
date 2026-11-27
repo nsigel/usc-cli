@@ -1,13 +1,11 @@
 package handshake
 
-// Category is a Handshake event-search category.
 type Category struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 	Slug string `json:"slug"`
 }
 
-// Organization identifies an event host or owner.
 type Organization struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
@@ -15,7 +13,6 @@ type Organization struct {
 	Logo string `json:"logo,omitempty"`
 }
 
-// Employer is an employer attached to an event or career fair.
 type Employer struct {
 	ID       string `json:"id"`
 	Name     string `json:"name"`
@@ -24,7 +21,6 @@ type Employer struct {
 	Location string `json:"location,omitempty"`
 }
 
-// Contact is an event organizer or contact.
 type Contact struct {
 	ID    string `json:"id"`
 	Name  string `json:"name"`
@@ -33,8 +29,6 @@ type Contact struct {
 	Photo string `json:"photo,omitempty"`
 }
 
-// EventSummary is one event-search result. Event returns the full record,
-// including its type and contacts.
 type EventSummary struct {
 	ID                  string       `json:"id"`
 	Name                string       `json:"name"`
@@ -54,7 +48,6 @@ type EventSummary struct {
 	URL                 string       `json:"url"`
 }
 
-// CareerFairSummary is one career-fair search result.
 type CareerFairSummary struct {
 	ID                  string       `json:"id"`
 	Name                string       `json:"name"`
@@ -73,7 +66,6 @@ type CareerFairSummary struct {
 	URL                 string       `json:"url"`
 }
 
-// Registration summarizes the current user's event registration state.
 type Registration struct {
 	Registered  bool `json:"registered"`
 	Registering bool `json:"registering"`
@@ -81,7 +73,6 @@ type Registration struct {
 	CheckedIn   bool `json:"checked_in"`
 }
 
-// Location is a normalized event or career-fair location.
 type Location struct {
 	Name      string   `json:"name"`
 	Building  string   `json:"building,omitempty"`
@@ -93,7 +84,6 @@ type Location struct {
 	Longitude *float64 `json:"longitude,omitempty"`
 }
 
-// EventDetail is the complete student-facing event record.
 type EventDetail struct {
 	ID                   string        `json:"id"`
 	Name                 string        `json:"name"`
@@ -125,7 +115,6 @@ type EventDetail struct {
 	URL                  string        `json:"url"`
 }
 
-// CareerFairSession is one component session of a career fair.
 type CareerFairSession struct {
 	ID               int    `json:"id"`
 	Name             string `json:"name"`
@@ -140,7 +129,6 @@ type CareerFairSession struct {
 	WaitlistEnabled  bool   `json:"waitlist_enabled"`
 }
 
-// CareerFairDetail is the complete student-facing career-fair record.
 type CareerFairDetail struct {
 	ID                int                 `json:"id"`
 	Name              string              `json:"name"`
@@ -172,22 +160,18 @@ type CareerFairDetail struct {
 	URL               string              `json:"url"`
 }
 
-// Search filters and orders an event or career-fair list. The zero value is
-// the first 30 results by relevance.
 type Search struct {
-	Categories     []string // names, slugs, or IDs from Categories
-	Organizer      string   // host, employer, or contact name or email
+	Categories     []string
+	Organizer      string
 	Keyword        string
-	Medium         string // all, virtual, or in-person
-	Date           string // all, today, next-10, next-30, or past-year
-	Sort           string // relevance, date, or posted-desc
+	Medium         string
+	Date           string
+	Sort           string
 	PostedBySchool bool
-	Limit          int    // 1-100; 0 means 30
-	After          string // NextCursor of the previous page
+	Limit          int
+	After          string
 }
 
-// Page is one result page. Pass NextCursor as Search.After, with the same
-// filters and sort, to read the next one.
 type Page[T any] struct {
 	Items      []T    `json:"items"`
 	HasMore    bool   `json:"has_more"`
@@ -196,8 +180,6 @@ type Page[T any] struct {
 	Sort       string `json:"sort"`
 }
 
-// CareerFairRegistration is the current user's attendance record for one
-// career-fair session.
 type CareerFairRegistration struct {
 	AttendeeID  int    `json:"attendee_id"`
 	SessionID   int    `json:"session_id"`

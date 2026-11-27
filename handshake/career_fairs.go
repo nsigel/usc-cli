@@ -67,8 +67,6 @@ type careerFairSessionWire struct {
 	WaitlistEnabled    bool   `json:"waitlist_enabled?"`
 }
 
-// careerFairPageWire covers both layouts of the career-fair page's embedded
-// data: in-person fairs nest it under "page", virtual fairs under "entities".
 type careerFairPageWire struct {
 	Page struct {
 		CareerFair careerFairWire `json:"career_fair"`
@@ -93,13 +91,11 @@ func (p careerFairPageWire) fair() (careerFairWire, []careerFairSessionWire) {
 	return p.Page.CareerFair, sessions
 }
 
-// CareerFairs returns one page of career fairs.
 func (c *Client) CareerFairs(ctx context.Context, search Search) (Page[CareerFairSummary], error) {
 	page, err := c.search(ctx, search, "CareerFair")
 	return convertPage(page, normalizeCareerFairSummary), err
 }
 
-// CareerFair returns the complete student-facing career-fair page by ID.
 func (c *Client) CareerFair(ctx context.Context, id int) (CareerFairDetail, error) {
 	if id < 1 {
 		return CareerFairDetail{}, errors.New("career fair ID must be a positive integer")

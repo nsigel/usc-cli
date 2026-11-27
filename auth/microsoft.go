@@ -18,14 +18,12 @@ import (
 )
 
 func (a *authenticator) continueMicrosoft(ctx context.Context, current *page) (*page, error) {
-	// Prefer signed redirect parameters over inferred forms; Microsoft uses
-	// both shapes, but only the former preserves every SAML field verbatim.
+
 	if form, ok := microsoftRedirectForm(current); ok {
 		return a.submit(ctx, current, form)
 	}
 	if current.URL.Path == "/login.srf" {
-		// Microsoft's login.srf branch does not expose a usable continuation until
-		// login.live.com initializes its account state.
+
 		bootstrap, err := a.get(ctx, "https://login.live.com/Me.htm", current.URL)
 		if err != nil {
 			return nil, err
@@ -80,13 +78,10 @@ func microsoftForm(page *page, remembered map[string]string) (form, bool, error)
 	return form{Method: http.MethodPost, Action: action, Fields: fields}, true, nil
 }
 
-// microsoftSSOState is the continuation state every Microsoft form posts back.
 type microsoftSSOState struct {
 	ctx, requestID, flowToken, canary, pageTime field
 }
 
-// microsoftState collects the state from this page, falling back to values
-// remembered from earlier pages, which later pages often omit.
 func microsoftState(page *page, thisPage, remembered map[string]string) (microsoftSSOState, error) {
 	known := make(map[string]string, len(remembered))
 	maps.Copy(known, remembered)
@@ -100,7 +95,7 @@ func microsoftState(page *page, thisPage, remembered map[string]string) (microso
 		requestID: field{Name: "hpgrequestid", Value: firstValue(known, "sessionId", "hpgrequestid")},
 		flowToken: field{Name: "flowToken", Value: firstValue(known, "sFT", "flowToken")},
 		canary:    field{Name: "canary", Value: known["canary"]},
-		// Microsoft uses i19 for client-side timing telemetry, not SSO state.
+
 		pageTime: field{Name: "i19", Value: cmp.Or(known["i19"], "0")},
 	}
 	var missing []string
@@ -132,8 +127,7 @@ func microsoftRedirectForm(page *page) (form, bool) {
 		if !ok {
 			return form{}, false
 		}
-		// BssoInterrupt_Core HTML-unescapes names and values before creating
-		// hidden inputs. Sending the encoded config changes signed SAML data.
+
 		fields = append(fields, field{
 			Name:  html.UnescapeString(name),
 			Value: html.UnescapeString(value),
@@ -183,8 +177,7 @@ func microsoftServerData(body []byte) map[string]any {
 }
 
 func configAssignment(body []byte, marker string) map[string]any {
-	// Microsoft can emit several telemetry and runtime configs with the same
-	// marker. Prefer the object carrying actual authentication state.
+
 	var best map[string]any
 	bestScore := -1
 	for offset := 0; offset < len(body); {
@@ -298,8 +291,6 @@ func firstValue(values map[string]string, names ...string) string {
 	return ""
 }
 
-// microsoftStep advances any Microsoft page. Only the sign-in page receives
-// credentials; the rest carry Microsoft's own state forward.
 func (a *authenticator) microsoftStep(ctx context.Context, current *page, credentials Credentials) (*page, error) {
 	if needsMicrosoftReload(current) {
 		return a.reloadMicrosoft(ctx, current)
@@ -314,16 +305,14 @@ func (a *authenticator) microsoftStep(ctx context.Context, current *page, creden
 	return a.continueMicrosoft(ctx, current)
 }
 
-// submitMicrosoftSignIn is the only place the username and password are
-// sent: USC accounts sign in on Microsoft's own page, which posts both at once.
 func (a *authenticator) submitMicrosoftSignIn(ctx context.Context, current *page, config map[string]any, credentials Credentials) (*page, error) {
-	if !credentials.Complete() {
+	if credentials.Username == "" || credentials.Password == "" {
 		return nil, ErrCredentialsRequired
 	}
 	if a.passwordSent {
-		// Microsoft answers a failed password with the sign-in page again.
+
 		code, _ := config["sErrorCode"].(string)
-		if code == "50126" {
+		if code == "50126" || code == "50034" {
 			return nil, ErrPasswordRejected
 		}
 		return nil, fmt.Errorf("microsoft sign-in failed (AADSTS%s)", code)
@@ -339,7 +328,7 @@ func (a *authenticator) submitMicrosoftSignIn(ctx context.Context, current *page
 	}
 	a.passwordSent = true
 	username := microsoftUsername(credentials.Username)
-	// The fields mirror the browser's post, empty ones included.
+
 	return a.submit(ctx, current, form{Method: http.MethodPost, Action: destination.String(), Fields: []field{
 		{Name: "i13", Value: "0"},
 		{Name: "login", Value: username},
@@ -354,8 +343,6 @@ func (a *authenticator) submitMicrosoftSignIn(ctx context.Context, current *page
 	}})
 }
 
-// microsoftUsername is the account name Microsoft expects: a NetID alone
-// becomes the NetID's usc.edu address.
 func microsoftUsername(username string) string {
 	if strings.Contains(username, "@") {
 		return username
@@ -363,12 +350,8 @@ func microsoftUsername(username string) string {
 	return username + "@usc.edu"
 }
 
-// beginExternalVerification picks USC Duo, which Microsoft runs as an
-// external authentication method, on Microsoft's verification page.
 func (a *authenticator) beginExternalVerification(ctx context.Context, current *page, config map[string]any, credentials Credentials) (*page, error) {
-	if credentials.BypassCode == "" {
-		return nil, ErrCredentialsRequired
-	}
+
 	if a.duoStarted {
 		return nil, errors.New("microsoft asked for verification again after Duo")
 	}
@@ -394,8 +377,6 @@ func (a *authenticator) beginExternalVerification(ctx context.Context, current *
 	}})
 }
 
-// configStrings is a page config's own top-level values, which take
-// precedence over anything remembered from earlier pages.
 func configStrings(config map[string]any) map[string]string {
 	values := make(map[string]string, len(config))
 	for key, value := range config {

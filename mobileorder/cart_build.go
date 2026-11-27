@@ -7,17 +7,13 @@ import (
 	"strings"
 )
 
-// CartSelection supplies explicit choices while menu metadata supplies section
-// and option IDs. Repeating an item ID adds another unit with the same choices.
 type CartSelection struct {
 	Cart    Cart
 	ItemIDs []int
-	// Choices are ITEM_ID:VALUE_ID. Combo child items use their own item IDs.
+
 	Choices []string
 }
 
-// BuildCart resolves item selections against one current menu. It does not quote
-// or submit the cart and never selects default modifier values.
 func (c *Client) BuildCart(ctx context.Context, s CartSelection) (*Cart, error) {
 	cart := s.Cart
 	if cart.PaymentMethod == nil || cart.Date == nil || cart.Time == nil || len(s.ItemIDs) == 0 {

@@ -10,9 +10,6 @@ import (
 	"golang.org/x/net/html"
 )
 
-// Checkout is the pending registration WebReg will submit for a term:
-// scheduled, unregistered sections to add and unscheduled, registered
-// sections to drop, grouped as WebReg presents them.
 type Checkout struct {
 	Term    string          `json:"term"`
 	Ready   bool            `json:"ready"`
@@ -20,15 +17,12 @@ type Checkout struct {
 	Groups  []CheckoutGroup `json:"groups"`
 }
 
-// CheckoutGroup is one checkout heading, e.g. Action "REGISTER", and its courses.
 type CheckoutGroup struct {
 	Action  string   `json:"action"`
 	Heading string   `json:"heading"`
 	Courses []Course `json:"courses"`
 }
 
-// CheckoutResult is WebReg's registration response. WebReg does not process
-// partial registrations: on failure nothing was changed.
 type CheckoutResult struct {
 	Term      string   `json:"term"`
 	Succeeded bool     `json:"succeeded"`
@@ -36,7 +30,6 @@ type CheckoutResult struct {
 	Messages  []string `json:"messages,omitempty"`
 }
 
-// Checkout previews the changes Submit would send. It changes nothing.
 func (c *Client) Checkout(ctx context.Context, term string) (*Checkout, error) {
 	checkout, _, err := c.checkout(ctx, term)
 	return checkout, err
@@ -92,8 +85,6 @@ func (c *Client) checkout(ctx context.Context, term string) (*Checkout, url.Valu
 	return checkout, values, nil
 }
 
-// checkoutAction extracts the uppercase verb from headings such as
-// "You are about to REGISTER for the following sections:".
 func checkoutAction(heading string) string {
 	for _, word := range strings.Fields(heading) {
 		word = strings.Trim(word, ":,.")
@@ -104,9 +95,6 @@ func checkoutAction(heading string) string {
 	return ""
 }
 
-// Submit registers and drops the sections Checkout lists. This is the same
-// irreversible action as WebReg's Submit button. Callers should show the
-// preview from Checkout and obtain the student's confirmation first.
 func (c *Client) Submit(ctx context.Context, term string) (*CheckoutResult, error) {
 	checkout, form, err := c.checkout(ctx, term)
 	if err != nil {

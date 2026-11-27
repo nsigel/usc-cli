@@ -6,14 +6,12 @@ import (
 	"github.com/nsigel/usc-cli/site"
 )
 
-// Location is a dining location available to the signed-in account.
 type Location struct {
 	ID           int    `json:"id"`
 	Name         string `json:"name"`
 	PickupStatus string `json:"pickup_status"`
 }
 
-// Locations returns the current campus dining locations.
 func (c *Client) Locations(ctx context.Context) ([]Location, error) {
 	if c.token == "" {
 		return nil, auth.ForSite(site.MobileOrder, auth.ErrCredentialsRequired)

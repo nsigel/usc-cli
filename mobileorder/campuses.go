@@ -5,7 +5,6 @@ import (
 	"fmt"
 )
 
-// Campus describes a campus in the Transact directory.
 type Campus struct {
 	ID       int    `json:"id"`
 	Name     string `json:"name"`
@@ -20,10 +19,8 @@ type campusWire struct {
 	Timezone string `json:"timezone"`
 }
 
-// Campuses returns the public campus directory.
 func (c *Client) Campuses(ctx context.Context) ([]Campus, error) { return c.campuses(ctx) }
 
-// USC returns USC Campus Dining's directory entry.
 func (c *Client) USC(ctx context.Context) (*Campus, error) {
 	campuses, err := c.Campuses(ctx)
 	if err != nil {

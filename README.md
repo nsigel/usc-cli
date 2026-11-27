@@ -27,10 +27,10 @@ go install github.com/nsigel/usc-cli/cmd/usc@latest
 ## Sign in
 
 ```sh
-usc auth login
+usc auth login --web
 ```
 
-It asks for your NetID, password, and a [Duo bypass code](https://account.usc.edu/2fa/duo-bypass-code), and saves them on your machine (`0600`). Every later command signs itself in. For scripts and CI, set `USC_USERNAME`, `USC_PASSWORD`, and `USC_DUO_BYPASS` instead. Details: [Signing in](https://usc.sh/docs/auth/).
+Open the printed `url` and sign in with your NetID, password, and Duo. Later commands sign in on their own. For scripts and CI, set `USC_USERNAME`, `USC_PASSWORD`, and `USC_DUO_TOTP_SECRET` or `USC_DUO_BYPASS` instead. Details: [Signing in](https://usc.sh/docs/auth/).
 
 ## Give your agent the skill
 

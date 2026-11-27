@@ -31,8 +31,6 @@ func (w attendeeWire) registration() CareerFairRegistration {
 		SessionName: w.Attendee.AttendableName, Registered: w.Attendee.Registered, Waitlisted: w.Attendee.Waitlisted}
 }
 
-// RegisterCareerFairSession registers the current user for a career-fair
-// session, or waitlists them. Session IDs come from CareerFair.
 func (c *Client) RegisterCareerFairSession(ctx context.Context, sessionID int) (CareerFairRegistration, error) {
 	label := "register for career fair session " + strconv.Itoa(sessionID)
 	var result attendeeWire
@@ -46,11 +44,9 @@ func (c *Client) RegisterCareerFairSession(ctx context.Context, sessionID int) (
 	return result.registration(), nil
 }
 
-// CancelCareerFairSession cancels the current user's registration or waitlist
-// spot for a career-fair session. Cancelling an unregistered session succeeds.
 func (c *Client) CancelCareerFairSession(ctx context.Context, sessionID int) (CareerFairRegistration, error) {
 	label := "cancel career fair session " + strconv.Itoa(sessionID)
-	var results map[string]attendeeWire // keyed by attendee ID
+	var results map[string]attendeeWire
 	path := "/stu/career_fair_sessions/attendees?" + url.Values{"attendable_ids[]": {strconv.Itoa(sessionID)}}.Encode()
 	if err := c.changeAttendance(ctx, http.MethodDelete, path, nil, label, &results); err != nil {
 		return CareerFairRegistration{}, err
@@ -81,7 +77,6 @@ func (c *Client) changeAttendance(ctx context.Context, method, path string, payl
 	return nil
 }
 
-// csrfToken reads Rails' token from a student page; /stu/events is one that has it.
 func (c *Client) csrfToken(ctx context.Context) (string, error) {
 	page, err := c.getHTML(ctx, "/stu/events", "CSRF token")
 	if err != nil {

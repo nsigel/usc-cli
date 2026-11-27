@@ -11,15 +11,12 @@ import (
 	"golang.org/x/net/html"
 )
 
-// Term is a registration term WebReg offers.
 type Term struct {
 	Code   string `json:"code"`
 	Name   string `json:"name"`
 	Active bool   `json:"active"`
 }
 
-// Terms lists the terms open in WebReg. Active marks the session's current
-// term, if one has been selected.
 func (c *Client) Terms(ctx context.Context) ([]Term, error) {
 	data, err := c.page(ctx, "/Terms", "")
 	if err != nil {
@@ -43,19 +40,16 @@ func (c *Client) Terms(ctx context.Context) ([]Term, error) {
 	return terms, nil
 }
 
-// School groups the programs (subject codes) WebReg lists under a school.
 type School struct {
 	Name     string    `json:"name"`
 	Programs []Program `json:"programs"`
 }
 
-// Program is a subject such as BUAD that can be passed to Courses.
 type Program struct {
 	Code string `json:"code"`
 	Name string `json:"name"`
 }
 
-// Programs lists a term's schools and their programs.
 func (c *Client) Programs(ctx context.Context, term string) ([]School, error) {
 	if err := c.SelectTerm(ctx, term); err != nil {
 		return nil, err
@@ -87,17 +81,13 @@ func (c *Client) Programs(ctx context.Context, term string) ([]School, error) {
 	return schools, nil
 }
 
-// CourseQuery selects WebReg catalog courses. Set exactly one field.
 type CourseQuery struct {
-	Program string // subject code, e.g. BUAD
-	Course  string // course code, e.g. BUAD-302
+	Program string
+	Course  string
 }
 
 const maxCoursePages = 40
 
-// Courses lists a term's courses for a program or a single course code,
-// following WebReg's pagination. Each section reports whether it is already
-// in the course bin.
 func (c *Client) Courses(ctx context.Context, term string, query CourseQuery) ([]Course, error) {
 	values := url.Values{}
 	switch {

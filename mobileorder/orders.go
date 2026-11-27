@@ -7,7 +7,6 @@ import (
 	"strconv"
 )
 
-// Order includes fulfillment status and receipt data without the account envelope.
 type Order struct {
 	ID         int             `json:"id"`
 	LocationID int             `json:"location_id"`
@@ -52,7 +51,6 @@ func (c *Client) Orders(ctx context.Context, pending bool) ([]Order, error) {
 	return out, nil
 }
 
-// OrderProgress is a staged checkout result. Only stage "success" means completed checkout.
 type OrderProgress struct {
 	ID      int    `json:"id"`
 	Stage   string `json:"stage"`
@@ -64,7 +62,6 @@ type progressWire struct {
 	Message string `json:"order_status_message"`
 }
 
-// ContinueOrder advances/checks an already staged purchase; it may process payment.
 func (c *Client) ContinueOrder(ctx context.Context, id int) (*OrderProgress, error) {
 	if id <= 0 {
 		return nil, errors.New("mobileorder: order ID must be positive")
@@ -79,7 +76,6 @@ func (c *Client) ContinueOrder(ctx context.Context, id int) (*OrderProgress, err
 	return &OrderProgress{r.ID, r.Stage, r.Message}, nil
 }
 
-// Acknowledgement confirms an action accepted by the API.
 type Acknowledgement struct {
 	Accepted bool `json:"accepted"`
 }
@@ -95,7 +91,6 @@ func (c *Client) CancelOrder(ctx context.Context, id int) (*Acknowledgement, err
 	return &Acknowledgement{true}, nil
 }
 
-// OutcomeUnknown means a purchase may have been accepted. Never automatically resubmit.
 type OutcomeUnknown struct{ ID int }
 
 func (e *OutcomeUnknown) Error() string {
@@ -103,7 +98,6 @@ func (e *OutcomeUnknown) Error() string {
 }
 func (e *OutcomeUnknown) ErrorCode() string { return "mobileorder_order_unknown" }
 
-// CheckInOrder announces arrival for a selected order using its check-in barcode.
 func (c *Client) CheckInOrder(ctx context.Context, id int, barcode string) (*Acknowledgement, error) {
 	if id <= 0 || barcode == "" {
 		return nil, errors.New("mobileorder: order ID and check-in barcode are required")

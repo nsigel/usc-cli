@@ -21,8 +21,6 @@ func lines(node *html.Node) []string {
 	return result
 }
 
-// hidden reports an inline display:none, which WebReg uses to switch between
-// pre-rendered course-bin states.
 func hidden(node *html.Node) bool {
 	style := strings.ReplaceAll(strings.ToLower(dom.Attr(node, "style")), " ", "")
 	return strings.Contains(style, "display:none")

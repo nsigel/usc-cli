@@ -5,13 +5,11 @@ import (
 	"fmt"
 )
 
-// TableOfContents is the normalized course-content tree.
 type TableOfContents struct {
 	CourseID int      `json:"course_id"`
 	Modules  []Module `json:"modules"`
 }
 
-// Module is a Brightspace content module and its nested child modules.
 type Module struct {
 	ID           int      `json:"id"`
 	Title        string   `json:"title"`
@@ -21,7 +19,6 @@ type Module struct {
 	Modules      []Module `json:"modules"`
 }
 
-// Topic is a Brightspace content topic.
 type Topic struct {
 	ID           int     `json:"id"`
 	Title        string  `json:"title"`
@@ -29,11 +26,10 @@ type Topic struct {
 	URL          string  `json:"url"`
 	DueDate      *string `json:"due_date"`
 	LastModified *string `json:"last_modified"`
-	// Module is the topic's module path, set only by Flatten.
+
 	Module string `json:"module,omitempty"`
 }
 
-// Content returns the full nested content table of contents for courseID.
 func (c *Client) Content(ctx context.Context, courseID int) (TableOfContents, error) {
 	var response struct {
 		Modules []contentModule `json:"Modules"`
@@ -45,8 +41,6 @@ func (c *Client) Content(ctx context.Context, courseID int) (TableOfContents, er
 	return TableOfContents{CourseID: courseID, Modules: normalizeModules(response.Modules)}, nil
 }
 
-// Flatten lists every topic in order, each labeled with its module path such
-// as "Week 1 > Readings".
 func (t TableOfContents) Flatten() []Topic {
 	return flattenTopics(t.Modules, "")
 }
@@ -67,7 +61,6 @@ func flattenTopics(modules []Module, parent string) []Topic {
 	return topics
 }
 
-// Topic returns a content topic by ID from courseID's table of contents.
 func (c *Client) Topic(ctx context.Context, courseID, topicID int) (Topic, error) {
 	toc, err := c.Content(ctx, courseID)
 	if err != nil {

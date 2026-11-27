@@ -12,9 +12,6 @@ import (
 	http "github.com/saucesteals/fhttp"
 )
 
-// A hold is LibCal's temporary claim on a slot while its checkout form is
-// open. The browser keeps the hold in page state and resends it on every
-// request; pendingBooking is that state.
 type pendingBooking struct {
 	ID              int      `json:"id"`
 	EID             int      `json:"eid"`

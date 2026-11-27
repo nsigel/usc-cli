@@ -9,7 +9,6 @@ import (
 	"strings"
 )
 
-// Announcement is a normalized Brightspace news item.
 type Announcement struct {
 	CourseID         int          `json:"course_id"`
 	CourseCode       *string      `json:"course_code"`
@@ -25,14 +24,12 @@ type Announcement struct {
 	Attachments      []Attachment `json:"attachments"`
 }
 
-// Attachment is an announcement attachment's metadata.
 type Attachment struct {
 	ID   int    `json:"id"`
 	Name string `json:"name"`
 	Size *int   `json:"size"`
 }
 
-// Announcements returns news items for courseID, optionally since an ISO-8601 time.
 func (c *Client) Announcements(ctx context.Context, courseID int, since string) ([]Announcement, error) {
 	query := url.Values{}
 	if since != "" {
@@ -58,22 +55,16 @@ func (c *Client) Announcements(ctx context.Context, courseID int, since string) 
 	return announcements, nil
 }
 
-// AnnouncementFeed is the announcements of every enrolled course. Courses
-// whose news could not be read, such as closed past courses, are listed in
-// Errors instead of failing the whole feed.
 type AnnouncementFeed struct {
 	Announcements []Announcement `json:"announcements"`
 	Errors        []CourseError  `json:"errors,omitempty"`
 }
 
-// CourseError is a course a multi-course read had to skip.
 type CourseError struct {
 	CourseID int    `json:"course_id"`
 	Error    string `json:"error"`
 }
 
-// AllAnnouncements returns the announcements of every course offering the
-// user is enrolled in, each labeled with its course code.
 func (c *Client) AllAnnouncements(ctx context.Context, since string) (AnnouncementFeed, error) {
 	courses, err := c.Courses(ctx)
 	if err != nil {

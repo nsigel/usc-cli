@@ -1,55 +1,23 @@
-## Layout
+- Put behavior and result types in library packages. CLI commands parse inputs,
+  call the library, and print its result.
+- Libraries receive credentials and session paths through `auth.Options`.
+  Only `cli` reads configuration paths and `USC_*` variables.
+- Keep wire types unexported and resource code in separate files.
+- Wrap authentication failures in `*auth.SiteError`; CLI action hints belong
+  in `cli.WriteError`.
+- Output JSON to stdout; errors go to stderr with exit code 1.
+  `usc skill` emits Markdown. Default to pretty JSON in terminals and compact
+  JSON in pipes; honor `--pretty` and `--compact`.
+- No command aliases or shorthand flags.
+- Require explicit booking slots, terms, and form answers.
+- Only `usc auth login` may prompt: in a terminal, or on its `--web` loopback page.
+- Never log credentials, activation secrets, or cookies.
+- Persist only `session.json`, `credentials.json`, and LibCal checkout recovery.
+- Verify with live tests; do not add unit tests.
 
-```text
-cmd/usc/             executable entrypoint
-auth/                USC SSO (Microsoft, Duo), the cookie session, and saved credentials
-brightspace/         Brightspace client, one file per resource
-handshake/           Handshake events and career fairs
-libcal/              Leavey Library availability and booking
-webreg/              Web Registration
-directory/           USC Student Directory
-classes/             public Schedule of Classes
-browser/             Chrome DevTools Protocol cookie sync
-site/                site names and their sign-in pages
-config/              the usc command's configuration file paths
-skill/               embedded agent skill definition
-cli/                 Cobra commands: parse flags, call a package, print JSON
-internal/dom/        HTML helpers shared by the clients
-examples/            runnable library examples
-web/                 usc.sh website and docs (Astro), with the install script
-```
+Before finishing, run:
 
-## Conventions
-
-- Every feature is a library call first. A command only parses flags, calls
-  the package, and prints exactly what it returns; neither logic nor output
-  shapes live in `cli`. Commands with nothing to return print a
-  one-field acknowledgement.
-- The library holds no ambient state. A program signs in with `auth.Options`
-  (explicit credentials or a credentials file) and owns its session,
-  which stays in memory unless it names a `SessionFile`. Only `cli`
-  knows about the usc configuration directory and the `USC_*` environment
-  variables (`signIn` in `cli/open.go`).
-- Each service package has a `client.go` (construction, `Open`, HTTP, errors)
-  and one file per resource or step. Wire types stay unexported.
-- Authentication failures are `*auth.SiteError`; do not add per-package
-  session errors. The library never names a `usc` command; `WriteError` in
-  `cli` adds the CLI's `action` hint.
-- Commands emit JSON to stdout, except `usc skill`, which emits raw Markdown.
-  JSON output is pretty in a terminal and single-line when piped; `--compact`
-  and `--pretty` override detection.
-- Errors are JSON on stderr and return exit code 1.
-- One name per command and one flag per input: no aliases or shorthand forms.
-- Never guess for the user: no default room, slot, term, or form answer.
-- Only `usc auth login` may prompt, and only on a terminal.
-- Never log passwords, bypass codes, or cookie values.
-- Local state is limited to `session.json`, `credentials.json`, and LibCal's
-  checkout recovery record. Do not add caches or histories.
-- No unit tests will be written for this repo. You must verify functionality using live tests.
-
-## Verify
-
-```bash
+```sh
 gofmt -l .
 go vet ./...
 go build ./cmd/usc

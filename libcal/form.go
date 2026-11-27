@@ -73,7 +73,7 @@ func parseBookingForm(raw string) (bookingForm, error) {
 func parseField(node *html.Node, label string) (bookingFormField, bool) {
 	field := bookingFormField{
 		Name: dom.Attr(node, "name"), Type: node.Data, Label: label,
-		// LibCal marks required controls with classes instead of the attribute.
+
 		Required: dom.HasAttr(node, "required") || dom.HasClass(node, "notempty") || dom.HasClass(node, "requirechecked"),
 	}
 	if field.Name == "" || dom.HasAttr(node, "disabled") {
@@ -154,7 +154,7 @@ func (form bookingForm) answer(field bookingFormField, details ReservationDetail
 		}
 		return "", nil
 	case "radio":
-		// As in a browser, the last checked button of a group wins.
+
 		selected := ""
 		for _, choice := range form.radios(field.Name) {
 			if provided && choice.Value == given || !provided && choice.Checked {

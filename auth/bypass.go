@@ -12,7 +12,6 @@ import (
 
 const bypassURL = "https://account.usc.edu/2fa/duo-bypass-code"
 
-// BypassCode contains a secret. Callers must not log it.
 type BypassCode struct {
 	Code             string `json:"code"`
 	Validity         string `json:"validity,omitempty"`
@@ -21,19 +20,12 @@ type BypassCode struct {
 
 var bypassCodePattern = regexp.MustCompile(`^[0-9]{9}$`)
 
-// CreateBypassCode requests a Duo bypass code from USC Account Services.
-// Issuance may invalidate earlier codes. It never prompts or retries issuance.
-// If CredentialsFile is set, the resolved credentials are saved with the new
-// code before session persistence. Otherwise the caller owns the returned code.
-// Validity is USC's description, not an independently verified expiration time.
-// A non-nil result may accompany a persistence error after issuance succeeded.
 func CreateBypassCode(ctx context.Context, options Options) (*BypassCode, error) {
 	session, err := OpenSession(options, CookiePolicy{})
 	if err != nil {
 		return nil, err
 	}
-	// Persist the issued credential before cookies: a session write failure
-	// must not discard a replacement for an invalidated bypass code.
+
 	page, err := session.authenticator.open(ctx, bypassURL, session.credentials, nil)
 	if err != nil {
 		forgetRejected(options.CredentialsFile, err, session.credentials)

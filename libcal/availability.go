@@ -13,8 +13,6 @@ type AvailabilityOptions struct {
 	MaxCapacity int
 }
 
-// Availability contains spaces whose returned intervals cover the exact requested
-// span. It neither holds a space nor guarantees a later booking will succeed.
 type Availability struct {
 	Start     time.Time         `json:"start"`
 	End       time.Time         `json:"end"`
@@ -42,7 +40,6 @@ func (c *Client) Availability(ctx context.Context, options AvailabilityOptions) 
 	return schedule.Availability(start, end)
 }
 
-// Availability also filters an already-fetched schedule without another request.
 func (s Schedule) Availability(start, end time.Time) (Availability, error) {
 	if err := validateInterval(start, end); err != nil {
 		return Availability{}, err

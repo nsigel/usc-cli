@@ -2,7 +2,6 @@ package mobileorder
 
 import "fmt"
 
-// Fulfillment identifies how an order is received.
 type Fulfillment string
 
 const (

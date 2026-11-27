@@ -8,8 +8,6 @@ import (
 	"github.com/nsigel/usc-cli/internal/dom"
 )
 
-// ResponseError describes a rejected LibCal HTTP request without exposing the
-// response body, which may contain user or session state.
 type ResponseError struct {
 	Operation string
 	Status    int
@@ -17,7 +15,6 @@ type ResponseError struct {
 	Cause     error
 }
 
-// Error provides a stable machine-readable code and a safe explanation.
 type Error struct {
 	Code    string
 	Message string
@@ -60,8 +57,6 @@ func libcalError(message string) *Error {
 	return &Error{Code: code, Message: message}
 }
 
-// mentionsSecret reports a server message that may echo session state and
-// must not be repeated to the caller.
 func mentionsSecret(message string) bool {
 	lower := strings.ToLower(message)
 	return strings.Contains(lower, "cookie") || strings.Contains(lower, "token") || strings.Contains(lower, "password")
