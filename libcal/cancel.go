@@ -15,7 +15,6 @@ import (
 	"golang.org/x/net/html"
 )
 
-// Booking is one reservation listed under a cancellation link.
 type Booking struct {
 	ID         int       `json:"id"`
 	Space      string    `json:"space"`
@@ -25,7 +24,6 @@ type Booking struct {
 	Cancelable bool      `json:"cancelable"`
 }
 
-// Cancellation is LibCal's answer to a canceled booking.
 type Cancellation struct {
 	BookingID     int  `json:"booking_id"`
 	Canceled      bool `json:"canceled"`
@@ -36,9 +34,6 @@ var errInvalidCancelLink = &Error{Code: "libcal_cancel_link_invalid", Message: "
 
 var cancelCodePattern = regexp.MustCompile(`^[A-Za-z0-9]+$`)
 
-// CancelCode returns the code in a LibCal cancellation link, such as
-// https://libcal.usc.edu/equipment/cancel?id=ab4448afc8ed from a
-// confirmation email. The code alone is the only key to its bookings.
 func CancelCode(link string) (string, error) {
 	parsed, err := url.Parse(strings.TrimSpace(link))
 	invalid := errors.New("expected a LibCal cancellation link such as https://libcal.usc.edu/equipment/cancel?id=CODE")
@@ -52,8 +47,6 @@ func CancelCode(link string) (string, error) {
 	return code, nil
 }
 
-// Bookings lists the reservations a cancellation code covers. Canceled and
-// past bookings stay listed but are not cancelable.
 func (c *Client) Bookings(ctx context.Context, code string) ([]Booking, error) {
 	if !cancelCodePattern.MatchString(code) {
 		return nil, errors.New("invalid LibCal cancellation code")
@@ -103,8 +96,6 @@ func textOf(node *html.Node, match func(*html.Node) bool) string {
 	return ""
 }
 
-// parseBookingTimes reads LibCal's "11:00am - 12:00pm, Monday, November 16,
-// 2026". An end at or before the start falls on the next day.
 func parseBookingTimes(value string) (time.Time, time.Time, error) {
 	invalid := errors.New("LibCal listed a booking with unreadable times")
 	span, day, ok := strings.Cut(value, ", ")
@@ -131,7 +122,6 @@ func parseBookingTimes(value string) (time.Time, time.Time, error) {
 	return start, end, nil
 }
 
-// Cancel cancels one booking listed under the cancellation code.
 func (c *Client) Cancel(ctx context.Context, code string, bookingID int) (Cancellation, error) {
 	if !cancelCodePattern.MatchString(code) {
 		return Cancellation{}, errors.New("invalid LibCal cancellation code")

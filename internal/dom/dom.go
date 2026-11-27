@@ -8,7 +8,7 @@ import (
 )
 
 func Parse(data []byte) *html.Node {
-	// html.Parse fails only when its reader does, which a byte slice cannot.
+
 	document, _ := html.Parse(bytes.NewReader(data))
 	return document
 }

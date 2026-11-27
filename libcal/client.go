@@ -1,6 +1,3 @@
-// Package libcal reads Leavey Library room availability from USC Libraries'
-// LibCal and books rooms. NewPublic is enough for availability; booking needs
-// a client from Open.
 package libcal
 
 import (
@@ -24,39 +21,29 @@ const (
 	ajaxAccept       = "application/json, text/javascript, */*;q=0.01"
 )
 
-// ErrAuthenticationRequired means LibCal's checkout needs a USC sign-in and
-// no complete credentials were available.
 var ErrAuthenticationRequired = &Error{
 	Code: "libcal_authentication_required", Message: "LibCal needs a USC sign-in",
 	Cause: &auth.SiteError{Site: site.LibCal, Err: auth.ErrCredentialsRequired},
 }
 
-// Doer is the HTTP surface the client needs. auth.Session satisfies it.
 type Doer interface {
 	Do(*http.Request) (*http.Response, error)
 }
 
-// Client reads and books Leavey Library spaces through LibCal.
 type Client struct {
 	http         Doer
 	authenticate func(context.Context, string, string) (*http.Response, error)
 	checkoutPath string
 }
 
-// New creates a LibCal client using the supplied HTTP client.
 func New(httpClient Doer) *Client {
 	return &Client{http: httpClient}
 }
 
-// NewPublic creates a client for unauthenticated availability and room reads.
 func NewPublic() *Client {
 	return New(&http.Client{Timeout: 30 * time.Second})
 }
 
-// Open returns a booking client. LibCal only issues its SSO redirect once a
-// booking is staged, so sign-in happens during Book, with the credentials in
-// options. With a SessionFile, checkout recovery state is kept beside it and
-// bookings from other processes using that file are serialized.
 func Open(options auth.Options) (*Client, error) {
 	session, err := auth.OpenSession(options, auth.CookiePolicy{
 		ResetDomains:    []string{"libcal.usc.edu", "libauth.com"},

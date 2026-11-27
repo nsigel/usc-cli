@@ -17,8 +17,6 @@ import (
 
 const sessionVersion = 1
 
-// StoredCookie is a session cookie plus the URL that set it, which is needed
-// to restore host-only and path-scoped cookies. Never log Cookie.Value.
 type StoredCookie struct {
 	SetBy  string      `json:"set_by"`
 	Cookie http.Cookie `json:"cookie"`
@@ -29,8 +27,6 @@ type savedSession struct {
 	Cookies []StoredCookie `json:"cookies"`
 }
 
-// LoadStoredCookies reads the cookies in a saved session file. A missing file
-// returns ErrSessionNotFound.
 func LoadStoredCookies(sessionFile string) ([]StoredCookie, error) {
 	session, err := readSession(sessionFile)
 	if errors.Is(err, os.ErrNotExist) {
@@ -54,8 +50,6 @@ func readSession(name string) (savedSession, error) {
 	return session, nil
 }
 
-// sessionJar keeps the response URL that set each cookie, which the standard
-// jar hides.
 type sessionJar struct {
 	inner   *cookiejar.Jar
 	entries map[string]StoredCookie
@@ -81,8 +75,7 @@ func (j *sessionJar) SetCookies(source *url.URL, cookies []*http.Cookie) {
 		}
 		key := cookieKey(source, cookie)
 		stored := cloneCookie(cookie)
-		// Max-Age is relative to the response, so store an absolute expiry;
-		// otherwise a reloaded cookie would start its lifetime over.
+
 		if stored.MaxAge > 0 {
 			stored.Expires = time.Now().Add(time.Duration(stored.MaxAge) * time.Second).UTC()
 			stored.MaxAge = 0
@@ -133,7 +126,6 @@ func defaultCookiePath(requestPath string) string {
 	return requestPath[:strings.LastIndex(requestPath, "/")]
 }
 
-// sourceWithoutQuery keeps signed SAML state in query strings off disk.
 func sourceWithoutQuery(source *url.URL) string {
 	clean := *source
 	clean.RawQuery = ""

@@ -11,7 +11,6 @@ import (
 	http "github.com/saucesteals/fhttp"
 )
 
-// Space is a reservable room or pod in Leavey Library.
 type Space struct {
 	ID           int      `json:"id"`
 	Name         string   `json:"name"`
@@ -23,8 +22,6 @@ type Space struct {
 	URL          string   `json:"url"`
 }
 
-// Spaces lists reservable Leavey spaces. A blank selector or "all" includes
-// group study rooms and pods; "rooms" excludes pods.
 func (c *Client) Spaces(ctx context.Context, selector Category) ([]Space, error) {
 	selected, err := selectCategories(selector)
 	if err != nil {
@@ -47,7 +44,6 @@ func (c *Client) Spaces(ctx context.Context, selector Category) ([]Space, error)
 	return spaces, nil
 }
 
-// Space returns one Leavey space by ID.
 func (c *Client) Space(ctx context.Context, id int) (Space, error) {
 	spaces, err := c.Spaces(ctx, CategoryAll)
 	if err != nil {
@@ -61,13 +57,6 @@ func (c *Client) Space(ctx context.Context, id int) (Space, error) {
 	return Space{}, fmt.Errorf("Leavey space %d was not found", id)
 }
 
-// A category page declares each space as a JavaScript object literal:
-//
-//	resources.push({
-//	    eid: 31391,
-//	    title: "LVL 201",
-//	    ...
-//	});
 var (
 	resourceBlock    = regexp.MustCompile(`(?s)resources\.push\(\{(.*?)\}\);`)
 	resourceProperty = regexp.MustCompile(`(?m)^\s*(\w+):\s*("(?:\\.|[^"\\])*"|-?\d+)`)

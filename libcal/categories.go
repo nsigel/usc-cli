@@ -4,7 +4,6 @@ import (
 	"fmt"
 )
 
-// Category identifies a Leavey LibCal reservation category.
 type Category string
 
 const (
@@ -16,7 +15,6 @@ const (
 	CategoryThird  Category = "lvl3"
 )
 
-// CategoryInfo describes one live Leavey reservation category.
 type CategoryInfo struct {
 	ID   int      `json:"id"`
 	Name string   `json:"name"`
@@ -36,7 +34,6 @@ var leaveyCategories = []categoryPage{
 	{CategoryInfo: CategoryInfo{ID: 49218, Name: "Leavey Study Pods", Slug: CategoryPods, Kind: "pod"}, Path: "/reserve/lvl-pods"},
 }
 
-// Categories returns USC's current Leavey LibCal categories in site order.
 func Categories() []CategoryInfo {
 	result := make([]CategoryInfo, len(leaveyCategories))
 	for i, category := range leaveyCategories {
@@ -68,8 +65,6 @@ func categoryOf(space Space) (categoryPage, error) {
 	return categoryPage{}, fmt.Errorf("unsupported Leavey reservation category %d", space.CategoryID)
 }
 
-// returnPath is the page LibCal's booking flow returns to: the category page
-// with its position in the Leavey category picker.
 func (c categoryPage) returnPath() string {
 	for index, candidate := range leaveyCategories {
 		if candidate.ID == c.ID {
@@ -79,7 +74,6 @@ func (c categoryPage) returnPath() string {
 	return c.Path
 }
 
-// defaultReferer is a reservation page, the origin of LibCal's own requests.
 const defaultReferer = baseURL + "/reserve/lvl2"
 
 func refererFor(space Space) string {

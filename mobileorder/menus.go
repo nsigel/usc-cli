@@ -8,7 +8,6 @@ import (
 	"strconv"
 )
 
-// MenuOptions selects explicit fulfillment and payment context.
 type MenuOptions struct {
 	LocationID    int
 	Fulfillment   Fulfillment
@@ -18,7 +17,6 @@ type MenuOptions struct {
 	Time          string
 }
 
-// Menu contains visible menu sections and item summaries; prices are cents.
 type Menu struct {
 	Status     string        `json:"status"`
 	LocationID int           `json:"location_id"`
@@ -37,7 +35,6 @@ type MenuItem struct {
 	Available bool   `json:"available"`
 }
 
-// FlatMenu preserves venue status and section context alongside item summaries.
 type FlatMenu struct {
 	Status     string         `json:"status"`
 	LocationID int            `json:"location_id"`
@@ -60,7 +57,6 @@ func (m Menu) Flatten() FlatMenu {
 	return result
 }
 
-// Item includes the selections needed to construct a cart item.
 type Item struct {
 	MenuItem
 	SectionID   int          `json:"section_id"`
@@ -83,7 +79,6 @@ type ItemValue struct {
 	ComboItemID int    `json:"combo_item_id,omitempty"`
 }
 
-// CheckoutOptions holds scheduling, tender rules and required checkout questions.
 type CheckoutOptions struct {
 	LocationID          int             `json:"location_id"`
 	Status              string          `json:"status"`

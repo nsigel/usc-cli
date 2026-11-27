@@ -7,13 +7,11 @@ import (
 	"strings"
 )
 
-// Grades is the normalized gradebook for a course.
 type Grades struct {
 	CourseID int     `json:"course_id"`
 	Grades   []Grade `json:"grades"`
 }
 
-// Grade joins a grade item with the current user's value for that item.
 type Grade struct {
 	ID               string   `json:"id"`
 	Name             string   `json:"name"`
@@ -29,7 +27,6 @@ type Grade struct {
 	LastModified     *string  `json:"last_modified"`
 }
 
-// Grades returns grade items joined with the current user's grade values.
 func (c *Client) Grades(ctx context.Context, courseID int) (Grades, error) {
 	var items []gradeItem
 	itemsPath := fmt.Sprintf("/d2l/api/le/%s/%d/grades/", leVersion, courseID)
@@ -63,7 +60,6 @@ func (c *Client) Grades(ctx context.Context, courseID int) (Grades, error) {
 	return Grades{CourseID: courseID, Grades: grades}, nil
 }
 
-// Graded returns only the items that have a score.
 func (g Grades) Graded() Grades {
 	graded := Grades{CourseID: g.CourseID, Grades: []Grade{}}
 	for _, grade := range g.Grades {
@@ -74,7 +70,6 @@ func (g Grades) Graded() Grades {
 	return graded
 }
 
-// identifier is a grade object ID, which Brightspace sends as a number or a string.
 type identifier json.RawMessage
 
 func (id *identifier) UnmarshalJSON(data []byte) error {

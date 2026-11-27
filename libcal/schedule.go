@@ -14,9 +14,6 @@ import (
 	http "github.com/saucesteals/fhttp"
 )
 
-// ScheduleOptions selects a date range and optional inventory filters.
-// EndDate is exclusive and defaults to the day after Date. No duration,
-// ranking, or room-type preference is applied.
 type ScheduleOptions struct {
 	Date        time.Time
 	EndDate     time.Time
@@ -25,9 +22,6 @@ type ScheduleOptions struct {
 	MaxCapacity int
 }
 
-// Schedule contains the server's intervals, including unavailable intervals.
-// Missing intervals are not evidence of availability. WindowEnd is preserved
-// per category. Callers choose continuous intervals of up to two hours.
 type Schedule struct {
 	StartDate  string             `json:"start_date"`
 	EndDate    string             `json:"end_date"`
@@ -54,8 +48,6 @@ type Interval struct {
 	checksum  string
 }
 
-// Schedule returns the live grid without synthesizing durations or choosing
-// a slot. Callers select a continuous span of up to two hours for Book.
 func (c *Client) Schedule(ctx context.Context, options ScheduleOptions) (Schedule, error) {
 	if options.MinCapacity < 0 || options.MaxCapacity < 0 ||
 		(options.MaxCapacity > 0 && options.MinCapacity > options.MaxCapacity) {
@@ -204,7 +196,6 @@ func pacific() (*time.Location, error) {
 	return location, nil
 }
 
-// ParseDate reads a day on USC's calendar: "today", "tomorrow", or YYYY-MM-DD.
 func ParseDate(value string) (time.Time, error) {
 	location, err := pacific()
 	if err != nil {

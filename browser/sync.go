@@ -6,7 +6,6 @@ import (
 	"github.com/nsigel/usc-cli/auth"
 )
 
-// SyncResult is the JSON-safe outcome of syncing cookies into a browser.
 type SyncResult struct {
 	CDP       string `json:"cdp"`
 	Attempted int    `json:"attempted"`
@@ -14,7 +13,6 @@ type SyncResult struct {
 	Skipped   int    `json:"skipped"`
 }
 
-// SyncCookies loads the saved session and injects cookies into Chrome over CDP.
 func SyncCookies(ctx context.Context, sessionFile, target string) (*SyncResult, error) {
 	stored, err := auth.LoadStoredCookies(sessionFile)
 	if err != nil {

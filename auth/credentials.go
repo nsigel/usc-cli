@@ -9,13 +9,13 @@ import (
 )
 
 type savedCredentials struct {
-	Username   string `json:"username"`
-	Password   string `json:"password"`
-	BypassCode string `json:"bypass_code"`
+	DuoDeviceID   string `json:"duo_device_id,omitempty"`
+	Username      string `json:"username"`
+	Password      string `json:"password"`
+	BypassCode    string `json:"bypass_code"`
+	DuoTOTPSecret string `json:"duo_totp_secret,omitempty"`
 }
 
-// LoadCredentials reads a credentials file written by SaveCredentials. A
-// missing file yields empty credentials.
 func LoadCredentials(file string) (Credentials, error) {
 	data, err := os.ReadFile(file)
 	if errors.Is(err, os.ErrNotExist) {
@@ -31,7 +31,6 @@ func LoadCredentials(file string) (Credentials, error) {
 	return Credentials(saved), nil
 }
 
-// SaveCredentials writes a credentials file readable only by its owner.
 func SaveCredentials(file string, credentials Credentials) error {
 	data, err := json.MarshalIndent(savedCredentials(credentials), "", "  ")
 	if err != nil {

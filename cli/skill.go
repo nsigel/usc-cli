@@ -27,7 +27,6 @@ func skillCommand() *cobra.Command {
 	}
 }
 
-// commandIndex lists each leaf command as "path args --flag : short".
 func commandIndex(cmd *cobra.Command) string {
 	if cmd.Hidden || cmd.Name() == "help" || cmd.Name() == "completion" {
 		return ""

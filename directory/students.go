@@ -10,13 +10,8 @@ import (
 	"strings"
 )
 
-// MaxResults is the most students one search returns. The directory stops
-// there; narrow the search to see the rest.
 const MaxResults = 100
 
-// StudentQuery filters a search: either Query, a basic search over name,
-// major, and email, or any of the other fields. Each matches as a substring.
-// The directory ignores Query alongside fields, so Students rejects both.
 type StudentQuery struct {
 	Query     string
 	FirstName string
@@ -27,8 +22,6 @@ type StudentQuery struct {
 	Phone     string
 }
 
-// Student is one directory entry. Employment fields are set only for
-// students who hold a USC job.
 type Student struct {
 	ID            string   `json:"id"`
 	Name          string   `json:"name"`
@@ -46,14 +39,11 @@ type Student struct {
 	Address       []string `json:"address,omitempty"`
 }
 
-// StudentResults is a search's matches. Truncated means the directory
-// stopped at MaxResults and more students may match.
 type StudentResults struct {
 	Students  []Student `json:"students"`
 	Truncated bool      `json:"truncated"`
 }
 
-// Students searches the student directory.
 func (c *Client) Students(ctx context.Context, query StudentQuery) (StudentResults, error) {
 	values := url.Values{}
 	if basic := strings.TrimSpace(query.Query); basic != "" {
@@ -88,7 +78,6 @@ func (c *Client) Students(ctx context.Context, query StudentQuery) (StudentResul
 	return StudentResults{Students: students, Truncated: len(students) >= MaxResults}, nil
 }
 
-// Student returns one student by the id a search returned.
 func (c *Client) Student(ctx context.Context, id string) (Student, error) {
 	id = strings.TrimSpace(id)
 	if id == "" || strings.Trim(strings.ToLower(id), "abcdefghijklmnopqrstuvwxyz0123456789") != "" {
@@ -108,16 +97,13 @@ func (c *Client) Student(ctx context.Context, id string) (Student, error) {
 	return entries[0].student(), nil
 }
 
-// entry is a directory LDAP record: every attribute is a list of values.
 type entry map[string][]string
 
-// decodeEntries reads the proxy's answer, which is null for no match, one
-// object for a single match, and an array otherwise.
 func decodeEntries(data []byte) ([]entry, error) {
 	data = bytes.TrimSpace(data)
 	switch {
 	case len(data) == 0:
-		// The directory sends nothing, not null, to requests it refuses.
+
 		return nil, &Error{Status: 200, Message: "empty response"}
 	case string(data) == "null":
 		return nil, nil
@@ -137,7 +123,6 @@ func decodeEntries(data []byte) ([]entry, error) {
 	return nil, &Error{Status: 200, Message: shortMessage(data)}
 }
 
-// value joins a multi-valued attribute the way the directory page does.
 func (e entry) value(name string) string {
 	return strings.Join(e[name], ", ")
 }
@@ -158,7 +143,7 @@ func (e entry) student() Student {
 		Division:      e.value("usccostcenternamelevel5"),
 		MailCode:      e.value("uscofficeaddressmailcode"),
 	}
-	// LDAP postal addresses separate lines with "$".
+
 	for _, address := range e["postaladdress"] {
 		for _, line := range strings.Split(address, "$") {
 			if line = strings.TrimSpace(line); line != "" {

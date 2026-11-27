@@ -10,8 +10,6 @@ import (
 	http "github.com/saucesteals/fhttp"
 )
 
-// Session sends requests with USC browser cookies. Do never reauthenticates;
-// Authenticate is the explicit SSO handoff.
 type Session struct {
 	authenticator *authenticator
 	options       Options
@@ -19,15 +17,11 @@ type Session struct {
 	policy        CookiePolicy
 }
 
-// CookiePolicy makes a session start over at some sites each time it is
-// opened. LibCal needs this: a stale checkout cookie breaks a new booking.
 type CookiePolicy struct {
-	ResetDomains    []string // Skip these domains' saved cookies; replace them on save.
-	PreserveCookies []string // Cookie names within ResetDomains to leave untouched on disk.
+	ResetDomains    []string
+	PreserveCookies []string
 }
 
-// OpenSession restores the cookies in options.SessionFile, if any. Nothing
-// is written until Authenticate succeeds.
 func OpenSession(options Options, policy CookiePolicy) (*Session, error) {
 	credentials, err := options.ResolveCredentials()
 	if err != nil {
@@ -37,6 +31,11 @@ func OpenSession(options Options, policy CookiePolicy) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
+	authenticator.requestDuoPasscode = options.RequestDuoPasscode
+	authenticator.duoPasscode = options.DuoPasscode
+	authenticator.duoPushDevice = options.DuoPushDevice
+	authenticator.duoSMSDevice = options.DuoSMSDevice
+	authenticator.duoPushStarted = options.DuoPushStarted
 	if options.SessionFile != "" {
 		if err := loadSession(options.SessionFile, authenticator.jar, policy.ResetDomains); err != nil {
 			return nil, err
@@ -45,14 +44,10 @@ func OpenSession(options Options, policy CookiePolicy) (*Session, error) {
 	return &Session{authenticator: authenticator, options: options, credentials: credentials, policy: policy}, nil
 }
 
-// Do implements the small HTTP contract used by site clients.
 func (s *Session) Do(request *http.Request) (*http.Response, error) {
 	return s.authenticator.client.Do(request)
 }
 
-// Authenticate opens target, completing USC SSO with the session's
-// credentials if its cookies are not enough, then saves the cookies. The
-// caller owns the final response body, including when saving returns an error.
 func (s *Session) Authenticate(ctx context.Context, target, referer string) (*http.Response, error) {
 	var refererURL *url.URL
 	if referer != "" {

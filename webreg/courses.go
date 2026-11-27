@@ -8,7 +8,6 @@ import (
 	"golang.org/x/net/html"
 )
 
-// Course is a WebReg course and the sections shown for it on one page.
 type Course struct {
 	Code          string    `json:"code"`
 	Title         string    `json:"title"`
@@ -17,13 +16,9 @@ type Course struct {
 	Sections      []Section `json:"sections"`
 }
 
-// Section is one WebReg section row. Fields that only one page shows are
-// omitted elsewhere: InCourseBin comes from catalog pages, CourseBin and
-// GradeOption from the course bin.
 type Section struct {
 	ID int `json:"id"`
-	// Clearance is WebReg's letter beside the section ID: "R" sections are
-	// open to registration and "D" sections need department clearance.
+
 	Clearance   string       `json:"clearance,omitempty"`
 	Session     string       `json:"session,omitempty"`
 	Type        string       `json:"type,omitempty"`
@@ -39,7 +34,6 @@ type Section struct {
 	GradeOption *GradeOption `json:"grade_option,omitempty"`
 }
 
-// Seats is the section's registration count as WebReg displays it.
 type Seats struct {
 	Registered int    `json:"registered"`
 	Capacity   int    `json:"capacity"`
@@ -47,17 +41,11 @@ type Seats struct {
 	Text       string `json:"text"`
 }
 
-// BinState is a course-bin section's schedule and registration state.
-// Checkout registers scheduled, unregistered sections and drops registered,
-// unscheduled ones.
 type BinState struct {
 	Scheduled  bool `json:"scheduled"`
 	Registered bool `json:"registered"`
 }
 
-// GradeOption is a course-bin section's grading basis and the choices WebReg
-// offers. ChangeRequest is true for registered sections, whose change is
-// submitted as a request instead of applied directly.
 type GradeOption struct {
 	Current       string        `json:"current,omitempty"`
 	Choices       []GradeChoice `json:"choices,omitempty"`
@@ -68,7 +56,6 @@ type GradeOption struct {
 	token string
 }
 
-// GradeChoice is a grade-option code such as L (letter) and its label.
 type GradeChoice struct {
 	Code string `json:"code"`
 	Name string `json:"name"`
@@ -84,9 +71,6 @@ func parseCourses(document *html.Node) []Course {
 	return courses
 }
 
-// parseCourse reads one course header and the body that follows it. The body
-// is the header's next element rather than a lookup by ID: checkout lists a
-// course once per action, with the same ID each time.
 func parseCourse(header *html.Node) (Course, bool) {
 	code := courseCode(header)
 	if code == "" {
@@ -111,7 +95,6 @@ func parseCourse(header *html.Node) (Course, bool) {
 	return course, true
 }
 
-// courseCode reads a header's code, joining suffixes such as "BUAD-200 x".
 func courseCode(header *html.Node) string {
 	code := text(dom.FindFirst(header, dom.Class("span", "crsID")))
 	return strings.ReplaceAll(strings.TrimSuffix(code, ":"), " ", "")
@@ -162,8 +145,7 @@ func parseSection(row *html.Node) (Section, bool) {
 		section.InCourseBin = &inBin
 	}
 	for _, note := range dom.FindAll(row, dom.Class("div", "dvSRtxt")) {
-		// Status notes have IDs and are toggled by the action bar; the
-		// remaining callouts are section notes such as fees or locations.
+
 		if dom.Attr(note, "id") == "" {
 			if content := text(note); content != "" {
 				section.Notes = append(section.Notes, content)

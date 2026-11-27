@@ -25,11 +25,10 @@ func New() *cobra.Command {
 	root.PersistentFlags().Bool("compact", false, "emit single-line JSON")
 	root.PersistentFlags().Bool("pretty", false, "pretty-print JSON")
 	root.MarkFlagsMutuallyExclusive("compact", "pretty")
-	root.AddCommand(authCommand(), bypassCommand(), browserCommand(), brightspaceCommand(), handshakeCommand(), libcalCommand(), webregCommand(), directoryCommand(), classesCommand(), mobileorderCommand(), skillCommand(), versionCommand())
+	root.AddCommand(duoCommand(), authCommand(), bypassCommand(), browserCommand(), brightspaceCommand(), handshakeCommand(), libcalCommand(), webregCommand(), directoryCommand(), classesCommand(), mobileorderCommand(), skillCommand(), versionCommand())
 	return root
 }
 
-// Cobra would otherwise print help and exit 0 for a mistyped subcommand.
 func group(use, short string, children ...*cobra.Command) *cobra.Command {
 	cmd := &cobra.Command{
 		Use: use, Short: short,
@@ -79,9 +78,12 @@ func writeJSON(cmd *cobra.Command, value any) error {
 }
 
 type errorInfo struct {
-	Error  string `json:"error"`
-	Code   string `json:"code,omitempty"`
-	Action string `json:"action,omitempty"`
+	Methods []auth.DuoMethod `json:"methods,omitempty"`
+	Error   string           `json:"error"`
+	Code    string           `json:"code,omitempty"`
+	Action  string           `json:"action,omitempty"`
+	Missing []string         `json:"missing,omitempty"`
+	URL     string           `json:"url,omitempty"`
 }
 
 func WriteError(cmd *cobra.Command, err error) error {
@@ -98,6 +100,19 @@ func WriteError(cmd *cobra.Command, err error) error {
 		info.Action = "usc libcal release"
 	case info.Code == "libcal_invalid_details":
 		info.Action = "usc libcal book --field NAME=VALUE"
+	}
+	var methods *auth.DuoMethodsRequired
+	if errors.As(err, &methods) {
+		info.Methods = methods.Methods
+	}
+	var required *auth.SignInRequired
+	if errors.As(err, &required) {
+		info.Missing = required.Missing
+		for _, field := range required.Missing {
+			if field == "USC_DUO_BYPASS" {
+				info.URL = "https://account.usc.edu/2fa/duo-bypass-code"
+			}
+		}
 	}
 	writer := cmd.ErrOrStderr()
 	return encodeJSON(writer, info, prettyOutput(cmd, writer))

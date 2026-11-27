@@ -1,4 +1,3 @@
-// Package classes reads the public USC Schedule of Classes.
 package classes
 
 import (
@@ -16,17 +15,14 @@ import (
 
 const courseURL = "https://classes.usc.edu/api/Courses/Course"
 
-// Client reads the public USC Schedule of Classes API.
 type Client struct {
 	http *http.Client
 }
 
-// New returns a public Schedule of Classes client.
 func New() *Client {
 	return &Client{http: &http.Client{Timeout: 30 * time.Second}}
 }
 
-// Course is a course and all of its scheduled sections for one term.
 type Course struct {
 	Code           string    `json:"code"`
 	Title          string    `json:"title"`
@@ -38,7 +34,6 @@ type Course struct {
 	Sections       []Section `json:"sections"`
 }
 
-// Section is one scheduled lecture, lab, quiz, or other class section.
 type Section struct {
 	ID              string       `json:"id"`
 	Type            string       `json:"type"`
@@ -55,7 +50,6 @@ type Section struct {
 	Syllabus        string       `json:"syllabus"`
 }
 
-// Meeting is one recurring meeting time for a section.
 type Meeting struct {
 	DayCode   string   `json:"day_code"`
 	Days      []string `json:"days"`
@@ -63,7 +57,6 @@ type Meeting struct {
 	EndTime   string   `json:"end_time"`
 }
 
-// Instructor is a section instructor.
 type Instructor struct {
 	FirstName string `json:"first_name"`
 	LastName  string `json:"last_name"`
@@ -107,7 +100,6 @@ type instructorResponse struct {
 	LastName  string `json:"lastName"`
 }
 
-// Course returns courseCode and all of its sections in termCode.
 func (c *Client) Course(ctx context.Context, termCode, courseCode string) (Course, error) {
 	termCode = strings.TrimSpace(termCode)
 	if len(termCode) != 5 || strings.Trim(termCode, "0123456789") != "" {

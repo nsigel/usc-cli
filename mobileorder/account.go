@@ -12,13 +12,11 @@ type userWire struct {
 	Token    string `json:"login_token"`
 }
 
-// Account identifies the signed-in user without exposing authentication tokens.
 type Account struct {
 	ID       int `json:"id"`
 	CampusID int `json:"campus_id"`
 }
 
-// Account verifies the current token and returns the account identity.
 func (c *Client) Account(ctx context.Context) (*Account, error) {
 	if c.token == "" {
 		return nil, auth.ForSite(site.MobileOrder, auth.ErrCredentialsRequired)

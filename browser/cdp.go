@@ -14,10 +14,8 @@ import (
 	"github.com/coder/websocket"
 )
 
-// ErrCDPUnavailable means the Chrome DevTools endpoint could not be reached.
 var ErrCDPUnavailable = errors.New("Chrome DevTools unavailable (start Chrome with --remote-debugging-port=9222)")
 
-// Client is a minimal Chrome DevTools Protocol client for Storage.setCookies.
 type Client struct {
 	ws       *websocket.Conn
 	endpoint string
@@ -45,8 +43,6 @@ type cdpError struct {
 	Message string `json:"message"`
 }
 
-// Connect dials a CDP target: an HTTP endpoint, whose browser websocket is
-// looked up, or a websocket debugger URL.
 func Connect(ctx context.Context, target string) (*Client, error) {
 	endpoint, err := ResolveTarget(target)
 	if err != nil {
@@ -66,12 +62,10 @@ func Connect(ctx context.Context, target string) (*Client, error) {
 	return &Client{ws: conn, endpoint: endpoint}, nil
 }
 
-// Endpoint returns the resolved CDP HTTP endpoint or websocket URL used to connect.
 func (c *Client) Endpoint() string {
 	return c.endpoint
 }
 
-// Close closes the websocket connection.
 func (c *Client) Close() error {
 	if c == nil || c.ws == nil {
 		return nil
@@ -79,9 +73,6 @@ func (c *Client) Close() error {
 	return c.ws.Close(websocket.StatusNormalClosure, "")
 }
 
-// SetCookies injects cookies via Storage.setCookies, falling back to one-by-one
-// when the batch call fails. Returns how many cookies were set successfully.
-// Cookie values are never logged.
 func (c *Client) SetCookies(ctx context.Context, cookies []CookieParam) (int, error) {
 	if len(cookies) == 0 {
 		return 0, nil

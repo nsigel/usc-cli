@@ -2,7 +2,6 @@ package mobileorder
 
 import "context"
 
-// PaymentMethod identifies an existing account payment method; it never contains a token.
 type PaymentMethod struct {
 	ID   int    `json:"id"`
 	Name string `json:"name"`

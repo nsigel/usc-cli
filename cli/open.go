@@ -23,12 +23,14 @@ func signIn() (auth.Options, error) {
 		return auth.Options{}, err
 	}
 	return auth.Options{
+		DuoPasscode:     os.Getenv("USC_DUO_PASSCODE"),
 		CredentialsFile: credentialsFile,
 		SessionFile:     sessionFile,
 		Credentials: auth.Credentials{
-			Username:   os.Getenv("USC_USERNAME"),
-			Password:   os.Getenv("USC_PASSWORD"),
-			BypassCode: os.Getenv("USC_DUO_BYPASS"),
+			Username:      os.Getenv("USC_USERNAME"),
+			Password:      os.Getenv("USC_PASSWORD"),
+			BypassCode:    os.Getenv("USC_DUO_BYPASS"),
+			DuoTOTPSecret: os.Getenv("USC_DUO_TOTP_SECRET"),
 		},
 	}, nil
 }

@@ -6,7 +6,6 @@ import (
 	"regexp"
 )
 
-// User is the signed-in Brightspace user.
 type User struct {
 	ID         string `json:"id"`
 	FirstName  string `json:"first_name"`
@@ -14,7 +13,6 @@ type User struct {
 	UniqueName string `json:"unique_name"`
 }
 
-// WhoAmI returns the authenticated Brightspace user.
 func (c *Client) WhoAmI(ctx context.Context) (User, error) {
 	var wire struct {
 		Identifier string `json:"Identifier"`
@@ -26,7 +24,6 @@ func (c *Client) WhoAmI(ctx context.Context) (User, error) {
 	return User{ID: wire.Identifier, FirstName: wire.FirstName, LastName: wire.LastName, UniqueName: wire.UniqueName}, err
 }
 
-// Course is a normalized Brightspace enrollment.
 type Course struct {
 	ID      int     `json:"id"`
 	Code    *string `json:"code"`
@@ -37,11 +34,8 @@ type Course struct {
 	RawName string  `json:"raw_name"`
 }
 
-// courseOffering is Brightspace's org-unit type for a class, as opposed to
-// the departments, semesters, and groups a student is also enrolled in.
 const courseOffering = "Course Offering"
 
-// Courses returns the classes the user is enrolled in.
 func (c *Client) Courses(ctx context.Context) ([]Course, error) {
 	enrollments, err := c.Enrollments(ctx)
 	if err != nil {
@@ -56,8 +50,6 @@ func (c *Client) Courses(ctx context.Context) ([]Course, error) {
 	return courses, nil
 }
 
-// Enrollments returns every org unit the user is enrolled in: classes and
-// also departments, semesters, and groups. Type tells them apart.
 func (c *Client) Enrollments(ctx context.Context) ([]Course, error) {
 	path := "/d2l/api/lp/" + lpVersion + "/enrollments/myenrollments/"
 	query := url.Values{"pageSize": {"100"}}
@@ -98,7 +90,6 @@ type enrollment struct {
 	} `json:"Access"`
 }
 
-// courseName splits names such as "20263_14721 BUAD-304: Organizational Behavior".
 var courseName = regexp.MustCompile(`^(\S+)\s+([A-Z]+-\d+[A-Z]*):\s+(.+)$`)
 
 func normalizeCourse(enrollment enrollment) Course {

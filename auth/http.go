@@ -19,9 +19,8 @@ const (
 	documentAccept = "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
 )
 
-// navigation is one browser request in the sign-in flow.
 type navigation struct {
-	method        string // GET when empty
+	method        string
 	url           string
 	body          []byte
 	contentType   string
@@ -29,7 +28,6 @@ type navigation struct {
 	duoTraceGroup string
 }
 
-// page is a response in the sign-in flow and the navigation that fetched it.
 type page struct {
 	URL     *url.URL
 	Status  int
@@ -43,8 +41,7 @@ func newAuthenticator() (*authenticator, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Microsoft and Duo select different flows from the TLS fingerprint. A
-	// generic Go client can be sent to browser-only challenges it cannot run.
+
 	transport, err := mimic.NewTransport(mimic.TransportOptions{
 		Version:  chromeVersion,
 		Brand:    mimic.BrandChrome,
@@ -69,14 +66,10 @@ func newAuthenticator() (*authenticator, error) {
 	}, nil
 }
 
-// neverFollowRedirects hands every redirect back to the SSO state machine,
-// which must see each identity-provider boundary to choose the next step.
 func neverFollowRedirects(*http.Request, []*http.Request) error {
 	return http.ErrUseLastResponse
 }
 
-// requireHTTPS is checked on every hop, since each can carry cookies or
-// signed SSO state.
 func requireHTTPS(target *url.URL) error {
 	if target.Scheme != "https" || target.Host == "" {
 		return fmt.Errorf("refusing non-HTTPS authentication URL %q", target.Redacted())
@@ -84,7 +77,6 @@ func requireHTTPS(target *url.URL) error {
 	return nil
 }
 
-// submit sends a form the way a browser would from the page that holds it.
 func (a *authenticator) submit(ctx context.Context, current *page, form form) (*page, error) {
 	destination, err := current.URL.Parse(form.Action)
 	if err != nil {
@@ -125,16 +117,12 @@ func (a *authenticator) do(ctx context.Context, nav navigation) (*page, error) {
 		return nil, err
 	}
 	if isMicrosoftHost(request.URL) {
-		// Microsoft spreads continuation tokens over multiple pages, and later
-		// pages frequently omit values that are still required.
+
 		a.rememberMicrosoft(data)
 	}
 	return &page{URL: request.URL, Status: response.StatusCode, Header: response.Header, Body: data, request: nav}, nil
 }
 
-// newRequest builds a navigation with the headers a browser sends. The
-// identity providers reject requests that do not look like the page that
-// produced them.
 func newRequest(ctx context.Context, nav navigation) (*http.Request, error) {
 	method := cmp.Or(nav.method, http.MethodGet)
 	request, err := http.NewRequestWithContext(ctx, method, nav.url, bytes.NewReader(nav.body))
@@ -156,9 +144,7 @@ func newRequest(ctx context.Context, nav navigation) (*http.Request, error) {
 	if nav.referer != nil {
 		sameOrigin := origin == nav.referer.Scheme+"://"+nav.referer.Host
 		origin = nav.referer.Scheme + "://" + nav.referer.Host
-		// Browsers apply strict-origin-when-cross-origin by default. Several SAML
-		// consumers reject a cross-site request whose Referer carries the
-		// identity provider's full state-bearing URL instead of only its origin.
+
 		if sameOrigin {
 			request.Header.Set("Referer", nav.referer.String())
 		} else {

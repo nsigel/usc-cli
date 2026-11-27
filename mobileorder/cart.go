@@ -9,8 +9,6 @@ import (
 	"strconv"
 )
 
-// Cart is an explicit purchase selection. Amounts are integer cents.
-// Repeat an item entry to request multiple units, as the Android app does.
 type Cart struct {
 	LocationID        int         `json:"location_id"`
 	Fulfillment       Fulfillment `json:"fulfillment"`
@@ -40,7 +38,6 @@ type CartValue struct {
 	ComboItems  []CartItem `json:"combo_items"`
 }
 
-// ReadCart parses a caller-owned input without storing a cart or history.
 func ReadCart(r io.Reader) (Cart, error) {
 	var cart Cart
 	d := json.NewDecoder(io.LimitReader(r, 1<<20))
@@ -96,7 +93,6 @@ func (c Cart) payload() map[string]any {
 	return map[string]any{"locationid": strconv.Itoa(c.LocationID), "retrieval_type": strconv.Itoa(code), "payment_method_default": strconv.Itoa(*c.PaymentMethod), "ct_id": strconv.Itoa(c.TenderID), "ct_id2": strconv.Itoa(c.SecondaryTenderID), "target_date": *c.Date, "target_time": *c.Time, "pickupspotid": strconv.Itoa(c.PickupSpotID), "special_comment": c.Comment, "checkout_select_choiceids": c.CheckoutChoices, "items": c.Items, "os_type": "1", "app_version": "2026.3.1", "app_bundle_name": "com.transact.mobileorder"}
 }
 
-// Quote contains server pricing and scheduling details. It does not place an order.
 type Quote struct {
 	Total int             `json:"total"`
 	Cart  json.RawMessage `json:"cart"`
@@ -125,8 +121,6 @@ func (c *Client) Quote(ctx context.Context, cart Cart) (*Quote, error) {
 	return &Quote{*price.Total, r.Cart, r.Date, r.Time}, nil
 }
 
-// PlaceOrder requotes and compares the exact expected total before submitting once.
-// A returned stage is not a payment success until it equals "success".
 func (c *Client) PlaceOrder(ctx context.Context, cart Cart, expectedTotal int) (*OrderProgress, error) {
 	if expectedTotal < 0 {
 		return nil, errors.New("mobileorder: expected total must be nonnegative")

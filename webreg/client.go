@@ -1,9 +1,3 @@
-// Package webreg is a client for USC Web Registration (webreg.usc.edu).
-//
-// WebReg is a server-rendered application: catalog, course bin, and checkout
-// data are parsed from its pages, while course-bin changes use its small
-// section API. The server keeps an active term per session, so every
-// term-scoped method selects its term before reading or changing state.
 package webreg
 
 import (
@@ -31,25 +25,18 @@ const (
 
 var errSessionInvalid = &auth.SiteError{Site: site.WebReg, Err: auth.ErrSessionInvalid}
 
-// Doer is the HTTP surface the client needs. auth.Session satisfies it.
 type Doer interface {
 	Do(*http.Request) (*http.Response, error)
 }
 
-// Client reads and changes WebReg state with an authenticated session. A
-// client is sequential: WebReg's active term is shared session state.
 type Client struct {
 	http Doer
 }
 
-// New creates a WebReg client from an authenticated HTTP client.
 func New(httpClient Doer) *Client {
 	return &Client{http: httpClient}
 }
 
-// Open signs in through USC SSO and returns an authenticated client. See
-// auth.Options for supplying credentials and keeping the session between
-// runs. It never prompts; authentication failures are *auth.SiteError values.
 func Open(ctx context.Context, options auth.Options) (*Client, error) {
 	session, err := auth.Open(ctx, site.WebReg, options)
 	if err != nil {
@@ -58,8 +45,6 @@ func Open(ctx context.Context, options auth.Options) (*Client, error) {
 	return New(session), nil
 }
 
-// Error describes a WebReg request the server rejected. Message is a short
-// server explanation when one was safe to include.
 type Error struct {
 	Operation string
 	Status    int
@@ -73,7 +58,6 @@ func (e *Error) Error() string {
 	return fmt.Sprintf("WebReg %s: HTTP %d", e.Operation, e.Status)
 }
 
-// SelectTerm makes term WebReg's active term for this session.
 func (c *Client) SelectTerm(ctx context.Context, term string) error {
 	if err := validTerm(term); err != nil {
 		return err
@@ -120,7 +104,6 @@ func (c *Client) page(ctx context.Context, path, referer string) ([]byte, error)
 	return nil, fmt.Errorf("WebReg GET %s: too many redirects", path)
 }
 
-// postForm submits a page's form the way a browser navigation does.
 func (c *Client) postForm(ctx context.Context, path string, form url.Values, referer string) ([]byte, error) {
 	return c.post(ctx, path, form, referer, map[string]string{
 		"Accept":       documentAccept,
@@ -128,7 +111,6 @@ func (c *Client) postForm(ctx context.Context, path string, form url.Values, ref
 	})
 }
 
-// postAJAX calls WebReg's section API the way its page scripts do.
 func (c *Client) postAJAX(ctx context.Context, path string, form url.Values, referer string) ([]byte, error) {
 	return c.post(ctx, path, form, referer, map[string]string{
 		"Accept":           "*/*",
@@ -199,8 +181,6 @@ func (c *Client) do(request *http.Request) (*http.Response, []byte, error) {
 	return response, data, nil
 }
 
-// landedOnSignIn catches a transport that followed redirects by itself: the
-// sign-in page then arrives as a 200, and only its URL gives it away.
 func landedOnSignIn(response *http.Response) bool {
 	return signInURL(response.Request.URL)
 }
@@ -216,8 +196,6 @@ func signInURL(location *url.URL) bool {
 	return strings.HasPrefix(path, "/auth/login") || path == "/signin-oidc"
 }
 
-// safeServerMessage returns a short server explanation, or nothing when the
-// body is a full page or may echo session state.
 func safeServerMessage(data []byte) string {
 	message := text(dom.Parse(data))
 	if len(data) > 2048 || len(message) > 300 {

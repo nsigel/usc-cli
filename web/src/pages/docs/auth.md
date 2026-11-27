@@ -1,79 +1,53 @@
 ---
 layout: ../../layouts/Docs.astro
 title: Signing in
-description: How usc signs in to USC through Microsoft and Duo, and where it keeps your session.
+description: Sign in once on a local page; later commands sign in on their own.
 ---
 
-One sign-in covers every site. `usc auth login` goes through USC's Microsoft sign-in and Duo, then saves your credentials so later commands can sign in again when the session expires. Only `usc auth login` ever prompts.
-
 ```sh
-usc auth login    # asks for NetID, password, and Duo bypass code
-usc auth status   # {"authenticated":true,"credentials_saved":true}
-usc auth logout   # deletes the session and the saved credentials
+usc auth login --web
 ```
 
-## Duo bypass code
+Open the printed `url` within ten minutes and sign in with your NetID,
+password, and Duo. When an agent runs this, it gives you the link, or opens it
+in its own browser for you to take control. Never paste your password or Duo
+codes into chat.
 
-`usc` can't approve a Duo push, so it uses a bypass code instead. Get one from the [USC Duo bypass code page](https://account.usc.edu/2fa/duo-bypass-code) and paste it when `usc auth login` asks.
+Sign-in adds a Duo device for USC CLI, so later commands sign in on their own.
 
-After signing in, create a replacement from the terminal:
-
-```sh
-usc bypass create
-```
-
-The command reuses the USC session or signs in with saved credentials, then
-saves the new code in `credentials.json`. JSON output contains `code`, USC's
-`validity` description, and `credentials_saved`. The code is a secret: do not
-send this output to logs or chat transcripts. Creating a code may invalidate
-previous codes, including copies on other devices. It does not schedule renewal
-or guarantee that future issuance will work without interactive verification.
-An existing `USC_DUO_BYPASS` environment variable still overrides the saved code;
-update or unset it after replacement.
-
-Library callers use `auth.CreateBypassCode(ctx, auth.Options)`. The call only
-persists credentials or cookies when their respective file paths are supplied.
-Without `CredentialsFile`, the caller must retain the returned code. A result
-can accompany a persistence error if USC already issued the code; retain that
-result instead of blindly retrying issuance.
-
-## What's saved
-
-Two files, readable only by you (`0600`):
-
-| File | Contents |
-| --- | --- |
-| `session.json` | Cookies for the signed-in session |
-| `credentials.json` | NetID, password, and Duo bypass code |
-
-They live in:
-
-| Platform | Directory |
-| --- | --- |
-| macOS | `~/Library/Application Support/usc/` |
-| Linux | `$XDG_CONFIG_HOME/usc/` or `~/.config/usc/` |
-| Windows | `%AppData%\usc\` |
-
-Set `USC_CONFIG_DIR` to use another directory.
-
-## Scripts and CI
-
-Environment variables override the saved credentials for any command, so a script can run without `usc auth login` and without saving anything:
+## Using a terminal
 
 ```sh
-USC_USERNAME=ttrojan USC_PASSWORD=... USC_DUO_BYPASS=123456789 usc brightspace courses
+usc auth login
 ```
 
-Outside a terminal, `usc auth login` reads these variables instead of prompting and says which ones are missing.
+Then rerun it with one of the methods it lists:
 
-## Rejected passwords and codes
+```sh
+usc auth login --push-device DEVICE_ID
+usc auth login --mobile-code
+usc auth login --sms-device DEVICE_ID
+```
 
-If USC rejects the password or Duo rejects the bypass code, the command stops after that one attempt and deletes the rejected value from `credentials.json`. The next `usc auth login` asks for a new one. Secrets are never retried automatically and are never accepted as command-line flags.
+`usc auth login --bypass` signs in with a
+[bypass code](https://account.usc.edu/2fa/duo-bypass-code) instead of adding a device.
 
-## Mobile ordering
+## Check or disconnect
 
-Mobile-order commands reuse USC SSO, then exchange its callback for a
-Transact token. That token stays in memory and is never printed. If sign-in
-requires fresh Duo credentials, run `usc auth login` again. Adding or changing
-payment cards is handled in the official app; `usc mobileorder payments`
-lists the methods already on the account.
+```sh
+usc auth status
+usc duo device delete DEVICE_ID
+usc auth logout
+```
+
+Logout removes local credentials and cookies but keeps the Duo device.
+
+## Where credentials live
+
+`credentials.json` and `session.json` are stored in:
+
+- macOS: `~/Library/Application Support/usc/`
+- Linux: `$XDG_CONFIG_HOME/usc/` or `~/.config/usc/`
+- Windows: `%AppData%\usc\`
+
+Keep this directory private. Set `USC_CONFIG_DIR` to choose another location.

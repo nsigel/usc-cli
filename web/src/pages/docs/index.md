@@ -8,13 +8,13 @@ description: Install the usc command, sign in once, and give your agent the skil
 
 ## With an agent
 
-Ask Claude Code, Codex, Grok, or any agent that can run shell commands:
+Tell an agent that can run commands and store credentials privately:
 
 ```text
 Set up the USC CLI for me: https://usc.sh/install.md
 ```
 
-The agent installs `usc` and adds the skill. To sign in, it never asks for your password in chat: it uses your agent's secure secret prompt if it has one, or asks you to run `usc auth login` in your own terminal.
+Your agent installs USC CLI and gives you a link to sign in. See [Signing in](/docs/auth/).
 
 ## By hand
 
@@ -39,10 +39,10 @@ On Windows without Go, download `usc_<version>_windows_amd64.exe` from the relea
 ### 2. Sign in
 
 ```sh
-usc auth login
+usc auth login --web
 ```
 
-It asks for your NetID, password, and a Duo bypass code, then saves them on your machine. Every later command signs itself in. See [Signing in](/docs/auth/).
+Open the printed `url` and sign in. See [Signing in](/docs/auth/).
 
 ### 3. Add the skill
 

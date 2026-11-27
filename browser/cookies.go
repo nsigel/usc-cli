@@ -8,8 +8,6 @@ import (
 	http "github.com/saucesteals/fhttp"
 )
 
-// CookieParam is the CDP Network.CookieParam subset used by Storage.setCookies.
-// Value is included for CDP only and must never be logged or printed.
 type CookieParam struct {
 	Name     string   `json:"name"`
 	Value    string   `json:"value"`
@@ -22,14 +20,11 @@ type CookieParam struct {
 	SameSite string   `json:"sameSite,omitempty"`
 }
 
-// CookieConversion holds CookieParams ready for CDP and how many were skipped.
 type CookieConversion struct {
 	Cookies []CookieParam
 	Skipped int
 }
 
-// CookiesToParams converts stored session cookies into CDP CookieParams.
-// Cookies with empty Name or Value are skipped. Cookie values are never logged.
 func CookiesToParams(stored []auth.StoredCookie) CookieConversion {
 	out := make([]CookieParam, 0, len(stored))
 	skipped := 0
@@ -67,13 +62,13 @@ func cookieToParam(entry auth.StoredCookie) (CookieParam, bool) {
 
 	hostPrefixed := strings.HasPrefix(c.Name, "__Host-")
 	if hostPrefixed {
-		// __Host- cookies must not carry Domain; force Secure and Path=/.
+
 		param.Secure = true
 		param.Path = "/"
 	} else if domain := strings.TrimSpace(c.Domain); domain != "" {
 		param.Domain = domain
 	} else {
-		// Host-only cookies often have empty Domain; CDP needs the hostname.
+
 		param.Domain = setBy.Hostname()
 	}
 

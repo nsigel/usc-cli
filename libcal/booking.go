@@ -12,10 +12,8 @@ import (
 	http "github.com/saucesteals/fhttp"
 )
 
-// bookingMethodID is LibCal's code for a booking made from the public page.
 const bookingMethodID = "11"
 
-// Selection identifies the exact space, start, and end to reserve.
 type Selection struct {
 	SpaceID int       `json:"space_id"`
 	Start   time.Time `json:"start"`
@@ -29,7 +27,6 @@ type availableSlot struct {
 	Checksum string
 }
 
-// Validate rejects invalid inputs and durations over two hours without requests.
 func (s Selection) Validate() error {
 	if s.SpaceID < 1 || s.Start.IsZero() || s.End.IsZero() {
 		return errors.New("an explicit space, start, and end are required")
@@ -54,14 +51,11 @@ func validateInterval(start, end time.Time) error {
 	return nil
 }
 
-// ReservationDetails are the caller's explicit answers to LibCal's checkout
-// form, keyed by field name. Book refuses to submit unless AcceptTerms is set.
 type ReservationDetails struct {
 	Fields      map[string]string
 	AcceptTerms bool
 }
 
-// Reservation is the confirmed LibCal booking returned after form submission.
 type Reservation struct {
 	Space       Space     `json:"space"`
 	Start       time.Time `json:"start"`
@@ -70,10 +64,6 @@ type Reservation struct {
 	ConfirmedAt time.Time `json:"confirmed_at"`
 }
 
-// Book reserves exactly the selected space, start, and end; it never
-// substitutes another room or time. A failed or interrupted booking releases
-// its temporary hold. ErrBookingUnknown means the outcome must be checked by
-// hand before booking again.
 func (c *Client) Book(ctx context.Context, selection Selection, details ReservationDetails) (reservation Reservation, resultErr error) {
 	if err := selection.Validate(); err != nil {
 		return Reservation{}, err
@@ -104,8 +94,6 @@ func (c *Client) Book(ctx context.Context, selection Selection, details Reservat
 	return Reservation{Space: slot.Space, Start: slot.Start, End: slot.End, State: "confirmed", ConfirmedAt: time.Now()}, nil
 }
 
-// slotStartingAt finds the selection's start in the live schedule. The end is
-// not checked here: LibCal validates it when the hold is extended.
 func (c *Client) slotStartingAt(ctx context.Context, selection Selection) (availableSlot, error) {
 	space, err := c.Space(ctx, selection.SpaceID)
 	if err != nil {
@@ -131,8 +119,6 @@ func (c *Client) slotStartingAt(ctx context.Context, selection Selection) (avail
 	return availableSlot{}, &Error{Code: "libcal_selected_slot_unavailable", Message: "the selected space and start are unavailable; refresh the schedule"}
 }
 
-// LibCal's own booking form gets the fields its browser submit handler
-// appends; the equipment checkout form already carries them.
 func (form bookingForm) submission(details ReservationDetails, slot availableSlot, hold pendingBooking) (url.Values, error) {
 	values, err := form.answers(details)
 	if err != nil || form.Action == equipmentCheckoutPath {
@@ -156,9 +142,6 @@ func (form bookingForm) submission(details ReservationDetails, slot availableSlo
 	return values, nil
 }
 
-// submit posts the reservation. The outcome is marked unknown before the
-// request leaves and cleared only by a definite answer, so a lost response
-// can never be retried blindly.
 func (c *Client) submit(ctx context.Context, form bookingForm, values url.Values, tx *checkout) error {
 	method, path, body, err := form.request(values)
 	if err != nil {
@@ -188,8 +171,6 @@ func (c *Client) submit(ctx context.Context, form bookingForm, values url.Values
 	return nil
 }
 
-// definiteRejection reports an answer that proves nothing was booked: a 4xx,
-// a redirect to sign-in, or LibCal's own error message.
 func definiteRejection(err error) bool {
 	var httpError *ResponseError
 	if errors.As(err, &httpError) {
@@ -199,8 +180,6 @@ func definiteRejection(err error) bool {
 	return errors.As(err, &rejection)
 }
 
-// request is the form's submission as a LibCal path and body. The form's
-// action must stay on LibCal.
 func (form bookingForm) request(values url.Values) (method, path string, body url.Values, err error) {
 	base, _ := url.Parse(baseURL)
 	target, err := base.Parse(form.Action)
@@ -227,8 +206,7 @@ func checkBookingResponse(data []byte) error {
 		if message, ok := wire["error"].(string); ok && message != "" {
 			return libcalError(message)
 		}
-		// LibCal's bookingSuccessCallback treats nonempty HTML without an
-		// error as success; confirmation wording varies by category.
+
 		if body, ok := wire["html"].(string); ok && strings.TrimSpace(body) != "" {
 			return nil
 		}

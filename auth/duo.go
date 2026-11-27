@@ -8,21 +8,19 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	http "github.com/saucesteals/fhttp"
 )
 
-// duoPrompt is the state Duo's prompt page hands to its browser client.
 type duoPrompt struct {
 	page       *page
 	base       string
 	authKey    string
-	traceGroup string // correlates the requests below; protocol state, not telemetry
+	traceGroup string
 }
 
-// duo completes Duo's prompt with a bypass code and returns the page Duo
-// sends the browser back to.
-func (a *authenticator) duo(ctx context.Context, current *page, bypassCode string) (*page, error) {
+func (a *authenticator) duo(ctx context.Context, current *page, credentials Credentials) (*page, error) {
 	prompt := duoPrompt{
 		page:       current,
 		base:       "https://" + current.URL.Host + current.URL.Path,
@@ -35,15 +33,49 @@ func (a *authenticator) duo(ctx context.Context, current *page, bypassCode strin
 	if err := a.duoPreflight(ctx, prompt); err != nil {
 		return nil, err
 	}
-	oidcCode, err := a.duoSubmitBypass(ctx, prompt, bypassCode)
+	if a.duoSMSDevice != "" {
+		code, err := a.duoSMS(ctx, prompt)
+		if err != nil {
+			return nil, err
+		}
+		return a.duoFinalize(ctx, prompt, code)
+	}
+	if a.duoPushDevice != "" {
+		code, err := a.duoPush(ctx, prompt)
+		if err != nil {
+			return nil, err
+		}
+		return a.duoFinalize(ctx, prompt, code)
+	}
+	factor, code := "bypass_code", credentials.BypassCode
+	if a.requestDuoPasscode != nil {
+		var err error
+		code, err = a.requestDuoPasscode()
+		if err != nil {
+			return nil, err
+		}
+		factor = "mobile_otp"
+	} else if a.duoPasscode != "" {
+		factor, code = "mobile_otp", a.duoPasscode
+		a.duoPasscode = ""
+	} else if credentials.DuoTOTPSecret != "" {
+		factor = "mobile_otp"
+		var err error
+		code, err = duoTOTP(credentials.DuoTOTPSecret, time.Now())
+		if err != nil {
+			return nil, err
+		}
+	}
+	if code == "" {
+		return nil, &DuoMethodsRequired{Methods: a.duoFactors}
+	}
+	oidcCode, err := a.duoSubmitPasscode(ctx, prompt, factor, code)
 	if err != nil {
 		return nil, err
 	}
 	return a.duoFinalize(ctx, prompt, oidcCode)
 }
 
-// duoPreflight makes the capability and policy requests Duo's browser client
-// makes. Duo only accepts a bypass code after both.
 func (a *authenticator) duoPreflight(ctx context.Context, prompt duoPrompt) error {
 	features, hints, err := duoClientDetails(a.duoClientHintUA)
 	if err != nil {
@@ -75,18 +107,38 @@ func (a *authenticator) duoPreflight(ctx context.Context, prompt duoPrompt) erro
 	if evaluation.Status != http.StatusOK {
 		return fmt.Errorf("duo pre_authn/evaluation returned %d", evaluation.Status)
 	}
+	var data struct {
+		Response struct {
+			Context struct {
+				Available struct {
+					Factors []struct {
+						Type   string `json:"factor_type"`
+						Device struct {
+							ID   string `json:"pkey"`
+							Name string `json:"name"`
+						} `json:"device_info"`
+					} `json:"factors"`
+				} `json:"available_unified_auth_factors"`
+			} `json:"auth_factors_context"`
+		} `json:"response"`
+	}
+	if json.Unmarshal(evaluation.Body, &data) != nil {
+		return errors.New("invalid Duo method response")
+	}
+	a.duoFactors = nil
+	for _, f := range data.Response.Context.Available.Factors {
+		a.duoFactors = append(a.duoFactors, DuoMethod{Type: f.Type, DeviceID: f.Device.ID, Name: f.Device.Name})
+	}
 	return nil
 }
 
-// duoSubmitBypass is the only place the bypass code is sent. It returns the
-// OIDC code Duo issues for some integrations, or "".
-func (a *authenticator) duoSubmitBypass(ctx context.Context, prompt duoPrompt, bypassCode string) (string, error) {
-	body, err := json.Marshal(map[string]string{"authkey": prompt.authKey, "bypass_code": bypassCode})
+func (a *authenticator) duoSubmitPasscode(ctx context.Context, prompt duoPrompt, factorName, passcode string) (string, error) {
+	body, err := json.Marshal(map[string]string{"authkey": prompt.authKey, factorName: passcode})
 	if err != nil {
 		return "", err
 	}
 	factor, err := a.do(ctx, navigation{
-		method: http.MethodPost, url: prompt.base + "/auth/factors/bypass_code",
+		method: http.MethodPost, url: prompt.base + "/auth/factors/" + factorName,
 		body: body, contentType: "application/json",
 		referer: prompt.page.URL, duoTraceGroup: prompt.traceGroup,
 	})
@@ -94,6 +146,9 @@ func (a *authenticator) duoSubmitBypass(ctx context.Context, prompt duoPrompt, b
 		return "", err
 	}
 	if err := validateDuoFactor(factor.Status, factor.Body); err != nil {
+		if factorName == "mobile_otp" && errors.Is(err, ErrBypassRejected) {
+			return "", ErrDuoPasscodeRejected
+		}
 		return "", err
 	}
 	return jsonStrings(factor.Body)["oidc_code"], nil
@@ -137,11 +192,8 @@ type duoClientHints struct {
 	UAFullVersion   string     `json:"uaFullVersion"`
 }
 
-// duoMacChromeFeatures is what Duo's prompt reports for Chrome on a MacBook.
 const duoMacChromeFeatures = `{"touch_supported":false,"platform_authenticator_status":"available","webauthn_supported":true,"screen_resolution_height":956,"screen_resolution_width":1470,"screen_color_depth":30,"is_uvpa_available":true,"client_capabilities_uvpa":true}`
 
-// duoClientDetails describes the browser to Duo, consistently with the
-// sec-ch-ua header the transport sends.
 func duoClientDetails(secCHUA string) (features, hints string, err error) {
 	brands, fullVersions, err := clientHintBrands(secCHUA)
 	if err != nil {
@@ -161,8 +213,6 @@ func duoClientDetails(secCHUA string) (features, hints string, err error) {
 	return duoMacChromeFeatures, base64.StdEncoding.EncodeToString(encoded), nil
 }
 
-// clientHintBrands parses a sec-ch-ua header into its brands and the full
-// versions a browser would report for them.
 func clientHintBrands(secCHUA string) (brands, fullVersions []duoBrand, err error) {
 	matches := clientHintBrandPattern.FindAllStringSubmatch(secCHUA, -1)
 	if len(matches) == 0 {
@@ -189,8 +239,6 @@ func jsonStrings(data []byte) map[string]string {
 	return collectJSONStrings(value)
 }
 
-// Duo sometimes nests continuation values inside JSON-encoded strings, so a
-// shallow unmarshal can silently miss the final URL or OIDC code.
 func collectJSONStrings(value any) map[string]string {
 	stringsByKey := make(map[string]string)
 	var collect func(any)
@@ -222,7 +270,7 @@ func validateDuoFactor(status int, body []byte) error {
 		return ErrBypassRejected
 	}
 	if status != http.StatusOK {
-		return fmt.Errorf("duo bypass factor returned %d", status)
+		return fmt.Errorf("duo passcode factor returned %d", status)
 	}
 	var payload struct {
 		Stat     string `json:"stat"`
@@ -233,7 +281,7 @@ func validateDuoFactor(status int, body []byte) error {
 		} `json:"response"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
-		return errors.New("duo bypass factor returned an invalid response")
+		return errors.New("duo passcode factor returned an invalid response")
 	}
 	if payload.Stat != "OK" || !payload.Response.AuthnEvaluation.IsAllowed {
 		return ErrBypassRejected

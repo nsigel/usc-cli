@@ -1,5 +1,3 @@
-// Package directory searches the USC Student Directory
-// (uscdirectory.usc.edu), which is open only to signed-in USC users.
 package directory
 
 import (
@@ -23,24 +21,18 @@ const (
 
 var errSessionInvalid = &auth.SiteError{Site: site.Directory, Err: auth.ErrSessionInvalid}
 
-// Doer is the HTTP surface the client needs. auth.Session satisfies it.
 type Doer interface {
 	Do(*http.Request) (*http.Response, error)
 }
 
-// Client searches the directory with an authenticated session.
 type Client struct {
 	http Doer
 }
 
-// New creates a client from an authenticated HTTP client.
 func New(httpClient Doer) *Client {
 	return &Client{http: httpClient}
 }
 
-// Open signs in through USC SSO and returns an authenticated client. See
-// auth.Options for supplying credentials and keeping the session between
-// runs. It never prompts; authentication failures are *auth.SiteError values.
 func Open(ctx context.Context, options auth.Options) (*Client, error) {
 	session, err := auth.Open(ctx, site.Directory, options)
 	if err != nil {
@@ -49,7 +41,6 @@ func Open(ctx context.Context, options auth.Options) (*Client, error) {
 	return New(session), nil
 }
 
-// Error is a directory request the server rejected.
 type Error struct {
 	Status  int
 	Message string
@@ -62,9 +53,6 @@ func (e *Error) Error() string {
 	return fmt.Sprintf("directory: HTTP %d", e.Status)
 }
 
-// proxy calls the endpoint behind the directory's search page. It answers
-// only requests that look like the page's own XHRs, and redirects to
-// Shibboleth once the session has expired.
 func (c *Client) proxy(ctx context.Context, query url.Values) ([]byte, error) {
 	if c == nil || c.http == nil {
 		return nil, errors.New("directory client has no HTTP session")
@@ -94,8 +82,6 @@ func (c *Client) proxy(ctx context.Context, query url.Values) ([]byte, error) {
 	return data, nil
 }
 
-// shortMessage returns the server's explanation when it is a short line of
-// text rather than a page.
 func shortMessage(data []byte) string {
 	message := strings.TrimSpace(string(data))
 	if len(message) > 300 || strings.ContainsAny(message, "<\n") {
