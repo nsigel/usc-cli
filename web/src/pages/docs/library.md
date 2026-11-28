@@ -4,7 +4,7 @@ title: Go library
 description: Use the usc clients from your own Go program.
 ---
 
-Every command is a call into a Go package; the CLI only parses flags and prints the result. Use the same packages directly:
+Each command calls a Go package. The CLI only reads the flags and prints the result. You can use the same packages in your program:
 
 ```sh
 go get github.com/nsigel/usc-cli
@@ -23,9 +23,9 @@ go get github.com/nsigel/usc-cli
 | `browser` | `SyncCookies(ctx, sessionFile, target)` |
 | `skill` | `WriteUSC(writer)` |
 
-## Signing in
+## Sign in
 
-Pass credentials directly, or point at the file `usc auth login` saved:
+Give the credentials directly. Or, give the file that `usc auth login` saved:
 
 ```go
 options := auth.Options{Credentials: auth.Credentials{
@@ -40,29 +40,35 @@ client, err := brightspace.Open(ctx, options)
 courses, err := client.Courses(ctx)
 ```
 
-The session stays in memory, so each run signs in again. To reuse it between runs, give it a file your program owns:
+The client keeps the session in memory. Each run signs in again. To keep the session between runs, give the client a file that your program owns:
 
 ```go
 options.SessionFile = "/var/lib/myapp/usc-session.json"
 ```
 
-Don't share the `usc` command's `session.json`, and give each concurrently running program its own file. A client is sequential and the last writer wins.
-
-The library never prompts and never reads environment variables.
+- Do not share the `session.json` of the `usc` command.
+- Give a different file to each program that runs at the same time. A client is sequential. The last write replaces the earlier writes.
+- The library never prompts and never reads environment variables.
 
 ## Errors
 
-Every sign-in failure is an `*auth.SiteError` naming the site. Check the cause with `errors.Is`:
+Each sign-in failure is an `*auth.SiteError` that gives the site name. Use `errors.Is` to find the cause:
 
 | Error | Meaning |
 | --- | --- |
-| `auth.ErrCredentialsRequired` | No credentials were given and there's no valid session |
+| `auth.ErrCredentialsRequired` | No credentials and no valid session |
 | `auth.ErrPasswordRejected` | USC rejected the password |
 | `auth.ErrBypassRejected` | Duo rejected the bypass code |
 | `auth.ErrDuoPasscodeRejected` | Duo rejected the generated mobile passcode |
-| `auth.ErrSessionInvalid` | The site dropped the session after the client opened |
+| `auth.ErrSessionInvalid` | The site stopped the session after the client opened |
 
-A rejected secret is submitted once. If it came from `CredentialsFile`, it's also removed from that file.
+The client sends a rejected secret only one time. If the secret came from `CredentialsFile`, the client also removes it from that file.
+
+## Mobile ordering
+
+**Warning:** `mobileorder.ContinueOrder` can charge the user.
+
+If the result is `OutcomeUnknown`, do not try again immediately. First, examine the pending and past orders.
 
 ## Examples
 
@@ -71,23 +77,3 @@ go run ./examples/availability   # today's Leavey rooms, no sign-in
 go run ./examples/brightspace    # your enrollments
 go run ./examples/webreg         # the newest term's course bin
 ```
-
-## Mobile ordering
-
-`mobileorder.Open(ctx, options)` completes USC SSO and keeps the Transact
-token in memory. It uses the caller's session options and never saves a cart.
-
-- `Menu`, `Item`, and `CheckoutOptions` take `MenuOptions` with explicit
-  location, `Fulfillment` (`Pickup`, `Delivery`, or `Address`), and payment.
-- `PaymentMethods` lists existing payment methods.
-- `BuildCart(ctx, CartSelection)` resolves item and modifier IDs from the menu;
-  `ReadCart(reader)` accepts advanced JSON input.
-- `Quote(ctx, cart)` prices a cart without submitting it.
-- `PlaceOrder(ctx, cart, expectedTotal)` requotes and submits once, rejecting
-  changed totals or checkout selections.
-- `ContinueOrder(ctx, id)` advances staged checkout and may process payment.
-- `Orders(ctx, pending)`, `CancelOrder`, and `CheckInOrder` manage existing orders.
-
-See [Mobile ordering](/docs/mobileorder/) for the CLI workflow and live-test
-coverage. An `OutcomeUnknown` is not permission to retry a purchase; inspect
-pending and past orders first.

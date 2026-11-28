@@ -14,6 +14,8 @@
 - Never log credentials, activation secrets, or cookies.
 - Persist only `session.json`, `credentials.json`, and LibCal checkout recovery.
 - Verify with live tests; do not add unit tests.
+- Write documentation, the skill, and `install.md` in ASD-STE100 Simplified
+  Technical English: active voice, present tense, one instruction per sentence.
 
 Before finishing, run:
 
