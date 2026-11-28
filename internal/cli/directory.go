@@ -12,7 +12,7 @@ func directoryCommand() *cobra.Command {
 func directoryStudentsCommand() *cobra.Command {
 	var query directory.StudentQuery
 	cmd := &cobra.Command{
-		Use: "students", Short: "Search students by name, major, school, email, or phone", Args: cobra.NoArgs,
+		Use: "students", Short: "Search students by name, major, school, or email", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			client, err := openDirectory(cmd)
 			if err != nil {
@@ -31,7 +31,7 @@ func directoryStudentsCommand() *cobra.Command {
 	cmd.Flags().StringVar(&query.Major, "major", "", "major")
 	cmd.Flags().StringVar(&query.School, "school", "", "school, e.g. Viterbi")
 	cmd.Flags().StringVar(&query.Email, "email", "", "email address")
-	cmd.Flags().StringVar(&query.Phone, "phone", "", "telephone number")
+	cmd.Flags().StringVar(&query.Phone, "phone", "", "published USC campus/office phone number")
 	cmd.MarkFlagsOneRequired("query", "first-name", "last-name", "major", "school", "email", "phone")
 	return cmd
 }

@@ -21,7 +21,7 @@ Errors print as JSON to stderr with exit code 1. When applicable, `code` identif
 | Command | Function |
 | --- | --- |
 | `usc auth login` / `status` / `logout` | Sign in, check the session, or sign out. [Sign in](/docs/auth/) |
-| `usc duo device ...`, `usc bypass create` | Manage Duo devices and bypass codes. [Sign in](/docs/auth/) |
+| `usc duo device ...` | List, create, or delete Duo devices. [Sign in](/docs/auth/) |
 | `usc brightspace ...` | Courses, content, grades, announcements, assignments, downloads. [Brightspace](/docs/brightspace/) |
 | `usc webreg ...` | Terms, catalog, course bin, calendar, checkout. [WebReg](/docs/webreg/) |
 | `usc handshake ...` | Events, career fairs, and fair registration. [Handshake](/docs/handshake/) |

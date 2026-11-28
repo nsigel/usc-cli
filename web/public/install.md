@@ -58,7 +58,7 @@ Follow the **Rules** section of the skill on all future USC tasks.
 
 Outbound hosts `usc` connects to, grouped by command. `usc.sh` is used for the installer and `usc auth login --remote`.
 
-**`auth`, `duo`, `bypass`** (required for sign-in and session refresh)
+**`auth`, `duo`** (required for sign-in and session refresh)
 
 ```text
 login.microsoftonline.com

@@ -60,11 +60,26 @@ func (a *authenticator) duo(ctx context.Context, current *page, credentials Cred
 		a.duoPasscode = ""
 	} else if credentials.DuoTOTPSecret != "" {
 		factor = "mobile_otp"
+		now := time.Now()
+		step := now.Unix() / 30
+		if a.lastTOTPStep != 0 && step <= a.lastTOTPStep {
+			wait := time.Until(time.Unix((a.lastTOTPStep+1)*30, 0).Add(500 * time.Millisecond))
+			if wait > 0 {
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case <-time.After(wait):
+				}
+			}
+			now = time.Now()
+			step = now.Unix() / 30
+		}
 		var err error
-		code, err = duoTOTP(credentials.DuoTOTPSecret, time.Now())
+		code, err = duoTOTP(credentials.DuoTOTPSecret, now)
 		if err != nil {
 			return nil, err
 		}
+		a.lastTOTPStep = step
 	}
 	if code == "" {
 		return nil, &DuoMethodsRequired{Methods: a.duoFactors}

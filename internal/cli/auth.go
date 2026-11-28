@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/nsigel/usc-cli/auth"
@@ -34,10 +35,10 @@ func loginCommand() *cobra.Command {
 			"            Use when the user's browser cannot reach this machine.\n" +
 			"Then wait for completion with: usc auth status --wait URL\n\n" +
 			"Terminal and CI sign-in (without --web or --remote):\n" +
-			"  Prompts for NetID and password in an interactive terminal, or reads USC_*\n" +
-			"  environment variables. The first run lists available Duo methods; rerun\n" +
-			"  with --push-device, --mobile-code, or --sms-device to enroll a Duo device,\n" +
-			"  or --bypass to sign in with a bypass code instead.",
+			"  In an interactive terminal, prompts for NetID, password, and Duo method to\n" +
+			"  enroll a Duo device in one pass (or pass --push-device, --mobile-code,\n" +
+			"  --sms-device, or --bypass directly). Non-interactively, reads USC_*\n" +
+			"  environment variables and supports --push-device or --bypass.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if serve, _ := cmd.Flags().GetBool("web-serve"); serve {
@@ -54,44 +55,62 @@ func loginCommand() *cobra.Command {
 			if options.Credentials, err = options.ResolveCredentials(); err != nil {
 				return err
 			}
+			input, isFile := cmd.InOrStdin().(*os.File)
+			interactive := isFile && term.IsTerminal(int(input.Fd()))
+			var reader *bufio.Reader
+			if interactive {
+				reader = bufio.NewReader(input)
+			}
 			options.DuoDeviceName, _ = cmd.Flags().GetString("device-name")
 			options.DuoSMSDevice, _ = cmd.Flags().GetString("sms-device")
 			options.DuoPushDevice, _ = cmd.Flags().GetString("push-device")
+			pushRound := 0
+			humanPush := interactive && isTerminal(cmd.ErrOrStderr())
 			options.DuoPushStarted = func(code string) {
-				_ = encodeJSON(cmd.ErrOrStderr(), map[string]string{"event": "duo_push_sent", "verification_code": code}, false)
+				if !humanPush {
+					_ = encodeJSON(cmd.ErrOrStderr(), map[string]string{"event": "duo_push_sent", "verification_code": code}, false)
+					return
+				}
+				pushRound++
+				message := "Approve Duo Push in Duo Mobile"
+				if pushRound > 1 {
+					message = "Approve once more in Duo Mobile to finish enrolling usc"
+				}
+				if code != "" {
+					fmt.Fprintf(cmd.ErrOrStderr(), "%s (code: %s)...\n", message, code)
+				} else {
+					fmt.Fprintf(cmd.ErrOrStderr(), "%s...\n", message)
+				}
 			}
 			mobile, _ := cmd.Flags().GetBool("mobile-code")
 			if mobile || options.DuoSMSDevice != "" {
-				input, ok := cmd.InOrStdin().(*os.File)
-				if !ok || !term.IsTerminal(int(input.Fd())) {
+				if !interactive {
 					return errors.New("code login requires a terminal for secure input")
 				}
-				options.RequestDuoPasscode = func() (string, error) {
-					label := "Fresh Duo Mobile code (wait for a new code after each approval): "
-					if options.DuoSMSDevice != "" {
-						label = "Enter the code just sent by SMS: "
-					}
-					fmt.Fprint(cmd.ErrOrStderr(), label)
-					value, err := term.ReadPassword(int(input.Fd()))
-					fmt.Fprintln(cmd.ErrOrStderr())
-					return strings.TrimSpace(string(value)), err
-				}
+				options.RequestDuoPasscode = promptPasscode(cmd, input, options.DuoSMSDevice != "")
 			}
 			bypass, _ := cmd.Flags().GetBool("bypass")
 			if bypass {
 				options.Credentials.DuoTOTPSecret = ""
 			}
 			if options.Credentials.Username == "" || options.Credentials.Password == "" || (bypass && options.Credentials.BypassCode == "") {
-				if err := promptForMissing(cmd, &options.Credentials, bypass); err != nil {
+				if err := promptForMissing(cmd, input, reader, interactive, &options.Credentials, bypass); err != nil {
 					return err
 				}
-
 				if err := os.Remove(options.SessionFile); err != nil && !errors.Is(err, os.ErrNotExist) {
 					return err
 				}
 			}
 			if !bypass && options.Credentials.DuoTOTPSecret == "" {
+				explicitMethod := mobile || options.DuoPushDevice != "" || options.DuoSMSDevice != ""
 				result, err := auth.CreateDuoDevice(cmd.Context(), options)
+				var required *auth.DuoMethodsRequired
+				if interactive && !explicitMethod && errors.As(err, &required) {
+					if err := selectDuoMethod(cmd, input, reader, required.Methods, &options); err != nil {
+						return err
+					}
+					result, err = auth.CreateDuoDevice(cmd.Context(), options)
+				}
 				if err != nil {
 					return err
 				}
@@ -132,10 +151,10 @@ func statusCommand() *cobra.Command {
 		Short: "Check the saved USC session and credentials",
 		Long: "Check whether the saved USC session is active and whether credentials are saved.\n\n" +
 			"If the session cookies have expired but a Duo TOTP device is saved, status\n" +
-			"refreshes the session automatically without prompting, and exits with the\n" +
-			"sign-in error if USC or Duo rejects the saved credentials. With --wait URL, blocks\n" +
-			"until the sign-in page finishes and returns an error if the page closes or\n" +
-			"expires without completing sign-in.",
+			"refreshes the session automatically without prompting and exits with an error\n" +
+			"if USC or Duo rejects the saved credentials. With --wait URL, blocks until\n" +
+			"the sign-in page finishes and returns an error if the page closes or expires\n" +
+			"without completing sign-in.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			options, err := signIn()
@@ -196,27 +215,153 @@ func statusCommand() *cobra.Command {
 	return cmd
 }
 
+type logoutResult struct {
+	LoggedOut     bool   `json:"logged_out"`
+	DeviceDeleted bool   `json:"device_deleted,omitempty"`
+	DuoDeviceID   string `json:"duo_device_id,omitempty"`
+}
+
 func logoutCommand() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "logout",
 		Short: "Delete the saved USC session and credentials",
-		Args:  cobra.NoArgs,
+		Long: "Delete the saved local USC session and credentials.\n\n" +
+			"With --delete-device, also deletes the saved CLI Duo device from your USC\n" +
+			"account before removing local files.",
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			options, err := signIn()
 			if err != nil {
 				return err
+			}
+			result := logoutResult{LoggedOut: true}
+			if deleteDevice, _ := cmd.Flags().GetBool("delete-device"); deleteDevice {
+				credentials, err := options.ResolveCredentials()
+				if err != nil {
+					return err
+				}
+				if credentials.DuoDeviceID == "" {
+					return errors.New("no saved Duo device ID to delete")
+				}
+				if _, err := auth.DeleteDuoDevice(cmd.Context(), options, credentials.DuoDeviceID); err != nil {
+					return fmt.Errorf("could not delete Duo device %s (%v); run usc auth logout without --delete-device to remove local files only", credentials.DuoDeviceID, err)
+				}
+				result.DeviceDeleted = true
+				result.DuoDeviceID = credentials.DuoDeviceID
 			}
 			for _, file := range []string{options.SessionFile, options.CredentialsFile} {
 				if err := os.Remove(file); err != nil && !errors.Is(err, os.ErrNotExist) {
 					return err
 				}
 			}
-			return writeJSON(cmd, map[string]bool{"logged_out": true})
+			return writeJSON(cmd, result)
 		},
+	}
+	cmd.Flags().Bool("delete-device", false, "Delete the saved CLI Duo device from your USC account before logging out")
+	return cmd
+}
+
+func promptPasscode(cmd *cobra.Command, input *os.File, sms bool) func() (string, error) {
+	round := 0
+	return func() (string, error) {
+		round++
+		label := "Duo Mobile code: "
+		if sms {
+			label = "Enter the code sent by SMS: "
+			if round > 1 {
+				label = "Enter the new code sent by SMS: "
+			}
+		} else if round > 1 {
+			label = "New Duo Mobile code (wait for a new code): "
+		}
+		return readSecret(cmd, input, label)
 	}
 }
 
-func promptForMissing(cmd *cobra.Command, credentials *auth.Credentials, bypass bool) error {
+func readSecret(cmd *cobra.Command, input *os.File, label string) (string, error) {
+	fmt.Fprint(cmd.ErrOrStderr(), label)
+	value, err := term.ReadPassword(int(input.Fd()))
+	fmt.Fprintln(cmd.ErrOrStderr())
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(value)), nil
+}
+
+func selectDuoMethod(cmd *cobra.Command, input *os.File, reader *bufio.Reader, methods []auth.DuoMethod, options *auth.Options) error {
+	type choice struct {
+		kind     string
+		deviceID string
+		label    string
+	}
+	var choices []choice
+	for _, kind := range []string{"push", "sms_otp"} {
+		for _, method := range methods {
+			if method.Type != kind || method.DeviceID == "" {
+				continue
+			}
+			base := "Duo Push"
+			if kind == "sms_otp" {
+				base = "Text message"
+			}
+			label := base
+			if name := strings.TrimSpace(method.Name); name != "" {
+				label += " (" + name + ")"
+			}
+			choices = append(choices, choice{kind: kind, deviceID: method.DeviceID, label: label})
+		}
+	}
+	choices = append(choices,
+		choice{kind: "mobile_otp", label: "Duo Mobile code"},
+		choice{kind: "bypass_code", label: "Bypass code"},
+	)
+
+	errOut := cmd.ErrOrStderr()
+	fmt.Fprintln(errOut, "Choose a Duo method to enroll usc:")
+	for i, c := range choices {
+		fmt.Fprintf(errOut, "  %d. %s\n", i+1, c.label)
+	}
+	var picked choice
+	for {
+		fmt.Fprint(errOut, "Select [1]: ")
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			return err
+		}
+		line = strings.TrimSpace(line)
+		index := 1
+		if line != "" {
+			parsed, err := strconv.Atoi(line)
+			if err != nil || parsed < 1 || parsed > len(choices) {
+				fmt.Fprintf(errOut, "Enter a number from 1 to %d.\n", len(choices))
+				continue
+			}
+			index = parsed
+		}
+		picked = choices[index-1]
+		break
+	}
+	switch picked.kind {
+	case "push":
+		options.DuoPushDevice = picked.deviceID
+	case "sms_otp":
+		options.DuoSMSDevice = picked.deviceID
+		options.RequestDuoPasscode = promptPasscode(cmd, input, true)
+	case "mobile_otp":
+		options.RequestDuoPasscode = promptPasscode(cmd, input, false)
+	case "bypass_code":
+		for options.Credentials.BypassCode == "" {
+			code, err := readSecret(cmd, input, "Duo bypass code: ")
+			if err != nil {
+				return err
+			}
+			options.Credentials.BypassCode = code
+		}
+	}
+	return nil
+}
+
+func promptForMissing(cmd *cobra.Command, input *os.File, reader *bufio.Reader, interactive bool, credentials *auth.Credentials, bypass bool) error {
 	fields := []struct {
 		name, label string
 		secret      bool
@@ -229,8 +374,7 @@ func promptForMissing(cmd *cobra.Command, credentials *auth.Credentials, bypass 
 	if !bypass || credentials.DuoTOTPSecret != "" || credentials.BypassCode != "" {
 		fields = fields[:2]
 	}
-	input, ok := cmd.InOrStdin().(*os.File)
-	if !ok || !term.IsTerminal(int(input.Fd())) {
+	if !interactive {
 		var missing []string
 		for _, field := range fields {
 			if *field.value == "" {
@@ -239,19 +383,17 @@ func promptForMissing(cmd *cobra.Command, credentials *auth.Credentials, bypass 
 		}
 		return auth.ForSite(signInProbe, &auth.SignInRequired{Missing: missing})
 	}
-	reader := bufio.NewReader(input)
 	for _, field := range fields {
 		for *field.value == "" {
-			fmt.Fprint(cmd.ErrOrStderr(), field.label)
 			if field.secret {
-				secret, err := term.ReadPassword(int(input.Fd()))
-				fmt.Fprintln(cmd.ErrOrStderr())
+				secret, err := readSecret(cmd, input, field.label)
 				if err != nil {
 					return err
 				}
-				*field.value = strings.TrimSpace(string(secret))
+				*field.value = secret
 				continue
 			}
+			fmt.Fprint(cmd.ErrOrStderr(), field.label)
 			line, err := reader.ReadString('\n')
 			if err != nil {
 				return err
