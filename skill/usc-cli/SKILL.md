@@ -101,25 +101,61 @@ price. Show the total, payment, and pickup time to the user before you run
 
 ## Hosts
 
-`usc` connects to these hosts. Sign-in uses the Microsoft and Duo hosts.
-`api-*.duosecurity.com` is one host whose name comes from Duo during sign-in.
+`usc` connects to these hosts. `usc.sh` is for `usc auth login --remote`.
+
+**`auth`, `duo`, `bypass`** (all commands that sign in use these hosts)
 
 ```text
-account.usc.edu
-brightspace.usc.edu
-classes.usc.edu
-libcal.usc.edu
-uscdirectory.usc.edu
-webreg.usc.edu
 login.microsoftonline.com
 login.live.com
 us.azureauth.duosecurity.com
+api-22627695.duosecurity.com
 uw1.devicemanagement.duosecurity.com
-api-*.duosecurity.com
-libauth.com
-usc.joinhandshake.com
-mobileorderprodapi.transactcampus.com
+account.usc.edu
 usc.sh
+```
+
+**`brightspace`**
+
+```text
+brightspace.usc.edu
+```
+
+**`webreg`**
+
+```text
+webreg.usc.edu
+```
+
+**`classes`**
+
+```text
+classes.usc.edu
+```
+
+**`handshake`**
+
+```text
+usc.joinhandshake.com
+```
+
+**`directory`**
+
+```text
+uscdirectory.usc.edu
+```
+
+**`libcal`**
+
+```text
+libcal.usc.edu
+libauth.com
+```
+
+**`mobileorder`**
+
+```text
+mobileorderprodapi.transactcampus.com
 ```
 
 ## Notes
