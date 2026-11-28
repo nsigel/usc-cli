@@ -37,8 +37,9 @@ Do these steps when an error has `"action": "usc auth login"`:
      can control.
    - `usc auth login --remote --device-name NAME`: use this in all other
      conditions.
-2. Give the full `url` to the user. The user opens it and signs in. If you
-   have a browser that the user can control, you can open the `url` there.
+2. If you have a browser that the user can control, open the `url` there and
+   ask the user to take control. If not, give the full `url` to the user.
+   The user signs in on the page.
 3. Run `usc auth status --wait URL`. If your command times out, run it again.
 4. If the command fails or prints `"authenticated": false`, start again at
    step 1.
@@ -46,6 +47,10 @@ Do these steps when an error has `"action": "usc auth login"`:
 The `--remote` page encrypts the user's input for your machine. Do not make a
 tunnel. Do not ask for a session file. If `--remote` fails, tell the user the
 error and stop.
+
+Sign-in connects to `login.microsoftonline.com`, `*.duosecurity.com`, and
+`account.usc.edu`. If your network needs approval for a site, ask the user to
+approve it. Sign-in stops until the user approves.
 
 To make sure that a `127.0.0.1` page is available, do a `GET /healthz` on its
 host, for example `curl http://127.0.0.1:PORT/healthz`. It returns
