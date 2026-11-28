@@ -101,6 +101,14 @@ func (s *Server) handler() http.Handler {
 	}
 	mux := http.NewServeMux()
 	mux.Handle("GET /", http.FileServerFS(assets))
+	// healthz needs no token so agents can check the page is still serving.
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(struct {
+			Status    string    `json:"status"`
+			ExpiresAt time.Time `json:"expires_at"`
+		}{"ok", s.expires})
+	})
 	mux.HandleFunc("GET /api/state", func(w http.ResponseWriter, _ *http.Request) {
 		s.writeState(w)
 	})

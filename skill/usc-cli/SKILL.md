@@ -18,7 +18,9 @@ that works for ten minutes.
   user to take control to log in.
 
 Then run `usc auth status --wait URL` with that `url`; rerun it if your command
-times out. If it fails or prints `"authenticated": false`, start over.
+times out. To check the page is still up, `GET /healthz` on the `url`'s host
+(for example `curl http://127.0.0.1:PORT/healthz`); it returns `{"status":"ok"}`
+until sign-in finishes or the page expires. If it fails or prints `"authenticated": false`, start over.
 
 Never put credentials in chat. Never read, screenshot, or type into the
 sign-in page.
