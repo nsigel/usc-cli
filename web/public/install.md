@@ -1,6 +1,8 @@
-# Set up the USC CLI
+# Set up or update the USC CLI
 
 `usc` gives you access to the user's USC accounts: Brightspace, Web Registration, Handshake, the Student Directory, Leavey Library rooms, USC mobile ordering, and the public Schedule of Classes. Each command prints JSON. Do these steps in sequence.
+
+If `usc` is already installed, do the same steps. They install the latest release and its skill.
 
 You must be able to run commands. Private persistent storage keeps the user signed in between sessions. Without it, the user must sign in again in each session.
 
@@ -33,11 +35,13 @@ If your agent does not have a skills directory, run `usc skill` at the start of 
 
 In a sandbox, sign-in stops until the user approves each host that `usc` connects to. If you can change the allowed hosts of your environment, allow the hosts in the "Hosts" section now. If you cannot, open the sign-in link in your in-app browser. The user sees the approval requests there.
 
+Run `usc auth status`. If `authenticated` is `true`, go to step 4.
+
 Do the steps in the "Sign in" section of the skill.
 
 ## 4. Finish
 
-Tell the user that the setup is complete. Give the user some example requests:
+Tell the user that the setup or update is complete. Give the user some example requests:
 
 - "when's my next exam?"
 - "any Leavey rooms for 4 tomorrow afternoon?"
