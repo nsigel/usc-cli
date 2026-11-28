@@ -55,116 +55,26 @@ usc directory students --last-name smith --school Viterbi
 usc classes 20271 CSCI-270
 ```
 
-## Commands
+## Docs
 
-| Command | |
-| --- | --- |
-| `usc auth login` / `status` / `logout` | Sign in, check the session, or delete it |
-| `usc bypass create` | Create and save a replacement Duo bypass code (secret JSON output) |
-| `usc brightspace whoami` | Your Brightspace user |
-| `usc brightspace courses [--all]` | Enrolled classes; `--all` adds departments, semesters, and groups |
-| `usc brightspace content COURSE_ID [--flat]` | A course's content tree |
-| `usc brightspace grades COURSE_ID [--graded-only]` | Grades for a course |
-| `usc brightspace announcements [COURSE_ID] [--since TIME]` | Announcements for one course or all of them |
-| `usc brightspace assignments COURSE_ID` | Assignment folders |
-| `usc brightspace submissions COURSE_ID FOLDER_ID [--download] [--output DIR]` | Your submissions, or download the files |
-| `usc brightspace download COURSE_ID TOPIC_ID [--output DIR]` | Download a content file |
-| `usc webreg terms` | Registration terms and their codes |
-| `usc webreg programs --term TERM` | Schools and program codes |
-| `usc webreg courses --term TERM (--program CODE \| --course CODE)` | Courses with sections, seats, and clearance |
-| `usc webreg bin --term TERM` | Your course bin |
-| `usc webreg calendar --term TERM` | Weekly meetings, with conflicts marked |
-| `usc webreg add\|schedule\|unschedule\|remove SECTION_ID --term TERM` | Plan course-bin changes |
-| `usc webreg grade-option SECTION_ID CODE --term TERM` | Change a grade option |
-| `usc webreg checkout --term TERM` | Preview what would be registered and dropped |
-| `usc webreg submit --term TERM --confirm` | Register and drop what checkout shows |
-| `usc directory students [FILTERS]` | Search the Student Directory |
-| `usc directory student STUDENT_ID` | One student |
-| `usc handshake categories` | Event categories |
-| `usc handshake events [FILTERS]` | Search events |
-| `usc handshake event EVENT_ID` | One event |
-| `usc handshake career-fairs [FILTERS]` | Search career fairs |
-| `usc handshake career-fair CAREER_FAIR_ID` | One career fair, with sessions |
-| `usc handshake career-fair-register SESSION_ID` | Register for a career-fair session |
-| `usc handshake career-fair-cancel SESSION_ID` | Cancel a career-fair session registration |
-| `usc libcal categories` | Leavey room and pod categories |
-| `usc libcal spaces [rooms\|pods\|all\|lvl1\|lvl2\|lvl3]` | Leavey spaces |
-| `usc libcal space SPACE_ID` | One space |
-| `usc libcal schedule [FILTERS]` | Open and taken times for each space |
-| `usc libcal book --space ID --start TIME --end TIME --accept-terms` | Book exactly that space and time |
-| `usc libcal release` | Clear an interrupted booking |
-| `usc mobileorder locations\|payments` | Dining locations and existing payment methods |
-| `usc mobileorder menu\|item\|checkout [FLAGS]` | Items, modifiers, and checkout requirements |
-| `usc mobileorder cart [FLAGS]` | Build cart JSON from item and modifier choices |
-| `usc mobileorder quote --cart FILE` | Price a cart without purchasing |
-| `usc mobileorder orders [--pending]` | Past or pending orders |
-| `usc mobileorder order place\|continue\|cancel\|check-in [ARGS]` | Explicit purchase and order actions |
-| `usc classes TERM_CODE COURSE_CODE` | Public course and sections, no sign-in |
-| `usc skill` | Print the agent skill |
-| `usc version` | Print the version |
+Each page gives the commands, filters, and flows for one area:
 
-Filters, IDs, and the registration and booking flows are in the [docs](https://usc.sh/docs/).
+- [Sign in](https://usc.sh/docs/auth/)
+- [Brightspace](https://usc.sh/docs/brightspace/)
+- [WebReg](https://usc.sh/docs/webreg/)
+- [Handshake](https://usc.sh/docs/handshake/)
+- [Student Directory](https://usc.sh/docs/directory/)
+- [Leavey Library](https://usc.sh/docs/libcal/)
+- [Mobile ordering](https://usc.sh/docs/mobileorder/)
+- [Schedule of Classes](https://usc.sh/docs/classes/)
+- [Output and errors](https://usc.sh/docs/output/)
+- [Go library](https://usc.sh/docs/library/), with [`examples/`](examples/)
 
-## Output
-
-Commands print JSON to stdout: indented in a terminal, one line when piped. `--pretty` and `--compact` override that. Errors are JSON on stderr with exit status 1, and name the command that fixes them when there is one:
-
-```json
-{"error":"brightspace: USC sign-in is required","action":"usc auth login"}
-```
-
-## Go library
-
-Every command is a call into a package you can use directly:
-
-```go
-client, err := brightspace.Open(ctx, auth.Options{CredentialsFile: file})
-courses, err := client.Courses(ctx)
-```
-
-See [Go library](https://usc.sh/docs/library/) and [`examples/`](examples/).
+`usc --help` and `usc skill` also list the commands.
 
 ## Website
 
 The site at [usc.sh](https://usc.sh) is in [`web/`](web/): `npm install && npm run dev` to work on it.
-
-## Mobile ordering
-
-Browse locations and menus, then build a cart using flags:
-
-```sh
-usc mobileorder locations
-usc mobileorder payments
-usc mobileorder menu --location LOCATION_ID --fulfillment pickup --payment-method PAYMENT_ID
-usc mobileorder item ITEM_ID --location LOCATION_ID --fulfillment pickup --payment-method PAYMENT_ID
-usc mobileorder checkout --location LOCATION_ID --fulfillment pickup --payment-method PAYMENT_ID
-usc mobileorder cart --location LOCATION_ID --fulfillment pickup \
-  --payment-method PAYMENT_ID --tender TENDER_ID --asap \
-  --item ITEM_ID --select ITEM_ID:VALUE_ID > cart.json
-usc mobileorder quote --cart cart.json
-```
-
-Repeat `--item` for quantities and `--select` for modifier choices. Use
-`--tender` for campus payment, and choose `--asap` or an explicit date/time.
-`menu` shows items and prices; `item` shows modifiers; `checkout` shows slots,
-tenders and questions. Prices are cents. Fulfillment is `pickup`, `delivery`,
-or `address`; pickup is the verified flow.
-
-`order place --cart cart.json --expected-total CENTS` submits a purchase.
-`order continue ORDER_ID` advances staged payment; only stage `success`
-confirms checkout. `orders [--pending]` reads orders, and `order cancel` and
-`order check-in` act on an existing order. These mutations are implemented
-but have not been verified with a real purchase; no money was spent during
-implementation. Browsing, cart building, quotes and order reads passed live
-checks. The client rejects changed totals and checkout selections before
-submission and never automatically retries a purchase.
-
-See the [website guide](https://usc.sh/docs/mobileorder/),
-[local command guide](docs/mobileorder-usage.md), and
-[API integration notes](docs/mobileorder-integration.md).
-Library callers use `mobileorder.Open(ctx, auth.Options)`; public USC campus
-information is available through `mobileorder.New().USC(ctx)` or
-`usc mobileorder campus`. Transact tokens stay in memory.
 
 ## Contributing
 
