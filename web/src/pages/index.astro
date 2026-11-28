@@ -5,6 +5,7 @@ import Stage from "../components/Stage.astro";
 import CopyCode from "../components/CopyCode.astro";
 import { scenarios } from "../scenarios";
 import type { SpriteName } from "../sprites";
+import { homeDescription, homeTitle } from "../docs";
 
 const prompt = "Set up the USC CLI for me: https://usc.sh/install.md";
 
@@ -54,10 +55,7 @@ const sites: { sprite: SpriteName; name: string; does: string; docs: string }[] 
 ];
 ---
 
-<Base
-  title="usc.sh: USC for your agent"
-  description="An open-source CLI that connects your AI agent to USC's student portals — Brightspace, WebReg, Handshake, Leavey Library, Student Directory, and USC dining."
->
+<Base title={homeTitle} description={homeDescription} markdown="/index.md">
   <main>
     <section class="wrap hero">
       <div class="pitch">

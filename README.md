@@ -1,6 +1,6 @@
 # usc
 
-A command-line client for USC's Brightspace, Web Registration, Handshake, the Student Directory, Leavey Library rooms, USC mobile ordering, and the public Schedule of Classes. Every command prints JSON, so Claude Code, Codex, Grok, or any agent with a terminal can run it for you.
+A command-line client for USC's Brightspace, Web Registration, Handshake, the Student Directory, Leavey Library rooms, USC mobile ordering, and the public Schedule of Classes. It signs in with your NetID and Duo, then reuses its own Duo device so later commands need no prompts. Every command prints JSON, so Claude Code, Codex, Grok, or any agent with a terminal can run it for you.
 
 Docs: [usc.sh/docs](https://usc.sh/docs/)
 
