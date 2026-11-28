@@ -1,7 +1,7 @@
 ---
 layout: ../../layouts/Docs.astro
 title: Student Directory
-description: Search the USC Student Directory by name, major, school, email, or phone.
+description: Search the USC Student Directory by name, major, school, or email.
 ---
 
 Searches the [USC Student Directory](https://uscdirectory.usc.edu/web/directory/student/). Requires a USC sign-in.
@@ -19,6 +19,7 @@ usc directory student STUDENT_ID
 - Each value matches as a substring.
 - The directory returns at most 100 matches. If `truncated` is `true`, narrow your filters.
 - The output does not include fields that a student did not publish.
+- `--phone` only matches published USC office/campus phone numbers (faculty, staff, and students with a USC job).
 - `title`, `department`, and `division` occur only for students with a USC job.
 
 ## Examples

@@ -27,7 +27,79 @@ type DuoDevice struct {
 	Secret           string `json:"-"`
 }
 
+type DuoDeviceInfo struct {
+	ID      string `json:"id"`
+	Type    string `json:"type"`
+	Name    string `json:"name,omitempty"`
+	Model   string `json:"model,omitempty"`
+	Number  string `json:"number,omitempty"`
+	Current bool   `json:"current,omitempty"`
+}
+
+type duoPortalData struct {
+	XSRF   string `json:"xsrf_token"`
+	Phones []struct {
+		Key          string `json:"key"`
+		Name         string `json:"name"`
+		Model        string `json:"model"`
+		Number       string `json:"number"`
+		PrettyNumber string `json:"pretty_number"`
+	} `json:"phones"`
+	WebAuthn []struct {
+		Key      string `json:"key"`
+		Name     string `json:"name"`
+		Metadata struct {
+			Browser string `json:"browser"`
+			OS      string `json:"os"`
+		} `json:"credential_metadata"`
+	} `json:"webauthn_credentials"`
+}
+
 var duoActivationHost = regexp.MustCompile(`^api-[a-zA-Z0-9]+\.duosecurity\.com$`)
+
+func ListDuoDevices(ctx context.Context, options Options) ([]DuoDeviceInfo, error) {
+	s, err := OpenSession(options, CookiePolicy{})
+	if err != nil {
+		return nil, err
+	}
+	_, portal, err := duoPortal(ctx, s)
+	if err != nil {
+		return nil, err
+	}
+	devices := make([]DuoDeviceInfo, 0, len(portal.Phones)+len(portal.WebAuthn))
+	for _, phone := range portal.Phones {
+		number := phone.PrettyNumber
+		if number == "" {
+			number = phone.Number
+		}
+		devices = append(devices, DuoDeviceInfo{
+			ID:      phone.Key,
+			Type:    "phone",
+			Name:    strings.TrimSpace(phone.Name),
+			Model:   strings.TrimSpace(phone.Model),
+			Number:  strings.TrimSpace(number),
+			Current: s.credentials.DuoDeviceID != "" && phone.Key == s.credentials.DuoDeviceID,
+		})
+	}
+	for _, cred := range portal.WebAuthn {
+		model := strings.TrimSpace(cred.Metadata.OS)
+		if browser := strings.TrimSpace(cred.Metadata.Browser); browser != "" {
+			if model != "" {
+				model += " (" + browser + ")"
+			} else {
+				model = browser
+			}
+		}
+		devices = append(devices, DuoDeviceInfo{
+			ID:    cred.Key,
+			Type:  "webauthn",
+			Name:  strings.TrimSpace(cred.Name),
+			Model: model,
+		})
+	}
+	_ = s.save()
+	return devices, nil
+}
 
 func CreateDuoDevice(ctx context.Context, options Options) (*DuoDevice, error) {
 	s, err := OpenSession(options, CookiePolicy{})
@@ -37,10 +109,11 @@ func CreateDuoDevice(ctx context.Context, options Options) (*DuoDevice, error) {
 	if s.credentials.DuoTOTPSecret != "" {
 		return nil, errors.New("a Duo TOTP credential is already configured; delete that enrollment before creating another")
 	}
-	base, token, err := duoPortal(ctx, s)
+	base, portal, err := duoPortal(ctx, s)
 	if err != nil {
 		return nil, err
 	}
+	token := portal.XSRF
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/frame/device-management/api/mobile_phone/activate", strings.NewReader(`{"phone_number":"","platform":"Generic Smartphone"}`))
 	if err != nil {
 		return nil, err
@@ -179,24 +252,22 @@ func activateDuoDevice(ctx context.Context, s *Session, activation string) (stri
 	return base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString([]byte(response.Response.Secret)), nil
 }
 
-func duoPortal(ctx context.Context, s *Session) (string, string, error) {
+func duoPortal(ctx context.Context, s *Session) (string, duoPortalData, error) {
 	page, err := s.authenticator.open(ctx, "https://account.usc.edu/2fa/enroll", s.credentials, nil)
 	if err != nil {
 		forgetRejected(s.options.CredentialsFile, err, s.credentials)
-		return "", "", ForSite(SiteAccount, err)
+		return "", duoPortalData{}, ForSite(SiteAccount, err)
 	}
 	if page.URL.Scheme != "https" || page.URL.Host != "uw1.devicemanagement.duosecurity.com" {
-		return "", "", errors.New("Duo device management did not return a trusted portal")
+		return "", duoPortalData{}, errors.New("Duo device management did not return a trusted portal")
 	}
-	var portal struct {
-		XSRF string `json:"xsrf_token"`
-	}
+	var portal duoPortalData
 	data := dom.RawText(dom.FindFirst(dom.Parse(page.Body), dom.ID("base-data")))
 	if json.Unmarshal([]byte(html.UnescapeString(data)), &portal) != nil || portal.XSRF == "" {
-		return "", "", errors.New("Duo device management requires interactive verification or returned unsupported portal data")
+		return "", duoPortalData{}, errors.New("Duo device management requires interactive verification or returned unsupported portal data")
 	}
 	base := "https://" + page.URL.Host
-	return base, portal.XSRF, nil
+	return base, portal, nil
 }
 
 type DuoDeviceDeletion struct {
@@ -211,10 +282,16 @@ func DeleteDuoDevice(ctx context.Context, options Options, id string) (*DuoDevic
 	if err != nil {
 		return nil, err
 	}
-	base, token, err := duoPortal(ctx, s)
+	base, portal, err := duoPortal(ctx, s)
 	if err != nil {
 		return nil, err
 	}
+	for _, cred := range portal.WebAuthn {
+		if cred.Key == id {
+			return nil, errors.New("WebAuthn credentials must be deleted in USC Duo device management")
+		}
+	}
+	token := portal.XSRF
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, base+"/frame/device-management/api/phone/"+url.PathEscape(id), nil)
 	if err != nil {
 		return nil, err
@@ -232,6 +309,7 @@ func DeleteDuoDevice(ctx context.Context, options Options, id string) (*DuoDevic
 	if response.Stat != "OK" {
 		return nil, errors.New("Duo did not confirm device deletion")
 	}
+	_ = s.save()
 	result := &DuoDeviceDeletion{Deleted: true}
 	if options.CredentialsFile != "" {
 		saved, err := LoadCredentials(options.CredentialsFile)

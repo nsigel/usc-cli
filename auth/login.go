@@ -53,6 +53,7 @@ type authenticator struct {
 	microsoft          map[string]string
 	passwordSent       bool
 	duoStarted         bool
+	lastTOTPStep       int64
 }
 
 func (a *authenticator) open(ctx context.Context, target string, credentials Credentials, initialReferer *url.URL) (*page, error) {
