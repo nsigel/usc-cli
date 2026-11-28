@@ -31,8 +31,6 @@ If your agent does not have a skills directory, run `usc skill` at the start of 
 
 ## 3. Sign in
 
-If you run in a sandbox and you can change its allowed hosts, allow the hosts in the "Hosts" section first. If you cannot, sign-in stops until the user approves each host.
-
 Do the steps in the "Sign in" section of the skill.
 
 ## 4. Finish
