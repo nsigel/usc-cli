@@ -68,6 +68,28 @@ usc classes 20271 CSCI-270
 usc mobileorder locations
 ```
 
+## Hosts
+
+`usc` connects to these hosts. Sign-in uses the Microsoft and Duo hosts. `api-*.duosecurity.com` is one host whose name comes from Duo during sign-in. `usc.sh` is for `usc auth login --remote` and the install script.
+
+```text
+account.usc.edu
+brightspace.usc.edu
+classes.usc.edu
+libcal.usc.edu
+uscdirectory.usc.edu
+webreg.usc.edu
+login.microsoftonline.com
+login.live.com
+us.azureauth.duosecurity.com
+uw1.devicemanagement.duosecurity.com
+api-*.duosecurity.com
+libauth.com
+usc.joinhandshake.com
+mobileorderprodapi.transactcampus.com
+usc.sh
+```
+
 ## Update
 
 Run the install command again. To see your version, run `usc version`.

@@ -48,10 +48,6 @@ The `--remote` page encrypts the user's input for your machine. Do not make a
 tunnel. Do not ask for a session file. If `--remote` fails, tell the user the
 error and stop.
 
-Sign-in connects to `login.microsoftonline.com`, `*.duosecurity.com`, and
-`account.usc.edu`. If your network needs approval for a site, ask the user to
-approve it. Sign-in stops until the user approves.
-
 To make sure that a `127.0.0.1` page is available, do a `GET /healthz` on its
 host, for example `curl http://127.0.0.1:PORT/healthz`. It returns
 `{"status":"ok"}` until sign-in is complete or the page expires.
@@ -102,6 +98,29 @@ Use `usc mobileorder locations`, `payments`, `menu`, `item`, and `checkout` to
 find the choices. Use `cart` to make the cart. Then use `quote` to get the
 price. Show the total, payment, and pickup time to the user before you run
 `order place`.
+
+## Hosts
+
+`usc` connects to these hosts. Sign-in uses the Microsoft and Duo hosts.
+`api-*.duosecurity.com` is one host whose name comes from Duo during sign-in.
+
+```text
+account.usc.edu
+brightspace.usc.edu
+classes.usc.edu
+libcal.usc.edu
+uscdirectory.usc.edu
+webreg.usc.edu
+login.microsoftonline.com
+login.live.com
+us.azureauth.duosecurity.com
+uw1.devicemanagement.duosecurity.com
+api-*.duosecurity.com
+libauth.com
+usc.joinhandshake.com
+mobileorderprodapi.transactcampus.com
+usc.sh
+```
 
 ## Notes
 
