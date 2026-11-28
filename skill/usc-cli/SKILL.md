@@ -48,10 +48,6 @@ The `--remote` page encrypts the user's input for your machine. Do not make a
 tunnel. Do not ask for a session file. If `--remote` fails, tell the user the
 error and stop.
 
-Sign-in connects to `login.microsoftonline.com`, `*.duosecurity.com`, and
-`account.usc.edu`. If your network needs approval for a site, ask the user to
-approve it. Sign-in stops until the user approves.
-
 To make sure that a `127.0.0.1` page is available, do a `GET /healthz` on its
 host, for example `curl http://127.0.0.1:PORT/healthz`. It returns
 `{"status":"ok"}` until sign-in is complete or the page expires.
@@ -105,6 +101,7 @@ price. Show the total, payment, and pickup time to the user before you run
 
 ## Notes
 
+- The hosts that `usc` connects to are at https://usc.sh/install.md.
 - WebReg submits all changes or no changes. If one section fails, WebReg
   changes nothing. `messages` gives the reason.
 - On a registered section, `webreg grade-option` only sends a request. The
