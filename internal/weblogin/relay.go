@@ -141,6 +141,9 @@ func (r *relay) register(ctx context.Context) error {
 	_, _, status, err := r.send(ctx, http.MethodPut, "", nil)
 	var failed *url.Error
 	if errors.As(err, &failed) {
+		if errors.Is(failed.Err, context.DeadlineExceeded) {
+			return fmt.Errorf("timed out connecting to the sign-in relay at %s", r.base)
+		}
 		return fmt.Errorf("could not reach the sign-in relay at %s: %w", r.base, failed.Err)
 	}
 	if err == nil && status != http.StatusCreated {

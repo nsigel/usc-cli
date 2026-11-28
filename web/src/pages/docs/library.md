@@ -26,11 +26,11 @@ The import path of each package is `github.com/nsigel/usc-cli/` and the package 
 
 ## Sign in
 
-Give the credentials directly. Or, give the file that `usc auth login` saved:
+Pass credentials directly (with `DuoTOTPSecret` or `BypassCode`), or point to the file saved by `usc auth login`:
 
 ```go
 options := auth.Options{Credentials: auth.Credentials{
-	Username: netID, Password: password, BypassCode: bypass,
+	Username: netID, Password: password, DuoTOTPSecret: totpSecret,
 }}
 
 // or
@@ -41,35 +41,38 @@ client, err := brightspace.Open(ctx, options)
 courses, err := client.Courses(ctx)
 ```
 
-The client keeps the session in memory. Each run signs in again. To keep the session between runs, give the client a file that your program owns:
+By default, the client keeps session cookies in memory and signs in on each run. To reuse sessions across runs, give the client a session file that your program owns:
 
 ```go
 options.SessionFile = "/var/lib/myapp/usc-session.json"
 ```
 
-- Do not share the `session.json` of the `usc` command.
-- Give a different file to each program that runs at the same time. A client is sequential. The last write replaces the earlier writes.
+- Do not share `usc`'s own `session.json`.
+- Give each concurrent process its own session file; clients are sequential and the last write wins.
 - The library never prompts and never reads environment variables.
 
 ## Errors
 
-Each sign-in failure is an `*auth.SiteError` that gives the site name. Use `errors.Is` to find the cause:
+Each sign-in failure is wrapped in an `*auth.SiteError` identifying the site. Use `errors.Is` to match the cause:
 
 | Error | Meaning |
 | --- | --- |
 | `auth.ErrCredentialsRequired` | No credentials and no valid session |
 | `auth.ErrPasswordRejected` | USC rejected the password |
 | `auth.ErrBypassRejected` | Duo rejected the bypass code |
-| `auth.ErrDuoPasscodeRejected` | Duo rejected the generated mobile passcode |
-| `auth.ErrSessionInvalid` | The site stopped the session after the client opened |
+| `auth.ErrDuoPasscodeRejected` | Duo rejected the mobile passcode |
+| `auth.ErrDuoSMSRejected` | Duo rejected the SMS code |
+| `auth.ErrDuoPushRejected` | The user did not approve the Duo push |
+| `auth.ErrDuoPushTimedOut` | The Duo push was not approved within 90 seconds; also matches `auth.ErrDuoPushRejected` |
+| `auth.ErrSessionInvalid` | The site ended the session after the client opened |
 
-The client sends a rejected secret only one time. If the secret came from `CredentialsFile`, the client also removes it from that file.
+A rejected password or bypass code is only sent once; if it came from `CredentialsFile`, the client removes it from that file.
 
 ## Mobile ordering
 
 **Warning:** `mobileorder.ContinueOrder` can charge the user.
 
-If the result is `OutcomeUnknown`, do not try again immediately. First, examine the pending and past orders.
+If the result is `OutcomeUnknown`, check pending and past orders before retrying.
 
 ## Examples
 

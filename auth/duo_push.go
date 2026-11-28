@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	http "github.com/saucesteals/fhttp"
 	"time"
 )
@@ -32,11 +31,17 @@ func (a *authenticator) duoPush(ctx context.Context, p duoPrompt) (string, error
 	if !allowed {
 		return "", &DuoMethodsRequired{Methods: a.duoFactors}
 	}
-	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	pushCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 	body, _ := json.Marshal(map[string]string{"authkey": p.authKey, "pkey": a.duoPushDevice})
-	r, err := a.do(ctx, navigation{method: http.MethodPost, url: p.base + "/auth/factors/push/auth", body: body, contentType: "application/json", referer: p.page.URL, duoTraceGroup: p.traceGroup})
+	r, err := a.do(pushCtx, navigation{method: http.MethodPost, url: p.base + "/auth/factors/push/auth", body: body, contentType: "application/json", referer: p.page.URL, duoTraceGroup: p.traceGroup})
 	if err != nil {
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
+		if pushCtx.Err() != nil {
+			return "", ErrDuoPushTimedOut
+		}
 		return "", errors.New("Duo push request failed")
 	}
 	var started struct {
@@ -53,8 +58,14 @@ func (a *authenticator) duoPush(ctx context.Context, p duoPrompt) (string, error
 		a.duoPushStarted(started.Response.Code)
 	}
 	for {
-		r, err = a.do(ctx, navigation{url: p.base + "/auth/factors/push/status?" + encodeFields([]field{{Name: "authkey", Value: p.authKey}, {Name: "push_txid", Value: started.Response.TxID}, {Name: "saw_good_news", Value: "false"}}), referer: p.page.URL, duoTraceGroup: p.traceGroup})
+		r, err = a.do(pushCtx, navigation{url: p.base + "/auth/factors/push/status?" + encodeFields([]field{{Name: "authkey", Value: p.authKey}, {Name: "push_txid", Value: started.Response.TxID}, {Name: "saw_good_news", Value: "false"}}), referer: p.page.URL, duoTraceGroup: p.traceGroup})
 		if err != nil {
+			if ctx.Err() != nil {
+				return "", ctx.Err()
+			}
+			if pushCtx.Err() != nil {
+				return "", ErrDuoPushTimedOut
+			}
 			return "", errors.New("Duo push status request failed")
 		}
 		var status struct {
@@ -81,8 +92,11 @@ func (a *authenticator) duoPush(ctx context.Context, p duoPrompt) (string, error
 			return "", ErrDuoPushRejected
 		}
 		select {
-		case <-ctx.Done():
-			return "", fmt.Errorf("%w: approval timed out", ErrDuoPushRejected)
+		case <-pushCtx.Done():
+			if ctx.Err() != nil {
+				return "", ctx.Err()
+			}
+			return "", ErrDuoPushTimedOut
 		case <-time.After(time.Second):
 		}
 	}

@@ -21,6 +21,7 @@ var (
 	ErrDuoPasscodeRejected = errors.New("Duo rejected the mobile passcode")
 
 	ErrDuoPushRejected = errors.New("Duo push was not approved")
+	ErrDuoPushTimedOut = fmt.Errorf("%w: approval timed out", ErrDuoPushRejected)
 
 	ErrSessionInvalid = errors.New("session expired")
 )

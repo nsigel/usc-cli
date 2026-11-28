@@ -8,35 +8,35 @@ description: Install the usc command, sign in once, and give your agent the skil
 
 ## With an agent
 
-Give this text to an agent. The agent must be able to run commands and keep credentials private.
+Send this prompt to an agent that can run shell commands and store credentials privately:
 
 ```text
 Set up the USC CLI for me: https://usc.sh/install.md
 ```
 
-The agent installs `usc`. Then it gives you a link to sign in. See [Sign in](/docs/auth/).
+The agent installs `usc`, saves the skill, and gives you a link to sign in. See [Sign in](/docs/auth/).
 
-To update `usc` and its skill, give the agent the same text again.
+To update `usc` and its skill later, send the same prompt again.
 
 ## By hand
 
 ### 1. Install
 
-On macOS and Linux, run:
+On macOS and Linux:
 
 ```sh
 curl -fsSL https://usc.sh/install | sh
 ```
 
-The script installs the latest [release](https://github.com/nsigel/usc-cli/releases) in `~/.local/bin`. Set `USC_INSTALL_DIR` to use another directory.
+The script installs the latest [release](https://github.com/nsigel/usc-cli/releases) into `~/.local/bin`. Set `USC_INSTALL_DIR` to use another directory.
 
-On all platforms with Go 1.24 or later, run:
+On any platform with Go 1.24 or later:
 
 ```sh
 go install github.com/nsigel/usc-cli/cmd/usc@latest
 ```
 
-On Windows without Go, download `usc_<version>_windows_amd64.exe` from the releases page. Change its name to `usc.exe`.
+On Windows without Go, download `usc_<version>_windows_amd64.exe` from the releases page and rename it to `usc.exe`.
 
 ### 2. Sign in
 
@@ -44,17 +44,17 @@ On Windows without Go, download `usc_<version>_windows_amd64.exe` from the relea
 usc auth login --web
 ```
 
-Open the printed `url` and sign in. See [Sign in](/docs/auth/).
+Open the printed `url` and sign in. See [Sign in](/docs/auth/) for `--remote`, terminal, and CI options.
 
 ### 3. Add the skill
 
-The skill is a short Markdown file. It gives an agent the commands and the rules for their use. Give this text to your agent:
+The skill is a short Markdown file giving agents the commands and rules for using `usc`. Send this prompt to your agent:
 
 ```text
 Add the usc skill: save the output of `usc skill` as a skill named usc-cli.
 ```
 
-Or, save the file yourself. For Claude Code, run:
+Or save it manually. For Claude Code:
 
 ```sh
 mkdir -p ~/.claude/skills/usc-cli
@@ -72,4 +72,4 @@ usc mobileorder locations
 
 ## Update
 
-Run the install command again. To see your version, run `usc version`.
+Rerun the install command, then regenerate the skill with `usc skill`. To check your version, run `usc version`.

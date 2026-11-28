@@ -4,13 +4,13 @@ title: Output and errors
 description: The JSON that usc prints, and how it reports errors.
 ---
 
-All commands except `usc skill` print JSON to stdout. The JSON is the value that the related Go library call returns. A list prints as a JSON array.
+Every command except `usc skill` prints JSON to stdout — the exact value returned by the corresponding Go library call, so lists print as JSON arrays.
 
-In a terminal, the output is indented. In a pipe, the output is on one line. To set the format, use `--pretty` or `--compact`.
+Output is pretty-printed in terminals and single-line in pipes. Pass `--pretty` or `--compact` to override.
 
 ## Errors
 
-`usc` prints errors as JSON to stderr and exits with status 1. If a different command can correct the problem, `action` gives that command:
+Errors print as JSON to stderr with exit code 1. When applicable, `code` identifies the error condition and `action` names the command that resolves it:
 
 ```json
 {"error":"brightspace: USC sign-in is required","action":"usc auth login"}
@@ -20,7 +20,7 @@ In a terminal, the output is indented. In a pipe, the output is on one line. To 
 
 | Command | Function |
 | --- | --- |
-| `usc auth login` / `status` / `logout` | Sign in, examine the session, or sign out. [Sign in](/docs/auth/) |
+| `usc auth login` / `status` / `logout` | Sign in, check the session, or sign out. [Sign in](/docs/auth/) |
 | `usc duo device ...`, `usc bypass create` | Manage Duo devices and bypass codes. [Sign in](/docs/auth/) |
 | `usc brightspace ...` | Courses, content, grades, announcements, assignments, downloads. [Brightspace](/docs/brightspace/) |
 | `usc webreg ...` | Terms, catalog, course bin, calendar, checkout. [WebReg](/docs/webreg/) |

@@ -126,10 +126,9 @@ func (s *Server) serveLoopback(ctx context.Context) error {
 // api runs one request from the page, whichever way it arrived. It reports
 // false for a request it cannot read.
 func (s *Server) api(path string, body []byte) (state, bool) {
+	waiter := path == "/api/wait"
 	switch path {
-	case "/api/wait":
-		return s.flow.snapshot(), true
-	case "/api/state":
+	case "/api/wait", "/api/state":
 	case "/api/retry":
 		s.flow.again()
 	case "/api/credentials":
@@ -164,7 +163,7 @@ func (s *Server) api(path string, body []byte) (state, bool) {
 	}
 	current := s.flow.snapshot()
 	if current.Step == stepDone || current.Step == stepFailed {
-		s.flow.release()
+		s.flow.acknowledge(waiter)
 	}
 	return current, true
 }
