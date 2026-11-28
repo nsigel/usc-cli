@@ -38,6 +38,8 @@ Use `--remote` when `usc` runs on a machine where you cannot open a browser.
 3. Select Accept.
 4. Sign in with your NetID, password, and Duo.
 
+If the agent's machine asks for approval to access a site, approve it. Sign-in stops until you approve.
+
 Only open a link that your own agent made for you. Your browser encrypts your input, and usc.sh sends only the encrypted messages.
 
 ## Sign out

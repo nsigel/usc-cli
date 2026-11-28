@@ -144,7 +144,9 @@ function Screen({ state, send }) {
     case "push":
       return html`<${Push} code=${state.code} round=${state.round} />`;
     case "working":
-      return html`<${Status} title="Signing in" text="Contacting USC…" busy />`;
+      return html`<${Status} title="Signing in" text="Contacting USC…" busy>
+        ${relayed && html`<${Text}>If your agent asks for approval to access a site, approve it.<//>`}
+      <//>`;
     case "done":
       return html`<${Status} status="success" title="Signed in to USC CLI" text="You can close this tab." />`;
     case "interrupted":
