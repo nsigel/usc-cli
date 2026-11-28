@@ -44,4 +44,63 @@ Tell the user that the setup is complete. Give the user some example requests:
 
 For all later tasks, obey the "Rules" section of the skill.
 
+## Hosts
+
+`usc` connects to these hosts. `usc.sh` is for `usc auth login --remote`.
+
+**`auth`, `duo`, `bypass`** (all commands that sign in use these hosts)
+
+```text
+login.microsoftonline.com
+login.live.com
+us.azureauth.duosecurity.com
+api-22627695.duosecurity.com
+uw1.devicemanagement.duosecurity.com
+account.usc.edu
+usc.sh
+```
+
+**`brightspace`**
+
+```text
+brightspace.usc.edu
+```
+
+**`webreg`**
+
+```text
+webreg.usc.edu
+```
+
+**`classes`**
+
+```text
+classes.usc.edu
+```
+
+**`handshake`**
+
+```text
+usc.joinhandshake.com
+```
+
+**`directory`**
+
+```text
+uscdirectory.usc.edu
+```
+
+**`libcal`**
+
+```text
+libcal.usc.edu
+libauth.com
+```
+
+**`mobileorder`**
+
+```text
+mobileorderprodapi.transactcampus.com
+```
+
 Full docs: https://usc.sh/docs/

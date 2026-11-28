@@ -101,7 +101,7 @@ price. Show the total, payment, and pickup time to the user before you run
 
 ## Notes
 
-- The hosts that `usc` connects to are at https://usc.sh/docs/#hosts.
+- The hosts that `usc` connects to are at https://usc.sh/install.md.
 - WebReg submits all changes or no changes. If one section fails, WebReg
   changes nothing. `messages` gives the reason.
 - On a registered section, `webreg grade-option` only sends a request. The

@@ -68,65 +68,6 @@ usc classes 20271 CSCI-270
 usc mobileorder locations
 ```
 
-## Hosts
-
-`usc` connects to these hosts. `usc.sh` is for `usc auth login --remote` and the install script.
-
-**`auth`, `duo`, `bypass`** (all commands that sign in use these hosts)
-
-```text
-login.microsoftonline.com
-login.live.com
-us.azureauth.duosecurity.com
-api-22627695.duosecurity.com
-uw1.devicemanagement.duosecurity.com
-account.usc.edu
-usc.sh
-```
-
-**`brightspace`**
-
-```text
-brightspace.usc.edu
-```
-
-**`webreg`**
-
-```text
-webreg.usc.edu
-```
-
-**`classes`**
-
-```text
-classes.usc.edu
-```
-
-**`handshake`**
-
-```text
-usc.joinhandshake.com
-```
-
-**`directory`**
-
-```text
-uscdirectory.usc.edu
-```
-
-**`libcal`**
-
-```text
-libcal.usc.edu
-libauth.com
-```
-
-**`mobileorder`**
-
-```text
-mobileorderprodapi.transactcampus.com
-```
-
 ## Update
 
 Run the install command again. To see your version, run `usc version`.
