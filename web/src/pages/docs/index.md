@@ -16,6 +16,8 @@ Set up the USC CLI for me: https://usc.sh/install.md
 
 The agent installs `usc`. Then it gives you a link to sign in. See [Sign in](/docs/auth/).
 
+To update `usc` and its skill, give the agent the same text again.
+
 ## By hand
 
 ### 1. Install

@@ -4,7 +4,7 @@ A command-line client for USC's Brightspace, Web Registration, Handshake, the St
 
 Docs: [usc.sh/docs](https://usc.sh/docs/)
 
-## Install
+## Install or update
 
 Ask your agent:
 
@@ -23,6 +23,8 @@ With Go 1.24 or later, on any platform:
 ```sh
 go install github.com/nsigel/usc-cli/cmd/usc@latest
 ```
+
+To update `usc` and its skill, ask your agent again. By hand, run the install command again. Then run `usc skill` again, as in [Give your agent the skill](#give-your-agent-the-skill).
 
 ## Sign in
 
