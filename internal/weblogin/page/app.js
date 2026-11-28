@@ -1,5 +1,5 @@
 import { html, render, useEffect, useState } from "./preact.js";
-import { Body, Button, Card, Check, Field, Header, Link, Note, Option, Options, Row, Text, Value } from "./ui.js";
+import { Approval, Body, Button, Card, Check, Field, Header, Link, Note, Option, Options, Row, Text, Value } from "./ui.js";
 
 const token = takeToken();
 
@@ -26,6 +26,8 @@ const requestLabel = new TextEncoder().encode("request");
 const client = Array.from(crypto.getRandomValues(new Uint8Array(8)), (byte) => byte.toString(16).padStart(2, "0")).join("");
 let sent = 0;
 let channel;
+// The relay has no page for this link, so asking again cannot help.
+const gone = new Error("gone");
 
 async function openChannel() {
   const secret = Uint8Array.from(atob(token.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
@@ -46,6 +48,7 @@ async function callRelay(path, body) {
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const sealed = await crypto.subtle.encrypt({ name: "AES-GCM", iv, additionalData: requestLabel }, key, padded);
   const response = await fetch(url, { method: "POST", body: new Blob([iv, sealed]) });
+  if (response.status === 404) throw gone;
   if (!response.ok) throw new Error(response.statusText);
   const answer = new Uint8Array(await response.arrayBuffer());
   const opened = await crypto.subtle.decrypt(
@@ -84,7 +87,8 @@ function App() {
     for (let attempt = 0; attempt < attempts; attempt++) {
       try {
         return setState(attempt ? await call("/api/state") : await call(path, body));
-      } catch {
+      } catch (error) {
+        if (error === gone) break;
         await new Promise((resolve) => setTimeout(resolve, 800));
       }
     }
@@ -140,9 +144,15 @@ function Screen({ state, send }) {
     case "push":
       return html`<${Push} code=${state.code} round=${state.round} />`;
     case "working":
-      return html`<${Status} title="Signing in" text="Contacting USC…" busy />`;
+      return html`<${Status} title="Signing in" text="Contacting USC…" busy>
+        ${relayed && html`<${Approval} title="Your agent may need approval">If it asks to access a site, approve it.<//>`}
+      <//>`;
     case "done":
       return html`<${Status} status="success" title="Signed in to USC CLI" text="You can close this tab." />`;
+    case "interrupted":
+      return html`<${Status} status="error" title="Sign-in didn't finish" text=${state.error}>
+        <${Button} type="button" onClick=${() => send("/api/retry", {})}>Try again<//>
+      <//>`;
     case "failed":
       return html`<${Status} status="error" title="Sign-in didn't finish" text=${state.error} />`;
     case "expired":
@@ -235,9 +245,9 @@ function Push({ code, round }) {
     <//>`;
 }
 
-function Status({ status, title, text, busy }) {
+function Status({ status, title, text, busy, children }) {
   return html`<${Header} title=${title} status=${status} />
-    <${Body}><${Text} busy=${busy}>${text}<//><//>`;
+    <${Body}><${Text} busy=${busy}>${text}<//>${children}<//>`;
 }
 
 render(html`<${App} />`, document.getElementById("app"));

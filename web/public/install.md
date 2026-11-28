@@ -31,6 +31,8 @@ If your agent does not have a skills directory, run `usc skill` at the start of 
 
 ## 3. Sign in
 
+In a sandbox, sign-in stops until the user approves each host that `usc` connects to. If you can change the allowed hosts of your environment, allow the hosts in the "Hosts" section now. If you cannot, open the sign-in link in your in-app browser. The user sees the approval requests there.
+
 Do the steps in the "Sign in" section of the skill.
 
 ## 4. Finish
@@ -43,5 +45,64 @@ Tell the user that the setup is complete. Give the user some example requests:
 - "what career fairs are coming up?"
 
 For all later tasks, obey the "Rules" section of the skill.
+
+## Hosts
+
+`usc` connects to these hosts. `usc.sh` is for `usc auth login --remote`.
+
+**`auth`, `duo`, `bypass`** (all commands that sign in use these hosts)
+
+```text
+login.microsoftonline.com
+login.live.com
+us.azureauth.duosecurity.com
+api-22627695.duosecurity.com
+uw1.devicemanagement.duosecurity.com
+account.usc.edu
+usc.sh
+```
+
+**`brightspace`**
+
+```text
+brightspace.usc.edu
+```
+
+**`webreg`**
+
+```text
+webreg.usc.edu
+```
+
+**`classes`**
+
+```text
+classes.usc.edu
+```
+
+**`handshake`**
+
+```text
+usc.joinhandshake.com
+```
+
+**`directory`**
+
+```text
+uscdirectory.usc.edu
+```
+
+**`libcal`**
+
+```text
+libcal.usc.edu
+libauth.com
+```
+
+**`mobileorder`**
+
+```text
+mobileorderprodapi.transactcampus.com
+```
 
 Full docs: https://usc.sh/docs/

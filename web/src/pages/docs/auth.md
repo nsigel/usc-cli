@@ -31,16 +31,16 @@ Without `--web` or `--remote`, `usc auth login` lists your Duo methods. Run the 
 
 ## Sign in from a different device
 
-Use `--remote` when `usc` runs on a machine where you cannot open a browser, for example an agent's cloud machine.
+Use `--remote` when `usc` runs on a machine where you cannot open a browser.
 
 1. Run `usc auth login --remote`.
-2. Open the printed `https://usc.sh/login/v1/` link on any device in ten minutes or less. Use the full link, with all the text after the `#`.
-3. Read the warning and select Accept.
+2. Open the printed link on any device in ten minutes or less.
+3. Select Accept.
 4. Sign in with your NetID, password, and Duo.
 
-Only open a link that your own agent made for you. A link from a different person gives their machine access to your account.
+If the agent's machine asks for approval to access a site, approve it. Sign-in stops until you approve.
 
-Your browser encrypts your input with a key from the link. The key is the text after the `#`, and the browser does not send it to usc.sh. usc.sh sends only encrypted messages to the machine that runs `usc`. You must trust the page that usc.sh gives you, as you trust the `usc` program.
+Only open a link that your own agent made for you. Your browser encrypts your input, and usc.sh sends only the encrypted messages.
 
 ## Sign out
 

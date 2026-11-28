@@ -182,6 +182,7 @@ func activateDuoDevice(ctx context.Context, s *Session, activation string) (stri
 func duoPortal(ctx context.Context, s *Session) (string, string, error) {
 	page, err := s.authenticator.open(ctx, "https://account.usc.edu/2fa/enroll", s.credentials, nil)
 	if err != nil {
+		forgetRejected(s.options.CredentialsFile, err, s.credentials)
 		return "", "", ForSite(SiteAccount, err)
 	}
 	if page.URL.Scheme != "https" || page.URL.Host != "uw1.devicemanagement.duosecurity.com" {
