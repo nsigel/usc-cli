@@ -19,9 +19,12 @@ import (
 )
 
 const (
-	lifetime    = 15 * time.Minute
-	pollWait    = 25 * time.Second
-	replyWait   = 30 * time.Second
+	lifetime  = 15 * time.Minute
+	pollWait  = 25 * time.Second
+	replyWait = 10 * time.Second
+	// ownerGrace is how long a channel lasts after its owner stops asking for
+	// messages, which it does when its process dies.
+	ownerGrace  = 10 * time.Second
 	maxRequest  = 4 << 10
 	maxReply    = 16 << 10
 	maxChannels = 10000
@@ -46,6 +49,21 @@ type channel struct {
 
 	mu      sync.Mutex
 	waiting map[string]*message
+	polling int
+	polled  time.Time
+}
+
+func (c *channel) abandoned() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.polling == 0 && time.Since(c.polled) > ownerGrace
+}
+
+func (c *channel) poll(change int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.polling += change
+	c.polled = time.Now()
 }
 
 type relay struct {
@@ -117,6 +135,7 @@ func (r *relay) register(w http.ResponseWriter, request *http.Request) {
 		queue:   make(chan *message, maxQueued),
 		closed:  make(chan struct{}),
 		waiting: map[string]*message{},
+		polled:  time.Now(),
 	}
 	r.mu.Lock()
 	_, taken := r.channels[name]
@@ -157,6 +176,8 @@ func (r *relay) remove(w http.ResponseWriter, request *http.Request, found *chan
 }
 
 func next(w http.ResponseWriter, request *http.Request, found *channel) {
+	found.poll(1)
+	defer found.poll(-1)
 	select {
 	case pending := <-found.queue:
 		w.Header().Set("Relay-Request", pending.id)
@@ -193,6 +214,10 @@ func reply(w http.ResponseWriter, request *http.Request, found *channel) {
 // ask queues a message from the page and holds the request open for its reply.
 func (r *relay) ask(w http.ResponseWriter, request *http.Request) {
 	found := r.find(request.PathValue("channel"))
+	if found != nil && found.abandoned() {
+		r.drop(request.PathValue("channel"), found)
+		found = nil
+	}
 	if found == nil {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
