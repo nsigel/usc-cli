@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/nsigel/usc-cli/internal/dom"
 	http "github.com/saucesteals/fhttp"
@@ -223,19 +224,26 @@ func activateDuoDevice(ctx context.Context, s *Session, activation string) (stri
 		return "", err
 	}
 
+	// Emulate the current Duo Mobile for Android release enrolling from a
+	// current Samsung tablet: the form fields, activation URL, and user agent
+	// below match what Duo Mobile 4.126.0 (versionCode 4126000) sends when it
+	// posts to /push/v2/activation/<code>. The security patch level reports the
+	// current month, as an up-to-date Samsung device would.
+	patchLevel := time.Now().UTC().Format("2006-01") + "-05"
 	fields := url.Values{
-		"customer_protocol": {"1"}, "pubkey": {string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: public}))},
-		"pkpush": {"rsa-sha512"}, "jailbroken": {"false"}, "architecture": {"arm64"}, "region": {"US"},
+		"pubkey": {string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: public}))},
+		"pkpush": {"rsa-sha512"}, "jailbroken": {"false"}, "architecture": {"aarch64"}, "region": {"US"},
 		"app_id": {"com.duosecurity.duomobile"}, "full_disk_encryption": {"true"}, "passcode_status": {"true"},
-		"app_version": {"4.110.0"}, "app_build_number": {"4110000"}, "version": {"13"},
-		"manufacturer": {"unknown"}, "language": {"en"}, "security_patch_level": {"2022-11-05"},
-		"platform": {"Android"}, "model": {"Galaxy Tab A8"},
+		"app_version": {"4.126.0"}, "app_build_number": {"4126000"}, "version": {"16"},
+		"manufacturer": {"samsung"}, "language": {"en"}, "security_patch_level": {patchLevel},
+		"platform": {"Android"}, "model": {"Galaxy Tab S9"},
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://"+string(decoded)+"/push/v2/activation/"+url.PathEscape(parts[0]), strings.NewReader(fields.Encode()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://"+string(decoded)+"/push/v2/activation/"+url.PathEscape(parts[0])+"?customer_protocol=1", strings.NewReader(fields.Encode()))
 	if err != nil {
 		return "", errors.New("invalid Duo activation request")
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("User-Agent", "DuoMobileApp/4.126.0 (Android 16; Galaxy Tab S9) okhttp3/4.12.0 ca_bundle/1.0 (ca_pinning=enabled)")
 	var response struct {
 		Stat     string `json:"stat"`
 		Response struct {
