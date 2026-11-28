@@ -3,7 +3,6 @@ package mobileorder
 import (
 	"context"
 	"github.com/nsigel/usc-cli/auth"
-	"github.com/nsigel/usc-cli/site"
 )
 
 type userWire struct {
@@ -19,7 +18,7 @@ type Account struct {
 
 func (c *Client) Account(ctx context.Context) (*Account, error) {
 	if c.token == "" {
-		return nil, auth.ForSite(site.MobileOrder, auth.ErrCredentialsRequired)
+		return nil, auth.ForSite(auth.SiteMobileOrder, auth.ErrCredentialsRequired)
 	}
 	var result struct {
 		User userWire `json:"user"`
@@ -28,7 +27,7 @@ func (c *Client) Account(ctx context.Context) (*Account, error) {
 		return nil, err
 	}
 	if result.User.ID != c.userID || result.User.CampusID != 155 {
-		return nil, auth.ForSite(site.MobileOrder, auth.ErrSessionInvalid)
+		return nil, auth.ForSite(auth.SiteMobileOrder, auth.ErrSessionInvalid)
 	}
 	return &Account{ID: result.User.ID, CampusID: result.User.CampusID}, nil
 }

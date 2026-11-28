@@ -8,8 +8,7 @@ import (
 	"strings"
 
 	"github.com/nsigel/usc-cli/auth"
-	"github.com/nsigel/usc-cli/site"
-	"github.com/nsigel/usc-cli/weblogin"
+	"github.com/nsigel/usc-cli/internal/weblogin"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -18,7 +17,7 @@ func authCommand() *cobra.Command {
 	return group("auth", "Manage the saved USC sign-in", loginCommand(), statusCommand(), logoutCommand())
 }
 
-const signInProbe = site.Brightspace
+const signInProbe = auth.SiteBrightspace
 
 func loginCommand() *cobra.Command {
 	cmd := &cobra.Command{

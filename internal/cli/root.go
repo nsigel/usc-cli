@@ -25,7 +25,7 @@ func New() *cobra.Command {
 	root.PersistentFlags().Bool("compact", false, "emit single-line JSON")
 	root.PersistentFlags().Bool("pretty", false, "pretty-print JSON")
 	root.MarkFlagsMutuallyExclusive("compact", "pretty")
-	root.AddCommand(duoCommand(), authCommand(), bypassCommand(), browserCommand(), brightspaceCommand(), handshakeCommand(), libcalCommand(), webregCommand(), directoryCommand(), classesCommand(), mobileorderCommand(), skillCommand(), versionCommand())
+	root.AddCommand(duoCommand(), authCommand(), bypassCommand(), brightspaceCommand(), handshakeCommand(), libcalCommand(), webregCommand(), directoryCommand(), classesCommand(), mobileorderCommand(), skillCommand(), versionCommand())
 	return root
 }
 
@@ -94,7 +94,7 @@ func WriteError(cmd *cobra.Command, err error) error {
 	}
 	var siteErr *auth.SiteError
 	switch {
-	case errors.As(err, &siteErr), errors.Is(err, auth.ErrSessionNotFound):
+	case errors.As(err, &siteErr):
 		info.Action = "usc auth login"
 	case info.Code == "libcal_booking_unknown", info.Code == "libcal_cleanup_failed":
 		info.Action = "usc libcal release"

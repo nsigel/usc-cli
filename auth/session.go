@@ -27,14 +27,6 @@ type savedSession struct {
 	Cookies []StoredCookie `json:"cookies"`
 }
 
-func LoadStoredCookies(sessionFile string) ([]StoredCookie, error) {
-	session, err := readSession(sessionFile)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, ErrSessionNotFound
-	}
-	return session.Cookies, err
-}
-
 func readSession(name string) (savedSession, error) {
 	var session savedSession
 	data, err := os.ReadFile(name)

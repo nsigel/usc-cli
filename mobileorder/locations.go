@@ -3,7 +3,6 @@ package mobileorder
 import (
 	"context"
 	"github.com/nsigel/usc-cli/auth"
-	"github.com/nsigel/usc-cli/site"
 )
 
 type Location struct {
@@ -14,7 +13,7 @@ type Location struct {
 
 func (c *Client) Locations(ctx context.Context) ([]Location, error) {
 	if c.token == "" {
-		return nil, auth.ForSite(site.MobileOrder, auth.ErrCredentialsRequired)
+		return nil, auth.ForSite(auth.SiteMobileOrder, auth.ErrCredentialsRequired)
 	}
 	var result struct {
 		Locations []struct {

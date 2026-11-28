@@ -5,7 +5,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/nsigel/usc-cli/skill"
+	usc "github.com/nsigel/usc-cli"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
@@ -18,10 +18,7 @@ func skillCommand() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			writer := cmd.OutOrStdout()
-			if err := skill.WriteUSC(writer); err != nil {
-				return err
-			}
-			_, err := io.WriteString(writer, "\n## All commands\n\nGenerated from the CLI; run `usc <command> --help` for flag details.\n\n"+commandIndex(cmd.Root()))
+			_, err := io.WriteString(writer, usc.SkillMD+"\n## All commands\n\nGenerated from the CLI; run `usc <command> --help` for flag details.\n\n"+commandIndex(cmd.Root()))
 			return err
 		},
 	}

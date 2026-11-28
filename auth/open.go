@@ -3,8 +3,6 @@ package auth
 import (
 	"context"
 	"errors"
-
-	"github.com/nsigel/usc-cli/site"
 )
 
 type Options struct {
@@ -49,14 +47,14 @@ func (o Options) ResolveCredentials() (Credentials, error) {
 }
 
 type SiteError struct {
-	Site site.Name
+	Site Site
 	Err  error
 }
 
 func (e *SiteError) Error() string { return string(e.Site) + ": " + e.Err.Error() }
 func (e *SiteError) Unwrap() error { return e.Err }
 
-func ForSite(name site.Name, err error) error {
+func ForSite(name Site, err error) error {
 	var attributed *SiteError
 	if errors.As(err, &attributed) {
 		return err
@@ -69,8 +67,8 @@ func ForSite(name site.Name, err error) error {
 	return err
 }
 
-func Open(ctx context.Context, name site.Name, options Options) (*Session, error) {
-	target, err := site.LoginURL(name)
+func Open(ctx context.Context, name Site, options Options) (*Session, error) {
+	target, err := loginURL(name)
 	if err != nil {
 		return nil, err
 	}

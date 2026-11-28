@@ -10,6 +10,8 @@ Each command calls a Go package. The CLI only reads the flags and prints the res
 go get github.com/nsigel/usc-cli
 ```
 
+The import path of each package is `github.com/nsigel/usc-cli/` and the package name. The packages in `internal/` are for the `usc` command only.
+
 | Package | Entry point |
 | --- | --- |
 | `brightspace` | `Open(ctx, auth.Options)` |
@@ -19,9 +21,8 @@ go get github.com/nsigel/usc-cli
 | `libcal` | `NewPublic()` for schedules, `Open(auth.Options)` for booking |
 | `mobileorder` | `Open(ctx, auth.Options)` for authenticated calls; `New().USC(ctx)` for public campus information |
 | `classes` | `New()` |
-| `auth` | `Options`, `Open(ctx, site.Name, Options)` for a raw SSO session, `SiteError` |
-| `browser` | `SyncCookies(ctx, sessionFile, target)` |
-| `skill` | `WriteUSC(writer)` |
+| `auth` | `Options`, `Open(ctx, auth.Site, Options)` for a raw SSO session, `SiteError` |
+| `usc` (the module root) | `SkillMD`, `CredentialsPath()`, `SessionPath()` |
 
 ## Sign in
 
@@ -33,7 +34,7 @@ options := auth.Options{Credentials: auth.Credentials{
 }}
 
 // or
-file, err := config.CredentialsPath()
+file, err := usc.CredentialsPath()
 options := auth.Options{CredentialsFile: file}
 
 client, err := brightspace.Open(ctx, options)

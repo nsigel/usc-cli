@@ -9,7 +9,7 @@ import (
 	"net/url"
 	"time"
 
-	sitePage "github.com/nsigel/usc-cli/weblogin/page"
+	sitePage "github.com/nsigel/usc-cli/internal/weblogin/page"
 )
 
 var errNotPage = errors.New("not a sign-in page URL")

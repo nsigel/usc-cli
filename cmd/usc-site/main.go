@@ -16,8 +16,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/nsigel/usc-cli/relay"
-	"github.com/nsigel/usc-cli/weblogin/page"
+	"github.com/nsigel/usc-cli/internal/relay"
+	"github.com/nsigel/usc-cli/internal/weblogin/page"
 )
 
 func main() {

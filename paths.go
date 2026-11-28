@@ -1,11 +1,11 @@
-package config
+package usc
 
 import (
 	"os"
 	"path/filepath"
 )
 
-func Directory() (string, error) {
+func ConfigDir() (string, error) {
 	root := os.Getenv("USC_CONFIG_DIR")
 	if root == "" {
 		base, err := os.UserConfigDir()
@@ -26,7 +26,7 @@ func SessionPath() (string, error) {
 }
 
 func path(name string) (string, error) {
-	directory, err := Directory()
+	directory, err := ConfigDir()
 	if err != nil {
 		return "", err
 	}
