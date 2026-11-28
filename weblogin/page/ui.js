@@ -102,14 +102,13 @@ export function Option({ icon, label, detail, tag, onClick }) {
   </button>`;
 }
 
-// A picture of the banner an agent's app shows when it needs permission to
-// reach a site, so the user knows it when they see it.
-export function ApprovalExample({ site }) {
-  return html`<div class="approval" role="img" aria-label="Example: your agent needs approval to access ${site}. Review.">
+// Styled like the banner an agent's app shows when it needs permission to
+// reach a site, so the user connects the two.
+export function Approval({ title, children }) {
+  return html`<p class="approval">
     <span class="approval-icon"><${Icon} name="globe" size=${20} /></span>
-    <span class="approval-text"><strong>Agent needs approval</strong><span>Access ${site}</span></span>
-    <span class="approval-action">Review</span>
-  </div>`;
+    <span class="approval-text"><strong>${title}</strong>${children}</span>
+  </p>`;
 }
 
 export function Note({ icon, children }) {

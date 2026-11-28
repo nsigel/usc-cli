@@ -121,7 +121,6 @@ body {
   border: 1px solid var(--border);
   border-radius: 20px;
   background: var(--hover);
-  user-select: none;
 }
 
 .approval-icon {
@@ -146,16 +145,6 @@ body {
 
 .approval-text strong {
   color: var(--text);
-  font-weight: 600;
-}
-
-.approval-action {
-  flex: none;
-  padding: 6px 14px;
-  border-radius: 999px;
-  background: #0a84ff;
-  color: #ffffff;
-  font-size: 14px;
   font-weight: 600;
 }
 

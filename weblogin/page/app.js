@@ -1,5 +1,5 @@
 import { html, render, useEffect, useState } from "./preact.js";
-import { ApprovalExample, Body, Button, Card, Check, Field, Header, Link, Note, Option, Options, Row, Text, Value } from "./ui.js";
+import { Approval, Body, Button, Card, Check, Field, Header, Link, Note, Option, Options, Row, Text, Value } from "./ui.js";
 
 const token = takeToken();
 
@@ -145,9 +145,7 @@ function Screen({ state, send }) {
       return html`<${Push} code=${state.code} round=${state.round} />`;
     case "working":
       return html`<${Status} title="Signing in" text="Contacting USC…" busy>
-        ${relayed &&
-        html`<${Text}>If your agent shows a banner like this one, approve it.<//>
-          <${ApprovalExample} site="duosecurity.com" />`}
+        ${relayed && html`<${Approval} title="Your agent may need approval">If it asks to access a site, approve it.<//>`}
       <//>`;
     case "done":
       return html`<${Status} status="success" title="Signed in to USC CLI" text="You can close this tab." />`;
