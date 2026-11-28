@@ -25,9 +25,9 @@ usc mobileorder orders [--pending]
 
 ## Order
 
-1. Make the cart with `cart`.
-2. Get the price with `quote`.
-3. Send the order with `order place`.
+1. Build the cart with `cart`.
+2. Price it with `quote`.
+3. Place the order with `order place`.
 4. Run `order continue` until the stage is `success`.
 
 **Warning:** `order continue` can charge you.
@@ -74,12 +74,12 @@ The cart must contain `date` and `time`. An empty string sets the next available
 
 - Payment method `0` is the campus card. The campus card also requires `--tender` from `checkout`.
 - All prices are integer cents.
-- An available item does not show that the location is open. Examine the location status.
+- An available item does not mean the location is open; check location status first.
 - All copies of one item get the same selections.
-- For a combo, select the child modifiers with the child item ID.
-- Only the stage `success` shows that the order is complete.
-- To add a payment card, use the official app.
-- `mobileorder_order_unknown`: it is possible that the order exists. Examine `orders --pending` and `orders` before you try again. `usc` does not retry a purchase.
+- For a combo, select child modifiers with the child item ID.
+- Only stage `success` confirms the order is complete.
+- Add payment cards in the official app.
+- On `mobileorder_order_unknown`, the order may have gone through. Check `orders --pending` and `orders` before retrying; `usc` never retries a purchase automatically.
 
 ## Live tests
 

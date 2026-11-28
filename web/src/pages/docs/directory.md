@@ -17,7 +17,7 @@ usc directory student STUDENT_ID
 ## Notes
 
 - Each value matches as a substring.
-- The directory returns 100 matches or fewer. If `truncated` is `true`, make the search narrower.
+- The directory returns at most 100 matches. If `truncated` is `true`, narrow your filters.
 - The output does not include fields that a student did not publish.
 - `title`, `department`, and `division` occur only for students with a USC job.
 

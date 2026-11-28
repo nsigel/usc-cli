@@ -45,7 +45,7 @@ usc libcal cancel 'https://libcal.usc.edu/equipment/cancel?id=CODE' --booking 13
 
 - LibCal cannot list your bookings. The confirmation email is your record.
 - If a booking fails, `usc` releases its hold.
-- If the result of a booking is unknown, `usc` stops new bookings. Examine your email. Then run `release`. `release` does not cancel a confirmed booking.
-- `availability` does not hold or book a space. A missing interval is not available. An empty result does not show the end of the booking period.
+- If a booking outcome is unknown, `usc` blocks new bookings until you clear it. Check your email, then run `release` (it never cancels a confirmed booking).
+- `availability` does not hold or book a space. A missing interval is unavailable, and an empty result does not mean the booking window has ended.
 - Anyone with a cancellation link can cancel its bookings. The link does not require sign-in.
 - `bookings` continues to list past and canceled bookings, with `cancelable: false`.

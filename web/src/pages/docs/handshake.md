@@ -4,7 +4,7 @@ title: Handshake
 description: Search Handshake events and career fairs, read their details, and register for fair sessions.
 ---
 
-Reads Handshake events and career fairs. Registers you for fair sessions. Requires a USC sign-in.
+Searches Handshake events and career fairs and registers for fair sessions. Requires a USC sign-in.
 
 ```sh
 usc handshake categories

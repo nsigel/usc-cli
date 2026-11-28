@@ -10,6 +10,7 @@ import (
 	"strconv"
 
 	"github.com/nsigel/usc-cli/auth"
+	"github.com/nsigel/usc-cli/internal/weblogin"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -95,6 +96,9 @@ func WriteError(cmd *cobra.Command, err error) error {
 	var siteErr *auth.SiteError
 	switch {
 	case errors.As(err, &siteErr):
+		info.Action = "usc auth login"
+	case errors.Is(err, weblogin.ErrPageClosed):
+		info.Code = "sign_in_page_closed"
 		info.Action = "usc auth login"
 	case info.Code == "libcal_booking_unknown", info.Code == "libcal_cleanup_failed":
 		info.Action = "usc libcal release"

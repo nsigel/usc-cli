@@ -23,14 +23,21 @@ func loginCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "login",
 		Short: "Sign in to USC and save the credentials for later commands",
-		Long: "Sign in to USC and save the credentials for later commands.\n\n" +
-			"With --web, print the URL of a sign-in page on this machine. With --remote,\n" +
-			"print a usc.sh link that opens on any device; the page encrypts what is\n" +
-			"typed for this machine, and usc.sh relays only the encrypted messages.\n" +
-			"Then run usc auth status --wait URL.\n\n" +
-			"Without either, the first login lists Duo methods. Rerun with --push-device,\n" +
-			"--mobile-code, or --sms-device to add a Duo device, or --bypass to sign in\n" +
-			"with a bypass code instead.",
+		Long: "Sign in to USC and save credentials for later commands.\n\n" +
+			"Browser sign-in (and terminal sign-in unless --bypass is used) enrolls a\n" +
+			"Duo TOTP device (named with --device-name) so later commands authenticate\n" +
+			"automatically. Subsequent sign-ins for the same NetID reuse the saved device.\n\n" +
+			"Browser sign-in (recommended for humans and required for chat agents):\n" +
+			"  --web     Start a local sign-in page on 127.0.0.1 (valid 10 minutes).\n" +
+			"            Use on your own machine or when the user can control a local browser.\n" +
+			"  --remote  Start an end-to-end encrypted sign-in page on usc.sh (valid 10 minutes).\n" +
+			"            Use when the user's browser cannot reach this machine.\n" +
+			"Then wait for completion with: usc auth status --wait URL\n\n" +
+			"Terminal and CI sign-in (without --web or --remote):\n" +
+			"  Prompts for NetID and password in an interactive terminal, or reads USC_*\n" +
+			"  environment variables. The first run lists available Duo methods; rerun\n" +
+			"  with --push-device, --mobile-code, or --sms-device to enroll a Duo device,\n" +
+			"  or --bypass to sign in with a bypass code instead.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if serve, _ := cmd.Flags().GetBool("web-serve"); serve {
@@ -113,11 +120,23 @@ func loginCommand() *cobra.Command {
 	return cmd
 }
 
+type authStatus struct {
+	Authenticated    bool   `json:"authenticated"`
+	CredentialsSaved bool   `json:"credentials_saved"`
+	DuoDeviceID      string `json:"duo_device_id,omitempty"`
+}
+
 func statusCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Check the saved USC session and credentials",
-		Args:  cobra.NoArgs,
+		Long: "Check whether the saved USC session is active and whether credentials are saved.\n\n" +
+			"If the session cookies have expired but a Duo TOTP device is saved, status\n" +
+			"refreshes the session automatically without prompting, and exits with the\n" +
+			"sign-in error if USC or Duo rejects the saved credentials. With --wait URL, blocks\n" +
+			"until the sign-in page finishes and returns an error if the page closes or\n" +
+			"expires without completing sign-in.",
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			options, err := signIn()
 			if err != nil {
@@ -127,19 +146,50 @@ func statusCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			var waitErr error
 			if page, _ := cmd.Flags().GetString("wait"); page != "" {
-				if err := weblogin.Wait(cmd.Context(), page); err != nil {
-					return err
+				waitErr = weblogin.Wait(cmd.Context(), page)
+				if waitErr != nil && !errors.Is(waitErr, weblogin.ErrPageClosed) {
+					return waitErr
 				}
 				if credentials, err = options.ResolveCredentials(); err != nil {
 					return err
 				}
 			}
 			_, err = auth.Open(cmd.Context(), signInProbe, auth.Options{SessionFile: options.SessionFile})
-			if err != nil && !errors.Is(err, auth.ErrCredentialsRequired) {
+			// When session cookies have expired and a reusable Duo TOTP device is saved,
+			// verify and refresh the session so status reflects whether commands will work.
+			// Never spend a bypass code during a status check, and skip refresh if --wait
+			// saw the sign-in page close without reporting completion.
+			if errors.Is(err, auth.ErrCredentialsRequired) &&
+				!errors.Is(waitErr, weblogin.ErrPageClosed) &&
+				credentials.Username != "" && credentials.Password != "" && credentials.DuoTOTPSecret != "" {
+				totp := credentials
+				totp.BypassCode = ""
+				_, err = auth.Open(cmd.Context(), signInProbe, auth.Options{
+					Credentials:     totp,
+					CredentialsFile: options.CredentialsFile,
+					SessionFile:     options.SessionFile,
+				})
+			}
+			if errors.Is(waitErr, weblogin.ErrPageClosed) {
+				if err != nil {
+					if errors.Is(err, auth.ErrCredentialsRequired) {
+						return waitErr
+					}
+					return err
+				}
+			} else if err != nil && !errors.Is(err, auth.ErrCredentialsRequired) {
 				return err
 			}
-			return writeJSON(cmd, map[string]bool{"authenticated": err == nil, "credentials_saved": credentials.Complete()})
+			status := authStatus{
+				Authenticated:    err == nil,
+				CredentialsSaved: credentials.Complete(),
+			}
+			if options.Credentials.DuoTOTPSecret == "" {
+				status.DuoDeviceID = credentials.DuoDeviceID
+			}
+			return writeJSON(cmd, status)
 		},
 	}
 	cmd.Flags().String("wait", "", "Wait for the sign-in page at this URL to finish")

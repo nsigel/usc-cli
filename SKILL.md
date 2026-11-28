@@ -2,118 +2,82 @@
 name: usc-cli
 description: >
   Use the user's USC accounts through the usc CLI. Use this skill when the user
-  asks what is due, about grades, announcements, or course files; if a class or
-  section has open seats; to plan or change registration; about career fairs
-  and events; to find a student; to find or book a Leavey Library room; or to
-  order food from a USC dining location.
+  asks what is due, about grades, announcements, or course files; whether a
+  class or section has open seats; to plan or change registration; about career
+  fairs and events; to look up a student; to find or book a Leavey Library room;
+  or to order food from a USC dining location.
 ---
 
 # USC CLI
 
-Run `usc` commands for the user. Use `--help` on a command to see its arguments.
+Run `usc` commands for the user. Pass `--help` to any command to see its flags and arguments.
 
 ## Rules
 
 - `usc` writes JSON to stdout. All money values are integer cents.
-- `usc` writes errors as JSON to stderr and exits with code 1. Read `code`.
-  If the error has `action`, run that command.
-- Before you run a command that changes the user's accounts, get the user's
-  approval for that exact change. These commands are `webreg submit`,
-  `libcal book`, `libcal cancel`, `career-fair-register`,
-  `career-fair-cancel`, `order place`, `order continue`, and `order cancel`.
-- Do not select sections, rooms, times, menu modifiers, or form answers for
-  the user. If more than one choice is possible, ask the user.
-- Give the user a summary. Do not show raw JSON. Show money in dollars.
+- Errors are JSON on stderr with exit code 1. Check `code`; if `action` is `"usc auth login"`, follow the Sign in section below, and for any other `action`, run that command.
+- Get the user's explicit approval for the exact action before running any mutating command: `webreg submit`, `libcal book`, `libcal cancel`, `career-fair-register`, `career-fair-cancel`, `order place`, `order continue`, and `order cancel`.
+- Never pick sections, rooms, times, menu modifiers, or form answers on the user's behalf. When more than one option fits, ask.
+- Summarize results for the user instead of dumping raw JSON. Format money in dollars.
 
 ## Sign in
 
-Do these steps when an error has `"action": "usc auth login"`:
+Run this flow when a command returns `"action": "usc auth login"` or `usc auth status` reports `"authenticated": false`:
 
-1. Run one of these commands. Use a name that the user can identify in their
-   Duo devices. The command prints a `url`. The `url` is valid for ten
-   minutes.
-   - `usc auth login --web --device-name NAME`: use this if you run on the
-     user's computer, or if you have a browser on your machine that the user
-     can control.
-   - `usc auth login --remote --device-name NAME`: use this in all other
-     conditions.
-2. If you have a browser that the user can control, open the `url` there and
-   ask the user to take control. If not, give the full `url` to the user.
-   The user signs in on the page.
-3. Run `usc auth status --wait URL`. If your command times out, run it again.
-4. If the command fails or prints `"authenticated": false`, start again at
-   step 1.
+1. Start a sign-in page with a `--device-name` the user will recognize in their Duo devices (such as your agent or machine name):
+   - `usc auth login --web --device-name NAME` — use this when running on the user's computer, or when you have a browser on your machine that the user can control.
+   - `usc auth login --remote --device-name NAME` — use this everywhere else (remote VMs, headless sandboxes, chat-only agents).
+   The command prints a one-time `url` valid for 10 minutes.
+2. Hand the `url` to the user:
+   - If you have a browser the user can control, open `url` there and ask the user to take control.
+   - Otherwise, send the full `url` to the user so they can open it on any device.
+3. Wait for sign-in to complete with `usc auth status --wait URL`.
+   - If your shell tool times out while the user is still signing in, run `usc auth status --wait URL` again.
+   - If `usc auth status --wait URL` exits with `sign_in_page_closed` or a sign-in failure, the link is finished — restart at step 1. If it fails to reach the relay, report the error and stop.
 
-The `--remote` page encrypts the user's input for your machine. Do not make a
-tunnel. Do not ask for a session file. If `--remote` fails, tell the user the
-error and stop.
+Rules for sign-in:
 
-To make sure that a `127.0.0.1` page is available, do a `GET /healthz` on its
-host, for example `curl http://127.0.0.1:PORT/healthz`. It returns
-`{"status":"ok"}` until sign-in is complete or the page expires.
-
-Do not ask for credentials in chat. Do not accept credentials in chat. Do not
-read, capture, or type into the sign-in page.
+- Never ask for or accept USC passwords, Duo codes, or session files in chat. Never read, screenshot, or type into the sign-in page.
+- `--remote` end-to-end encrypts input for your machine through `usc.sh`. Do not create a tunnel or proxy. If `--remote` fails to reach `usc.sh`, report the error and stop; do not fall back to plain `usc auth login`, which prompts in a terminal.
+- To check whether a local `127.0.0.1` page is still live, `GET http://127.0.0.1:PORT/healthz` returns `{"status":"ok","expires_at":...}` until sign-in completes or the page expires.
 
 ## Courses
 
-`usc brightspace courses` gives the course IDs for `content`, `grades`,
-`announcements`, and `assignments`. `content --flat` gives the topic IDs for
-`download`. `assignments` gives the folder IDs for `submissions`.
+`usc brightspace courses` returns course IDs for `content`, `grades`, `announcements`, and `assignments`. `content --flat` returns topic IDs for `download`; `assignments` returns folder IDs for `submissions`.
 
-`usc classes TERM_CODE COURSE_CODE` shows public sections, seats, and times.
-It does not need sign-in.
+`usc classes TERM_CODE COURSE_CODE` shows public sections, seats, and meeting times without signing in.
 
 ## Registration
 
-`usc webreg terms` gives the term codes. `courses` gives the section IDs.
-Use `add`, `schedule`, `unschedule`, and `remove` to change the course bin.
-Show the `checkout` preview to the user before you run `submit --confirm`.
+`usc webreg terms` lists term codes, and `courses` lists section IDs. Plan changes with `add`, `schedule`, `unschedule`, and `remove`, then show the `checkout` preview to the user before running `submit --confirm`.
 
-`submit` registers the scheduled sections. It also drops the registered
-sections that are not scheduled.
+`submit` registers all scheduled sections and drops any registered sections that are no longer scheduled.
 
 ## Career events
 
-Use `usc handshake events` or `career-fairs`. `career-fair FAIR_ID` gives the
-session IDs for `career-fair-register` and `career-fair-cancel`. When you use
-`--after` for the next page, keep the same filters.
+Use `usc handshake events` or `career-fairs`. `career-fair FAIR_ID` lists session IDs for `career-fair-register` and `career-fair-cancel`. Keep the same filters when paging with `--after`.
 
 ## Student directory
 
-`usc directory students` gives the student IDs for `student`.
+`usc directory students` returns student IDs for `student`.
 
 ## Library rooms
 
-Use `usc libcal availability` for a fixed time. Use `schedule` for flexible
-times. To book, copy the space ID and interval times exactly as `usc` prints
-them.
+Use `usc libcal availability` for a fixed window or `schedule` for flexible times. When booking, pass the exact space ID and interval timestamps printed by `usc`.
 
-To cancel, get the cancellation link from the user's confirmation email. Run
-`libcal bookings LINK`. Then run `cancel LINK --booking ID`.
+To cancel, get the cancellation link from the user's confirmation email, list bookings with `libcal bookings LINK`, and cancel with `cancel LINK --booking ID`.
 
 ## Dining orders
 
-Use `usc mobileorder locations`, `payments`, `menu`, `item`, and `checkout` to
-find the choices. Use `cart` to make the cart. Then use `quote` to get the
-price. Show the total, payment, and pickup time to the user before you run
-`order place`.
+Discover choices with `usc mobileorder locations`, `payments`, `menu`, `item`, and `checkout`. Build the cart with `cart`, price it with `quote`, and show the total, payment method, and pickup time to the user before running `order place`.
 
 ## Notes
 
-- WebReg submits all changes or no changes. If one section fails, WebReg
-  changes nothing. `messages` gives the reason.
-- On a registered section, `webreg grade-option` only sends a request. The
-  change occurs at checkout.
-- Some Handshake fairs require an attendee form. The user must complete the
-  form on Handshake.
-- LibCal cannot list the user's bookings. The confirmation email is the record.
-- `libcal_booking_unknown`: it is possible that the booking exists. Tell the
-  user to examine their email. Then run `usc libcal release`.
-- An available menu item does not show that the location is open. Examine the
-  location status.
-- **Warning:** `order continue` can charge the user. Only the stage `success`
-  shows that the order is complete.
-- `mobileorder_order_unknown`: it is possible that the order exists. Examine
-  `orders --pending` and `orders` before you try again. Do not automatically
-  retry a purchase.
+- WebReg checkout is all-or-nothing: if one section fails, nothing changes, and `messages` explains why.
+- On an already-registered section, `webreg grade-option` queues a change request that takes effect at checkout.
+- Some Handshake fairs require an attendee form that the user must fill out on Handshake.
+- LibCal does not list existing bookings; the confirmation email is the record.
+- On `libcal_booking_unknown`, the booking may have gone through. Ask the user to check their email, then run `usc libcal release`.
+- An available menu item does not mean the dining location is open; check location status first.
+- **Warning:** `order continue` can charge the user. Only stage `success` confirms the order is complete.
+- On `mobileorder_order_unknown`, the order may have gone through. Check `orders --pending` and `orders` before retrying; never automatically retry a purchase.

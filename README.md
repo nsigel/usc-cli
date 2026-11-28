@@ -24,7 +24,7 @@ With Go 1.24 or later, on any platform:
 go install github.com/nsigel/usc-cli/cmd/usc@latest
 ```
 
-To update `usc` and its skill, ask your agent again. By hand, run the install command again. Then run `usc skill` again, as in [Give your agent the skill](#give-your-agent-the-skill).
+To update `usc` and its skill, ask your agent again. By hand, rerun the install command and regenerate the skill (see [Give your agent the skill](#give-your-agent-the-skill)).
 
 ## Sign in
 
@@ -32,7 +32,7 @@ To update `usc` and its skill, ask your agent again. By hand, run the install co
 usc auth login --web
 ```
 
-Open the printed `url` and sign in with your NetID, password, and Duo. Later commands sign in on their own. For scripts and CI, set `USC_USERNAME`, `USC_PASSWORD`, and `USC_DUO_TOTP_SECRET` or `USC_DUO_BYPASS` instead. Details: [Sign in](https://usc.sh/docs/auth/).
+Open the printed `url` and sign in with your NetID, password, and Duo. Later commands authenticate automatically. On remote machines, use `usc auth login --remote`; for scripts and CI, set `USC_USERNAME`, `USC_PASSWORD`, and `USC_DUO_TOTP_SECRET` or `USC_DUO_BYPASS`. Details: [Sign in](https://usc.sh/docs/auth/).
 
 ## Give your agent the skill
 

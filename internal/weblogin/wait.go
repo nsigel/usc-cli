@@ -12,10 +12,17 @@ import (
 	sitePage "github.com/nsigel/usc-cli/internal/weblogin/page"
 )
 
-var errNotPage = errors.New("not a sign-in page URL")
+var (
+	errNotPage = errors.New("not a sign-in page URL")
+	// ErrPageClosed reports that the sign-in page stopped serving before
+	// reporting completion (for example, it expired or its process exited).
+	ErrPageClosed = errors.New("the sign-in page closed or expired before sign-in finished")
+	localClient   = &http.Client{Timeout: 10 * time.Second}
+)
 
 // Wait blocks until the sign-in page at pageURL finishes or stops serving.
-// It returns an error only when the page reports a failed sign-in.
+// It returns nil on completion, ErrPageClosed if the page stops answering
+// before reporting a final state, or an error describing why sign-in failed.
 func Wait(ctx context.Context, pageURL string) error {
 	page, err := url.Parse(pageURL)
 	if err != nil || page.Fragment == "" {
@@ -42,11 +49,14 @@ func Wait(ctx context.Context, pageURL string) error {
 				}
 				return current, true, nil
 			}
+			if ctx.Err() != nil {
+				return state{}, false, ctx.Err()
+			}
 			failures++
 			switch {
-			// A relay that restarts forgets the page for a moment.
+			// A relay that restarts forgets the page briefly while the owner re-registers.
 			case status == http.StatusNotFound && failures >= 5,
-				// Nothing has answered for a minute, so the sign-in has stopped.
+				// Two consecutive relay timeouts (~20s) mean the serving process stopped answering.
 				status == http.StatusGatewayTimeout && failures >= 2:
 				return state{}, false, nil
 			case failures >= 15:
@@ -61,8 +71,11 @@ func Wait(ctx context.Context, pageURL string) error {
 				return state{}, false, err
 			}
 			request.Header.Set("Authorization", "Bearer "+page.Fragment)
-			response, err := http.DefaultClient.Do(request)
+			response, err := localClient.Do(request)
 			if err != nil {
+				if ctx.Err() != nil {
+					return state{}, false, ctx.Err()
+				}
 				return state{}, false, nil
 			}
 			defer response.Body.Close()
@@ -81,7 +94,10 @@ func Wait(ctx context.Context, pageURL string) error {
 		case err != nil:
 			return err
 		case !serving:
-			return ctx.Err()
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return ErrPageClosed
 		case current.Step == stepDone:
 			return nil
 		case current.Step == stepFailed:

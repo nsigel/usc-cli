@@ -1,6 +1,6 @@
 # Ordering from the terminal
 
-Sign in with `usc auth login`. Mobile-order commands reuse USC SSO and keep
+Sign in with `usc auth login --web` (or `--remote` on a remote machine). Mobile-order commands reuse USC SSO and keep
 the Transact bearer token in memory. They do not save carts or order history.
 
 ## Browse and choose

@@ -36,7 +36,7 @@ usc webreg checkout --term 20271
 usc webreg submit --term 20271 --confirm
 ```
 
-To drop a registered section, run `unschedule`. Then do steps 2 and 3.
+To drop a registered section, run `unschedule`, then preview with `checkout` and submit with `submit --confirm`.
 
 ## Notes
 

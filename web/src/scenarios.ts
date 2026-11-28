@@ -59,15 +59,15 @@ export const scenarios: Scenario[] = [
     answer: "One: the Marshall Consulting & Strategy Fair, Nov 19, 11 am–3 pm at Town & Gown. 42 employers so far.",
   },
   {
-    question: "did my 270 hw grade post",
+    question: "order an iced latte from trojan grounds",
     site: {
-      name: "Brightspace",
-      host: "brightspace.usc.edu",
-      tabs: ["Home", "Content", "Grades"],
-      cards: ["ECON 203", "CSCI 270", "WRIT 150", "BUAD 306"],
-      target: 1,
+      name: "Dining",
+      host: "transactcampus.com",
+      tabs: ["Locations", "Menu", "Orders"],
+      cards: ["Trojan Grounds", "Seeds", "Literatea", "Cava"],
+      target: 0,
     },
-    calls: ["usc brightspace grades 150112 --graded-only"],
-    answer: "Yes, Homework 6 posted this morning: 46/50. Your course total is 91.2%.",
+    calls: ["usc mobileorder locations", "usc mobileorder quote --cart cart.json"],
+    answer: "Trojan Grounds is open. Iced Latte (16 oz) is $5.45 on Dining Dollars, ready in ~10 min. Place the order?",
   },
 ];

@@ -1,59 +1,63 @@
 ---
 layout: ../../layouts/Docs.astro
 title: Sign in
-description: Sign in once on a local page; later commands sign in automatically.
+description: Sign in once in your browser or terminal; later commands authenticate automatically.
 ---
 
-Sign in one time. Later commands sign in automatically.
+Sign in once. Browser sign-in (and terminal sign-in unless `--bypass` is used) enrolls a dedicated Duo TOTP device for `usc` so later commands authenticate automatically without prompting.
 
 ```sh
-usc auth login --web
-usc auth login --remote
-usc auth login [--push-device DEVICE_ID | --mobile-code | --sms-device DEVICE_ID | --bypass]
-usc auth status
+usc auth login --web [--device-name NAME]
+usc auth login --remote [--device-name NAME]
+usc auth login [--push-device DEVICE_ID | --mobile-code | --sms-device DEVICE_ID | --bypass] [--device-name NAME]
+usc auth status [--wait URL]
 usc auth logout
-usc duo device create
+usc duo device create [--device-name NAME]
 usc duo device delete DEVICE_ID
 usc bypass create
 ```
 
-## Sign in
+## Browser sign-in (`--web`)
 
-1. Run `usc auth login --web`.
-2. Open the printed `url` in ten minutes or less.
+Use `--web` on your own computer, or when an agent has a browser on its machine that you can take control of.
+
+1. Run `usc auth login --web` (pass `--device-name NAME` to choose the name shown in your Duo devices).
+2. Open the printed `http://127.0.0.1` URL within 10 minutes.
 3. Sign in with your NetID, password, and Duo.
 
-Sign-in adds a Duo device for USC CLI. Later commands use this device.
+When an agent runs sign-in, it either opens the link in a browser you control or gives you the link. Never paste your USC password or Duo codes into chat.
 
-An agent gives you the link. Or, the agent opens the link in its browser, and you control the browser. Do not put your password or Duo codes in chat.
+## Remote browser sign-in (`--remote`)
 
-Without `--web` or `--remote`, `usc auth login` lists your Duo methods. Run the command again with one of these methods.
+Use `--remote` when `usc` runs on a remote VM, headless sandbox, or cloud agent whose `127.0.0.1` your browser cannot reach.
 
-## Sign in from a different device
-
-Use `--remote` when `usc` runs on a machine where you cannot open a browser.
-
-1. Run `usc auth login --remote`.
-2. Open the printed link on any device in ten minutes or less.
-3. Select Accept.
+1. Run `usc auth login --remote` (optionally with `--device-name NAME`).
+2. Open the printed `https://usc.sh/login/v1/#...` link on any device within 10 minutes.
+3. Review the warning and click **Accept**.
 4. Sign in with your NetID, password, and Duo.
 
-If the agent's machine asks for approval to access a site, approve it. Sign-in stops until you approve.
+Only open a `--remote` link created by your own agent. Your browser encrypts everything with AES-256-GCM using the key in the URL fragment, which is never sent to the server; `usc.sh` forwards only ciphertext to your `usc` process.
 
-Only open a link that your own agent made for you. Your browser encrypts your input, and usc.sh sends only the encrypted messages.
+## Terminal and CI sign-in
 
-## Sign out
+Without `--web` or `--remote`, `usc auth login` signs in through your interactive terminal (or non-interactively via environment variables). Do not use this mode with chat agents.
 
-`usc auth logout` deletes the local credentials and cookies. It does not delete the Duo device. To delete the device, run `usc duo device delete DEVICE_ID`. `DEVICE_ID` is the `id` that sign-in prints.
+- **Interactive terminal:** The first run prompts for your NetID and password, then prints your available Duo methods. Rerun with `--push-device DEVICE_ID`, `--mobile-code`, or `--sms-device DEVICE_ID` to enroll a Duo device, or `--bypass` to sign in with a one-time bypass code instead.
+- **Scripts and CI:** Set `USC_USERNAME`, `USC_PASSWORD`, and either `USC_DUO_TOTP_SECRET` or `USC_DUO_BYPASS`. Environment variables override saved credentials for any command (`usc auth login` still saves `credentials.json`, and authenticated commands still update `session.json`).
 
-`bypass create` can cancel your old bypass codes. Its output contains the new code.
+## Duo devices, status, and sign out
+
+- **Reuse vs. enrollment:** The first browser sign-in (or terminal sign-in without `--bypass`) creates a Duo TOTP device for `usc` and saves its secret and `duo_device_id` in `credentials.json`. Subsequent sign-ins for the same NetID reuse that saved Duo device instead of creating a duplicate.
+- **Checking status:** `usc auth status` reports `authenticated`, `credentials_saved`, and `duo_device_id` (when enrolled from `credentials.json`). If session cookies have expired and a Duo TOTP device is saved, `status` refreshes the session automatically (without spending a bypass code) and returns an auth error if the saved credentials are rejected. Pass `--wait URL` to block until a `--web` or `--remote` sign-in page finishes.
+- **Signing out:** `usc auth logout` deletes local `credentials.json` and `session.json`, but leaves the Duo device on your USC account. To remove it from Duo, run `usc duo device delete DEVICE_ID` first (using `duo_device_id` from `usc auth status`), or delete it in USC Duo device management.
+- **Bypass codes:** `usc bypass create` generates and saves a Duo bypass code. It may invalidate previous bypass codes, and its JSON output contains the code — do not log it.
 
 ## Credential location
 
-`usc` keeps `credentials.json` and `session.json` in this directory:
+`usc` stores `credentials.json` and `session.json` with `0600` permissions in:
 
 - macOS: `~/Library/Application Support/usc/`
 - Linux: `$XDG_CONFIG_HOME/usc/` or `~/.config/usc/`
 - Windows: `%AppData%\usc\`
 
-Keep this directory private. To use a different directory, set `USC_CONFIG_DIR`.
+Keep this directory private. Set `USC_CONFIG_DIR` to use a different directory.

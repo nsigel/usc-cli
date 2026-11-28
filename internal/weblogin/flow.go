@@ -50,10 +50,13 @@ type flow struct {
 	passwordFailures int
 	duoFailures      int
 
-	workers   sync.WaitGroup
-	codes     chan string
-	delivered chan struct{}
-	deliver   sync.Once
+	workers         sync.WaitGroup
+	codes           chan string
+	delivered       chan struct{}
+	deliver         sync.Once
+	pageGrace       sync.Once
+	pageDelivered   bool
+	waiterDelivered bool
 }
 
 func newFlow(options Options) *flow {
@@ -93,9 +96,31 @@ func (f *flow) finish(final state) {
 	time.AfterFunc(30*time.Second, f.release)
 }
 
-// release lets the server stop once the page has seen the final state.
+// release lets the server stop once the final state has been observed.
 func (f *flow) release() {
 	f.deliver.Do(func() { close(f.delivered) })
+}
+
+// acknowledge records that either the browser page or `status --wait` read the
+// final state. Once both have seen it, the server stops immediately; if only
+// the browser has seen it, a short grace window lets a polling waiter catch up.
+func (f *flow) acknowledge(waiter bool) {
+	f.mu.Lock()
+	if waiter {
+		f.waiterDelivered = true
+	} else {
+		f.pageDelivered = true
+	}
+	both := f.pageDelivered && f.waiterDelivered
+	pageOnly := f.pageDelivered && !f.waiterDelivered
+	f.mu.Unlock()
+	if both {
+		f.release()
+		return
+	}
+	if pageOnly {
+		f.pageGrace.Do(func() { time.AfterFunc(10*time.Second, f.release) })
+	}
 }
 
 // run starts a step that talks to USC; Serve waits for it before exiting.
@@ -141,7 +166,7 @@ func (f *flow) signIn(credentials auth.Credentials) {
 	}
 	if _, err := auth.Open(f.ctx, f.options.Probe, f.authOptions()); err != nil {
 		if errors.Is(err, auth.ErrDuoPasscodeRejected) {
-			err = errors.New("The saved Duo device no longer works. Sign out, then sign in again.")
+			err = errors.New("Duo rejected the code from the saved device. Wait 30 seconds, then try again. If Duo rejects it again, run usc auth logout on the computer that runs usc, then start a new sign-in.")
 		}
 		f.retry(err)
 		return
@@ -249,6 +274,8 @@ func (f *flow) retry(err error) {
 		if f.passwordFailures >= maxPasswordFailures {
 			next = state{Step: stepFailed, Error: "Too many incorrect passwords."}
 		}
+	case errors.Is(err, auth.ErrDuoPushTimedOut):
+		next = f.duoRetry("The Duo push timed out.")
 	case errors.Is(err, auth.ErrDuoPushRejected):
 		next = f.duoRetry("The push wasn't approved.")
 	case errors.Is(err, auth.ErrDuoPasscodeRejected), errors.Is(err, auth.ErrDuoSMSRejected), errors.Is(err, auth.ErrBypassRejected):
