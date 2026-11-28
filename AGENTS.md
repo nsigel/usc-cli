@@ -1,7 +1,9 @@
 - Put behavior and result types in library packages. CLI commands parse inputs,
   call the library, and print its result.
 - Libraries receive credentials and session paths through `auth.Options`.
-  Only `cli` reads configuration paths and `USC_*` variables.
+  Only `internal/cli` reads configuration paths and `USC_*` variables.
+- Put a package in `internal/` unless a Go program outside this module uses it.
+  The root package `usc` holds the skill and the configuration paths.
 - Keep wire types unexported and resource code in separate files.
 - Wrap authentication failures in `*auth.SiteError`; CLI action hints belong
   in `cli.WriteError`.

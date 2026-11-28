@@ -9,7 +9,7 @@ import (
 	"os/exec"
 
 	"github.com/nsigel/usc-cli/auth"
-	"github.com/nsigel/usc-cli/weblogin"
+	"github.com/nsigel/usc-cli/internal/weblogin"
 	"github.com/spf13/cobra"
 )
 

@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/nsigel/usc-cli/auth"
-	"github.com/nsigel/usc-cli/site"
 	http "github.com/saucesteals/fhttp"
 )
 
@@ -19,7 +18,7 @@ const (
 	maxBody    = 4 << 20
 )
 
-var errSessionInvalid = &auth.SiteError{Site: site.Directory, Err: auth.ErrSessionInvalid}
+var errSessionInvalid = &auth.SiteError{Site: auth.SiteDirectory, Err: auth.ErrSessionInvalid}
 
 type Doer interface {
 	Do(*http.Request) (*http.Response, error)
@@ -34,7 +33,7 @@ func New(httpClient Doer) *Client {
 }
 
 func Open(ctx context.Context, options auth.Options) (*Client, error) {
-	session, err := auth.Open(ctx, site.Directory, options)
+	session, err := auth.Open(ctx, auth.SiteDirectory, options)
 	if err != nil {
 		return nil, err
 	}

@@ -23,8 +23,6 @@ var (
 	ErrDuoPushRejected = errors.New("Duo push was not approved")
 
 	ErrSessionInvalid = errors.New("session expired")
-
-	ErrSessionNotFound = errors.New("no saved session")
 )
 
 type Credentials struct {

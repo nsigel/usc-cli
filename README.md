@@ -98,7 +98,6 @@ usc classes 20271 CSCI-270
 | `usc mobileorder orders [--pending]` | Past or pending orders |
 | `usc mobileorder order place\|continue\|cancel\|check-in [ARGS]` | Explicit purchase and order actions |
 | `usc classes TERM_CODE COURSE_CODE` | Public course and sections, no sign-in |
-| `usc browser sync [--cdp TARGET]` | Copy the session into Chrome |
 | `usc skill` | Print the agent skill |
 | `usc version` | Print the version |
 

@@ -7,15 +7,15 @@ import (
 	"os"
 	"time"
 
+	usc "github.com/nsigel/usc-cli"
 	"github.com/nsigel/usc-cli/auth"
 	"github.com/nsigel/usc-cli/brightspace"
-	"github.com/nsigel/usc-cli/config"
 )
 
 func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	credentials, err := config.CredentialsPath()
+	credentials, err := usc.CredentialsPath()
 	if err != nil {
 		log.Fatal(err)
 	}

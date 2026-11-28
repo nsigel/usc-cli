@@ -3,9 +3,9 @@ package cli
 import (
 	"os"
 
+	usc "github.com/nsigel/usc-cli"
 	"github.com/nsigel/usc-cli/auth"
 	"github.com/nsigel/usc-cli/brightspace"
-	"github.com/nsigel/usc-cli/config"
 	"github.com/nsigel/usc-cli/directory"
 	"github.com/nsigel/usc-cli/handshake"
 	"github.com/nsigel/usc-cli/libcal"
@@ -14,11 +14,11 @@ import (
 )
 
 func signIn() (auth.Options, error) {
-	credentialsFile, err := config.CredentialsPath()
+	credentialsFile, err := usc.CredentialsPath()
 	if err != nil {
 		return auth.Options{}, err
 	}
-	sessionFile, err := config.SessionPath()
+	sessionFile, err := usc.SessionPath()
 	if err != nil {
 		return auth.Options{}, err
 	}

@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/nsigel/usc-cli/auth"
-	"github.com/nsigel/usc-cli/site"
 	http "github.com/saucesteals/fhttp"
 )
 
@@ -23,7 +22,7 @@ const (
 
 var ErrAuthenticationRequired = &Error{
 	Code: "libcal_authentication_required", Message: "LibCal needs a USC sign-in",
-	Cause: &auth.SiteError{Site: site.LibCal, Err: auth.ErrCredentialsRequired},
+	Cause: &auth.SiteError{Site: auth.SiteLibCal, Err: auth.ErrCredentialsRequired},
 }
 
 type Doer interface {
@@ -61,7 +60,7 @@ func Open(options auth.Options) (*Client, error) {
 		if errors.Is(err, auth.ErrCredentialsRequired) {
 			return response, ErrAuthenticationRequired
 		}
-		return response, auth.ForSite(site.LibCal, err)
+		return response, auth.ForSite(auth.SiteLibCal, err)
 	}
 	return client, nil
 }

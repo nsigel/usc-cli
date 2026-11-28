@@ -17,7 +17,6 @@ import (
 
 	"github.com/nsigel/usc-cli/auth"
 	"github.com/nsigel/usc-cli/internal/dom"
-	"github.com/nsigel/usc-cli/site"
 )
 
 const apiOrigin = "https://mobileorderprodapi.transactcampus.com"
@@ -32,7 +31,7 @@ func Open(ctx context.Context, options auth.Options) (*Client, error) {
 		defer r.Body.Close()
 	}
 	if err != nil {
-		return nil, auth.ForSite(site.MobileOrder, err)
+		return nil, auth.ForSite(auth.SiteMobileOrder, err)
 	}
 	if r.Request.URL.Scheme != "https" || r.Request.URL.Host != "mobileorderprodapi.transactcampus.com" || r.Request.URL.Path != "/api_user/samlsuccess" {
 		return nil, fmt.Errorf("mobileorder: unexpected SSO callback")
@@ -47,7 +46,7 @@ func Open(ctx context.Context, options auth.Options) (*Client, error) {
 	}
 	token := dom.Attr(dom.FindFirst(doc, dom.ID("temp_token")), "value")
 	if token == "" {
-		return nil, auth.ForSite(site.MobileOrder, auth.ErrSessionInvalid)
+		return nil, auth.ForSite(auth.SiteMobileOrder, auth.ErrSessionInvalid)
 	}
 	c := New()
 	c.http.CheckRedirect = func(req *http.Request, via []*http.Request) error { return http.ErrUseLastResponse }
@@ -102,7 +101,7 @@ func (c *Client) call(ctx context.Context, endpoint string, input map[string]any
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == 401 || resp.StatusCode == 403 {
-		return auth.ForSite(site.MobileOrder, auth.ErrSessionInvalid)
+		return auth.ForSite(auth.SiteMobileOrder, auth.ErrSessionInvalid)
 	}
 	if resp.StatusCode != 200 {
 		return fmt.Errorf("mobileorder: HTTP %d", resp.StatusCode)
@@ -120,7 +119,7 @@ func (c *Client) call(ctx context.Context, endpoint string, input map[string]any
 	}
 	if envelope.Status != "OK" {
 		if envelope.Reason == "TOKEN" {
-			return auth.ForSite(site.MobileOrder, auth.ErrSessionInvalid)
+			return auth.ForSite(auth.SiteMobileOrder, auth.ErrSessionInvalid)
 		}
 		if envelope.Reason != "" && len(envelope.Reason) < 64 && strings.IndexFunc(envelope.Reason, func(r rune) bool { return !(r >= 'A' && r <= 'Z' || r == '_') }) == -1 {
 			return fmt.Errorf("mobileorder: API rejected request (%s)", envelope.Reason)

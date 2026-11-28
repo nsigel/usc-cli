@@ -29,6 +29,5 @@ In a terminal, the output is indented. In a pipe, the output is on one line. To 
 | `usc libcal ...` | Leavey rooms, schedules, and bookings. [Leavey Library](/docs/libcal/) |
 | `usc mobileorder ...` | Dining menus, carts, quotes, and orders. [Mobile ordering](/docs/mobileorder/) |
 | `usc classes TERM COURSE` | Public course sections. [Schedule of Classes](/docs/classes/) |
-| `usc browser sync` | Copy the session into Chrome. [Browser sync](/docs/browser/) |
 | `usc skill` | Print the agent skill as Markdown |
 | `usc version` | Print the version and commit |

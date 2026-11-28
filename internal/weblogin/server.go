@@ -17,8 +17,7 @@ import (
 	"time"
 
 	"github.com/nsigel/usc-cli/auth"
-	"github.com/nsigel/usc-cli/site"
-	"github.com/nsigel/usc-cli/weblogin/page"
+	"github.com/nsigel/usc-cli/internal/weblogin/page"
 )
 
 const lifetime = 10 * time.Minute
@@ -27,7 +26,7 @@ type Options struct {
 	// Auth supplies CredentialsFile, SessionFile, and DuoDeviceName; other fields are ignored.
 	Auth auth.Options
 	// Probe is the site opened to confirm a sign-in that needs no new Duo device.
-	Probe site.Name
+	Probe auth.Site
 	// Relay is the site that serves the page and forwards its sealed requests
 	// here, for a browser that cannot reach this machine. Empty serves the
 	// page on the loopback interface.

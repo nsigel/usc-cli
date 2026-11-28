@@ -65,7 +65,7 @@ reproduce legacy identity-field registration as a substitute for SSO.
 The app also has email/password login and registration; these are separate
 Transact credentials and must not be confused with USC credentials.
 
-Repository integration: add site.MobileOrder and an auth adapter after
+Repository integration: add auth.SiteMobileOrder and an auth adapter after
 verifying the SSO entry and callback with a real authorized session. Return
 `*auth.SiteError` on token rejection. Keep credentials/session ownership
 explicit, and extend existing session serialization if necessary; do not
@@ -282,7 +282,7 @@ from a server auth token; it must not be treated as the authentication secret.
 
 Use `auth.Session.Authenticate` directly in mobileorder.Open so the client
 can consume the callback body: generic auth.Open currently discards it.
-Add site.MobileOrder for attributed errors. Keep token decoding and private
+Add auth.SiteMobileOrder for attributed errors. Keep token decoding and private
 identity state in mobileorder. Initially keeping the Transact identity in
 memory and using saved SSO cookies for a new exchange avoids inventing
 another local state file. If token persistence becomes necessary, extend

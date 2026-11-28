@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/nsigel/usc-cli/auth"
-	"github.com/nsigel/usc-cli/site"
 	http "github.com/saucesteals/fhttp"
 )
 
@@ -20,7 +19,7 @@ const (
 	detailGraphQL = "/hs/graphql"
 )
 
-var errSessionInvalid = &auth.SiteError{Site: site.Handshake, Err: auth.ErrSessionInvalid}
+var errSessionInvalid = &auth.SiteError{Site: auth.SiteHandshake, Err: auth.ErrSessionInvalid}
 
 type Doer interface {
 	Do(*http.Request) (*http.Response, error)
@@ -35,7 +34,7 @@ func New(httpClient Doer) *Client {
 }
 
 func Open(ctx context.Context, options auth.Options) (*Client, error) {
-	session, err := auth.Open(ctx, site.Handshake, options)
+	session, err := auth.Open(ctx, auth.SiteHandshake, options)
 	if err != nil {
 		return nil, err
 	}

@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/nsigel/usc-cli/internal/dom"
-	"github.com/nsigel/usc-cli/site"
 )
 
 const bypassURL = "https://account.usc.edu/2fa/duo-bypass-code"
@@ -29,15 +28,15 @@ func CreateBypassCode(ctx context.Context, options Options) (*BypassCode, error)
 	page, err := session.authenticator.open(ctx, bypassURL, session.credentials, nil)
 	if err != nil {
 		forgetRejected(options.CredentialsFile, err, session.credentials)
-		return nil, ForSite(site.Account, err)
+		return nil, ForSite(SiteAccount, err)
 	}
 	if page.URL.Scheme != "https" || page.URL.Host != "account.usc.edu" || page.URL.Path != "/2fa/duo-bypass-code" {
-		return nil, ForSite(site.Account, ErrSessionInvalid)
+		return nil, ForSite(SiteAccount, ErrSessionInvalid)
 	}
 	document := dom.Parse(page.Body)
 	code := dom.Attr(dom.FindFirst(document, dom.ID("bypassCode")), "value")
 	if !bypassCodePattern.MatchString(code) {
-		return nil, ForSite(site.Account, fmt.Errorf("%w: bypass-code page did not contain a valid code; interactive identity verification may be required", ErrSessionInvalid))
+		return nil, ForSite(SiteAccount, fmt.Errorf("%w: bypass-code page did not contain a valid code; interactive identity verification may be required", ErrSessionInvalid))
 	}
 	result := &BypassCode{Code: code}
 	if options.CredentialsFile != "" {
