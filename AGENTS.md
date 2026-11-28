@@ -10,7 +10,7 @@
   JSON in pipes; honor `--pretty` and `--compact`.
 - No command aliases or shorthand flags.
 - Require explicit booking slots, terms, and form answers.
-- Only `usc auth login` may prompt: in a terminal, or on its `--web` loopback page.
+- Only `usc auth login` may prompt: in a terminal, or on its `--web` or `--remote` page.
 - Never log credentials, activation secrets, or cookies.
 - Persist only `session.json`, `credentials.json`, and LibCal checkout recovery.
 - Verify with live tests; do not add unit tests.

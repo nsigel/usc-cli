@@ -1,5 +1,5 @@
-import { html, render, useEffect, useState } from "/preact.js";
-import { Body, Button, Card, Check, Field, Header, Link, Note, Option, Options, Row, Text, Value } from "/ui.js";
+import { html, render, useEffect, useState } from "./preact.js";
+import { Body, Button, Card, Check, Field, Header, Link, Note, Option, Options, Row, Text, Value } from "./ui.js";
 
 const token = takeToken();
 
@@ -18,7 +18,46 @@ function takeToken() {
   }
 }
 
+// On usc.sh the page cannot reach the machine signing in, so every request is
+// sealed with the link's key and passed through a relay that cannot read it.
+const relayed = location.pathname !== "/";
+const requestLabel = new TextEncoder().encode("request");
+// Requests are numbered so that one the relay sends twice is answered once.
+const client = Array.from(crypto.getRandomValues(new Uint8Array(8)), (byte) => byte.toString(16).padStart(2, "0")).join("");
+let sent = 0;
+let channel;
+
+async function openChannel() {
+  const secret = Uint8Array.from(atob(token.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+  const label = new TextEncoder().encode("usc-cli relay channel");
+  const name = new Uint8Array(await crypto.subtle.digest("SHA-256", new Uint8Array([...label, ...secret])));
+  return {
+    key: await crypto.subtle.importKey("raw", secret, "AES-GCM", false, ["encrypt", "decrypt"]),
+    url: `/relay/${Array.from(name.slice(0, 16), (byte) => byte.toString(16).padStart(2, "0")).join("")}`,
+  };
+}
+
+async function callRelay(path, body) {
+  const { key, url } = await (channel ??= openChannel());
+  // Padding hides the length of what was typed.
+  const plain = new TextEncoder().encode(JSON.stringify({ client, seq: ++sent, path, body }));
+  const padded = new Uint8Array(Math.ceil(plain.length / 512) * 512).fill(32);
+  padded.set(plain);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const sealed = await crypto.subtle.encrypt({ name: "AES-GCM", iv, additionalData: requestLabel }, key, padded);
+  const response = await fetch(url, { method: "POST", body: new Blob([iv, sealed]) });
+  if (!response.ok) throw new Error(response.statusText);
+  const answer = new Uint8Array(await response.arrayBuffer());
+  const opened = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: answer.slice(0, 12), additionalData: iv },
+    key,
+    answer.slice(12),
+  );
+  return JSON.parse(new TextDecoder().decode(opened));
+}
+
 async function call(path, body) {
+  if (relayed) return callRelay(path, body);
   const response = await fetch(path, {
     method: body ? "POST" : "GET",
     headers: { Authorization: `Bearer ${token}`, ...(body && { "Content-Type": "application/json" }) },
@@ -28,14 +67,21 @@ async function call(path, body) {
   return response.json();
 }
 
+// The relay adds a round trip to every request and can drop out for a few
+// seconds while usc.sh restarts, so a relayed page asks less often and waits
+// longer before giving up.
+const pollEvery = relayed ? 1500 : 800;
+const attempts = relayed ? 8 : 3;
+
 function App() {
   const [state, setState] = useState(null);
   const [expired, setExpired] = useState(!token);
+  const [accepted, setAccepted] = useState(!relayed);
 
   // A failed request falls back to reading the state, and only repeated
   // failures mean the server has gone.
   const send = async (path, body) => {
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (let attempt = 0; attempt < attempts; attempt++) {
       try {
         return setState(attempt ? await call("/api/state") : await call(path, body));
       } catch {
@@ -52,18 +98,34 @@ function App() {
   const waiting = !expired && (state?.step === "working" || state?.step === "push");
   useEffect(() => {
     if (!waiting) return;
-    const timer = setInterval(() => send("/api/state"), 800);
+    const timer = setInterval(() => send("/api/state"), pollEvery);
     return () => clearInterval(timer);
   }, [waiting]);
 
   const finished = state?.step === "done" || state?.step === "failed";
+  const shown = finished || !expired ? state : { step: "expired" };
   return html`<${Card} footer=${html`<${Footer} />`}>
-    <${Screen} state=${finished || !expired ? state : { step: "expired" }} send=${send} />
+    ${accepted || !shown || finished || expired
+      ? html`<${Screen} state=${shown} send=${send} />`
+      : html`<${Consent} accept=${() => setAccepted(true)} />`}
   <//>`;
 }
 
+// Anyone can make one of these links, so the page says what signing in gives
+// away before it asks for a password.
+function Consent({ accept }) {
+  return html`<${Header}
+      title="Before you sign in"
+      error="Signing in gives whoever made this link full access to your USC account."
+    />
+    <${Body}>
+      <${Text}>Only accept if you asked your own AI agent for this link. If someone sent it to you, close this page.<//>
+      <${Button} type="button" onClick=${accept}>Accept<//>
+    <//>`;
+}
+
 function Footer() {
-  return html`<${Note} icon="lock">Local USC login<//>
+  return html`<${Note} icon="lock">${relayed ? "Encrypted USC login" : "Local USC login"}<//>
     <${Link} icon="github" href="https://github.com/nsigel/usc-cli">GitHub<//>`;
 }
 

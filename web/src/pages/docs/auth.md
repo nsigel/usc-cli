@@ -15,6 +15,25 @@ codes into chat.
 
 Sign-in adds a Duo device for USC CLI, so later commands sign in on their own.
 
+## From another device
+
+```sh
+usc auth login --remote
+```
+
+When `usc` runs on a machine you can't open a browser on, such as an agent's
+cloud VM, this prints a `https://usc.sh/login/v1/` link that opens anywhere,
+including your phone. The page first asks you to accept that the machine
+which made the link will get access to your account.
+
+Your browser encrypts what you type with a key held in the link after the `#`,
+which is never sent to usc.sh. The site passes along only encrypted messages,
+so your password is not readable in transit or in its logs. You are still
+trusting the page usc.sh serves, as you trust the `usc` program itself.
+
+Only open a link you asked your own agent for. A link someone else sends you
+signs their machine in to your account.
+
 ## Using a terminal
 
 ```sh

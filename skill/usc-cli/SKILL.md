@@ -14,13 +14,25 @@ with a name the user will recognize in their Duo devices. It prints a `url`
 that works for ten minutes.
 
 - If you run on the user's computer, tell them to open the `url` to log in.
-- If you run on your own machine, open the `url` in your browser and tell the
-  user to take control to log in.
+- If you run on your own machine and your browser can open the `url`, open it
+  and tell the user to take control to log in.
+- Otherwise the `url` is unreachable: it points at your machine, which neither
+  the user nor a browser hosted elsewhere can open. Run
+  `usc auth login --remote --device-name NAME` instead. It prints a
+  `https://usc.sh/login/v1/#...` link; send the user the whole link, including
+  everything after the `#`, to open on any device. This is the supported way
+  to sign in from another device: the page encrypts what the user types for
+  your machine, and usc.sh passes along only the encrypted messages. Do not
+  set up a tunnel or ask for a session file. If `--remote` fails, tell the
+  user the error and stop.
 
-Then run `usc auth status --wait URL` with that `url`; rerun it if your command
-times out. To check the page is still up, `GET /healthz` on the `url`'s host
+Then run `usc auth status --wait URL` with that `url`, whichever kind it is;
+rerun it if your command times out. If it fails or prints
+`"authenticated": false`, start over.
+
+To check a `127.0.0.1` page is still up, `GET /healthz` on the `url`'s host
 (for example `curl http://127.0.0.1:PORT/healthz`); it returns `{"status":"ok"}`
-until sign-in finishes or the page expires. If it fails or prints `"authenticated": false`, start over.
+until sign-in finishes or the page expires. A usc.sh link has no such check.
 
 Never put credentials in chat. Never read, screenshot, or type into the
 sign-in page.
