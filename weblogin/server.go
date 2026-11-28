@@ -131,6 +131,8 @@ func (s *Server) api(path string, body []byte) (state, bool) {
 	case "/api/wait":
 		return s.flow.snapshot(), true
 	case "/api/state":
+	case "/api/retry":
+		s.flow.again()
 	case "/api/credentials":
 		var input struct {
 			Username string `json:"username"`

@@ -34,26 +34,22 @@ Do these steps when an error has `"action": "usc auth login"`:
    minutes.
    - `usc auth login --web --device-name NAME`: use this if you run on the
      user's computer, or if you have a browser on your machine that the user
-     can control. The `url` is a `127.0.0.1` address on your machine.
+     can control.
    - `usc auth login --remote --device-name NAME`: use this in all other
-     conditions, for example on a remote machine. The `url` is a
-     `https://usc.sh/login/v1/` link that opens on any device.
-2. Give the full `url` to the user. Include all the text after the `#`. The
-   user opens it and signs in. If you have a browser that the user can
-   control, you can open the `url` there.
+     conditions.
+2. Give the full `url` to the user. The user opens it and signs in. If you
+   have a browser that the user can control, you can open the `url` there.
 3. Run `usc auth status --wait URL`. If your command times out, run it again.
 4. If the command fails or prints `"authenticated": false`, start again at
    step 1.
 
-`--remote` is the approved procedure when the user cannot open a page on your
-machine. The page encrypts the user's input for your machine. usc.sh sends
-only the encrypted messages. Do not make a tunnel. Do not ask for a session
-file. If `--remote` fails, tell the user the error and stop.
+The `--remote` page encrypts the user's input for your machine. Do not make a
+tunnel. Do not ask for a session file. If `--remote` fails, tell the user the
+error and stop.
 
 To make sure that a `127.0.0.1` page is available, do a `GET /healthz` on its
 host, for example `curl http://127.0.0.1:PORT/healthz`. It returns
-`{"status":"ok"}` until sign-in is complete or the page expires. A usc.sh link
-does not have this check.
+`{"status":"ok"}` until sign-in is complete or the page expires.
 
 Do not ask for credentials in chat. Do not accept credentials in chat. Do not
 read, capture, or type into the sign-in page.

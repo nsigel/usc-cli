@@ -77,7 +77,13 @@ func requireHTTPS(target *url.URL) error {
 	return nil
 }
 
+// pageTimeout bounds one page of the sign-in, so a site that stops answering
+// fails while the user is still watching.
+const pageTimeout = 15 * time.Second
+
 func (a *authenticator) submit(ctx context.Context, current *page, form form) (*page, error) {
+	ctx, cancel := context.WithTimeout(ctx, pageTimeout)
+	defer cancel()
 	destination, err := current.URL.Parse(form.Action)
 	if err != nil {
 		return nil, err
@@ -99,6 +105,8 @@ func (a *authenticator) submit(ctx context.Context, current *page, form form) (*
 }
 
 func (a *authenticator) get(ctx context.Context, target string, referer *url.URL) (*page, error) {
+	ctx, cancel := context.WithTimeout(ctx, pageTimeout)
+	defer cancel()
 	return a.do(ctx, navigation{url: target, referer: referer})
 }
 

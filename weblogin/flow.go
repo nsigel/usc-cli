@@ -20,6 +20,7 @@ const (
 	stepPush        = "push"
 	stepDone        = "done"
 	stepFailed      = "failed"
+	stepInterrupted = "interrupted"
 )
 
 const (
@@ -237,7 +238,7 @@ func (f *flow) save(credentials auth.Credentials) {
 func (f *flow) retry(err error) {
 	f.mu.Lock()
 	var offered *auth.DuoMethodsRequired
-	next := state{Step: stepFailed, Error: err.Error()}
+	next := state{Step: stepInterrupted, Error: err.Error()}
 	switch {
 	case errors.As(err, &offered):
 		f.methods = devices(offered.Methods)
@@ -253,7 +254,7 @@ func (f *flow) retry(err error) {
 	case errors.Is(err, auth.ErrDuoPasscodeRejected), errors.Is(err, auth.ErrDuoSMSRejected), errors.Is(err, auth.ErrBypassRejected):
 		next = f.duoRetry("That code didn't work.")
 	case f.ctx.Err() != nil:
-		next.Error = "This page expired."
+		next = state{Step: stepFailed, Error: "This page expired."}
 	}
 	f.mu.Unlock()
 	if next.Step == stepFailed {
@@ -261,6 +262,18 @@ func (f *flow) retry(err error) {
 		return
 	}
 	f.set(next)
+}
+
+// again reruns a sign-in that an error interrupted, with the credentials
+// already entered.
+func (f *flow) again() {
+	if !f.begin(stepInterrupted) {
+		return
+	}
+	f.mu.Lock()
+	credentials := f.credentials
+	f.mu.Unlock()
+	f.run(func() { f.signIn(credentials) })
 }
 
 func (f *flow) duoRetry(message string) state {
