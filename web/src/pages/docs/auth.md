@@ -1,7 +1,7 @@
 ---
 layout: ../../layouts/Docs.astro
-title: Sign in
-description: Sign in once in your browser or terminal; later commands authenticate automatically.
+title: Sign in with NetID and Duo
+description: Sign in once with your NetID and Duo in a browser or terminal. usc enrolls its own Duo device, so later commands authenticate automatically.
 ---
 
 Sign in once. Browser sign-in (and terminal sign-in unless `--bypass` is used) enrolls a dedicated Duo TOTP device for `usc` so later commands authenticate automatically without prompting.

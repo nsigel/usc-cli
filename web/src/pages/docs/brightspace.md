@@ -1,7 +1,7 @@
 ---
 layout: ../../layouts/Docs.astro
 title: Brightspace
-description: Courses, content, grades, announcements, assignments, and downloads from Brightspace.
+description: Read USC Brightspace courses, content, grades, announcements, and assignments, and download files, from the command line.
 ---
 
 Reads live data from Brightspace (`brightspace.usc.edu`). Requires a USC sign-in. `usc` does not cache data.

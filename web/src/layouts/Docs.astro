@@ -1,7 +1,7 @@
 ---
 import Base from "./Base.astro";
 import Sprite from "../components/Sprite.astro";
-import type { SpriteName } from "../sprites";
+import { groups, markdownPath } from "../docs";
 
 interface Props {
   frontmatter: { title: string; description: string };
@@ -10,37 +10,9 @@ interface Props {
 const { title, description } = Astro.props.frontmatter;
 const path = Astro.url.pathname;
 
-const groups: { name: string; pages: { href: string; title: string; sprite?: SpriteName }[] }[] = [
-  {
-    name: "Start",
-    pages: [
-      { href: "/docs/", title: "Install" },
-      { href: "/docs/auth/", title: "Sign in" },
-      { href: "/docs/output/", title: "Output and errors" },
-    ],
-  },
-  {
-    name: "Sites",
-    pages: [
-      { href: "/docs/brightspace/", title: "Brightspace", sprite: "brightspace" },
-      { href: "/docs/webreg/", title: "WebReg", sprite: "webreg" },
-      { href: "/docs/handshake/", title: "Handshake", sprite: "handshake" },
-      { href: "/docs/directory/", title: "Student Directory", sprite: "directory" },
-      { href: "/docs/libcal/", title: "Leavey Library", sprite: "libcal" },
-      { href: "/docs/mobileorder/", title: "Mobile ordering", sprite: "trojan" },
-      { href: "/docs/classes/", title: "Schedule of Classes", sprite: "classes" },
-    ],
-  },
-  {
-    name: "More",
-    pages: [
-      { href: "/docs/library/", title: "Go library" },
-    ],
-  },
-];
 ---
 
-<Base title={`${title} · usc.sh`} description={description}>
+<Base title={`${title} · USC CLI docs`} description={description} markdown={markdownPath(path)}>
   <div class="wrap docs">
     <nav class="sidebar">
       {

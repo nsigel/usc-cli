@@ -1,0 +1,7 @@
+User-agent: *
+Content-Signal: search=yes, ai-input=yes, ai-train=yes
+Allow: /
+Disallow: /login/
+Disallow: /relay/
+
+Sitemap: https://usc.sh/sitemap.xml

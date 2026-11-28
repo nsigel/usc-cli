@@ -1,13 +1,18 @@
 ---
 import "../styles/global.css";
 import Sprite from "../components/Sprite.astro";
+import { searchEndpoint, searchInstructions, site } from "../docs";
 
 interface Props {
   title: string;
   description: string;
+  // markdown is the path of this page's Markdown version.
+  markdown?: string;
+  // canonical is false for pages that should not be indexed.
+  canonical?: boolean;
 }
 
-const { title, description } = Astro.props;
+const { title, description, markdown, canonical = true } = Astro.props;
 const path = Astro.url.pathname;
 ---
 
@@ -18,9 +23,14 @@ const path = Astro.url.pathname;
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title}</title>
     <meta name="description" content={description} />
+    {canonical ? <link rel="canonical" href={new URL(path, site)} /> : <meta name="robots" content="noindex" />}
+    {markdown && <link rel="alternate" type="text/markdown" href={markdown} />}
+    <meta name="agent:instructions" content={searchInstructions} />
+    <meta name="agent:endpoint" content={searchEndpoint} />
+    <meta name="agent:method" content="GET" />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
-    <meta property="og:url" content={new URL(path, "https://usc.sh")} />
+    {canonical && <meta property="og:url" content={new URL(path, site)} />}
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="usc.sh" />
     <meta property="og:image" content="https://usc.sh/og.png" />
