@@ -99,67 +99,9 @@ find the choices. Use `cart` to make the cart. Then use `quote` to get the
 price. Show the total, payment, and pickup time to the user before you run
 `order place`.
 
-## Hosts
-
-`usc` connects to these hosts. `usc.sh` is for `usc auth login --remote`.
-
-**`auth`, `duo`, `bypass`** (all commands that sign in use these hosts)
-
-```text
-login.microsoftonline.com
-login.live.com
-us.azureauth.duosecurity.com
-api-22627695.duosecurity.com
-uw1.devicemanagement.duosecurity.com
-account.usc.edu
-usc.sh
-```
-
-**`brightspace`**
-
-```text
-brightspace.usc.edu
-```
-
-**`webreg`**
-
-```text
-webreg.usc.edu
-```
-
-**`classes`**
-
-```text
-classes.usc.edu
-```
-
-**`handshake`**
-
-```text
-usc.joinhandshake.com
-```
-
-**`directory`**
-
-```text
-uscdirectory.usc.edu
-```
-
-**`libcal`**
-
-```text
-libcal.usc.edu
-libauth.com
-```
-
-**`mobileorder`**
-
-```text
-mobileorderprodapi.transactcampus.com
-```
-
 ## Notes
 
+- The hosts that `usc` connects to are at https://usc.sh/docs/#hosts.
 - WebReg submits all changes or no changes. If one section fails, WebReg
   changes nothing. `messages` gives the reason.
 - On a registered section, `webreg grade-option` only sends a request. The
