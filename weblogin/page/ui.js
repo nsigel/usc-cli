@@ -10,6 +10,7 @@ const strokes = {
   key: html`<path d="m21 2-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4" />`,
   chevron: html`<path d="m9 18 6-6-6-6" />`,
   back: html`<path d="m12 19-7-7 7-7M19 12H5" />`,
+  globe: html`<circle cx="12" cy="12" r="10" /><path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20" />`,
 };
 
 const github =
@@ -99,6 +100,16 @@ export function Option({ icon, label, detail, tag, onClick }) {
     ${tag && html`<span class="option-tag">${tag}</span>`}
     <span class="option-chevron"><${Icon} name="chevron" /></span>
   </button>`;
+}
+
+// A picture of the banner an agent's app shows when it needs permission to
+// reach a site, so the user knows it when they see it.
+export function ApprovalExample({ site }) {
+  return html`<div class="approval" role="img" aria-label="Example: your agent needs approval to access ${site}. Review.">
+    <span class="approval-icon"><${Icon} name="globe" size=${20} /></span>
+    <span class="approval-text"><strong>Agent needs approval</strong><span>Access ${site}</span></span>
+    <span class="approval-action">Review</span>
+  </div>`;
 }
 
 export function Note({ icon, children }) {

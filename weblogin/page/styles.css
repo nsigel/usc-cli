@@ -113,6 +113,52 @@ body {
   line-height: 20px;
 }
 
+.approval {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--hover);
+  user-select: none;
+}
+
+.approval-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #1a1a1a;
+}
+
+.approval-text {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--text-muted);
+}
+
+.approval-text strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.approval-action {
+  flex: none;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: #0a84ff;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 600;
+}
+
 .field {
   display: grid;
   gap: 6px;
