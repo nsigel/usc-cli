@@ -10,10 +10,12 @@
   JSON in pipes; honor `--pretty` and `--compact`.
 - No command aliases or shorthand flags.
 - Require explicit booking slots, terms, and form answers.
-- Only `usc auth login` may prompt: in a terminal, or on its `--web` loopback page.
+- Only `usc auth login` may prompt: in a terminal, or on its `--web` or `--remote` page.
 - Never log credentials, activation secrets, or cookies.
 - Persist only `session.json`, `credentials.json`, and LibCal checkout recovery.
 - Verify with live tests; do not add unit tests.
+- Write documentation, the skill, and `install.md` in ASD-STE100 Simplified
+  Technical English: active voice, present tense, one instruction per sentence.
 
 Before finishing, run:
 

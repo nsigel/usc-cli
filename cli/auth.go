@@ -25,9 +25,11 @@ func loginCommand() *cobra.Command {
 		Use:   "login",
 		Short: "Sign in to USC and save the credentials for later commands",
 		Long: "Sign in to USC and save the credentials for later commands.\n\n" +
-			"With --web, print the URL of a local sign-in page, then run\n" +
-			"usc auth status --wait URL.\n\n" +
-			"Without --web, the first login lists Duo methods. Rerun with --push-device,\n" +
+			"With --web, print the URL of a sign-in page on this machine. With --remote,\n" +
+			"print a usc.sh link that opens on any device; the page encrypts what is\n" +
+			"typed for this machine, and usc.sh relays only the encrypted messages.\n" +
+			"Then run usc auth status --wait URL.\n\n" +
+			"Without either, the first login lists Duo methods. Rerun with --push-device,\n" +
 			"--mobile-code, or --sms-device to add a Duo device, or --bypass to sign in\n" +
 			"with a bypass code instead.",
 		Args: cobra.NoArgs,
@@ -35,7 +37,8 @@ func loginCommand() *cobra.Command {
 			if serve, _ := cmd.Flags().GetBool("web-serve"); serve {
 				return serveWebLogin(cmd)
 			}
-			if web, _ := cmd.Flags().GetBool("web"); web {
+			web, _ := cmd.Flags().GetBool("web")
+			if remote, _ := cmd.Flags().GetBool("remote"); web || remote {
 				return startWebLogin(cmd)
 			}
 			options, err := signIn()
@@ -103,9 +106,11 @@ func loginCommand() *cobra.Command {
 	cmd.Flags().String("push-device", "", "Add a Duo device using Duo Push on this device ID")
 	cmd.Flags().Bool("bypass", false, "Sign in with a bypass code instead of adding a Duo device")
 	cmd.Flags().Bool("web", false, "Print the URL of a local sign-in page and return")
+	cmd.Flags().Bool("remote", false, "Print a usc.sh sign-in link that opens on any device and return")
 	cmd.Flags().Bool("web-serve", false, "Serve the sign-in page in the foreground")
 	_ = cmd.Flags().MarkHidden("web-serve")
 	cmd.MarkFlagsMutuallyExclusive("mobile-code", "push-device", "sms-device", "bypass", "web", "web-serve")
+	cmd.MarkFlagsMutuallyExclusive("mobile-code", "push-device", "sms-device", "bypass", "web", "remote")
 	return cmd
 }
 

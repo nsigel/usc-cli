@@ -30,11 +30,11 @@ go install github.com/nsigel/usc-cli/cmd/usc@latest
 usc auth login --web
 ```
 
-Open the printed `url` and sign in with your NetID, password, and Duo. Later commands sign in on their own. For scripts and CI, set `USC_USERNAME`, `USC_PASSWORD`, and `USC_DUO_TOTP_SECRET` or `USC_DUO_BYPASS` instead. Details: [Signing in](https://usc.sh/docs/auth/).
+Open the printed `url` and sign in with your NetID, password, and Duo. Later commands sign in on their own. For scripts and CI, set `USC_USERNAME`, `USC_PASSWORD`, and `USC_DUO_TOTP_SECRET` or `USC_DUO_BYPASS` instead. Details: [Sign in](https://usc.sh/docs/auth/).
 
 ## Give your agent the skill
 
-`usc skill` prints a SKILL.md that teaches an agent every command. Ask your agent to "add the usc skill: save the output of `usc skill` as a skill named usc-cli", or for Claude Code:
+`usc skill` prints a SKILL.md with the commands and the rules an agent follows, such as asking before it registers, books, or orders. Ask your agent to "add the usc skill: save the output of `usc skill` as a skill named usc-cli", or for Claude Code:
 
 ```sh
 mkdir -p ~/.claude/skills/usc-cli
