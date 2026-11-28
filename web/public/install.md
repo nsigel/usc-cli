@@ -31,6 +31,8 @@ If your agent does not have a skills directory, run `usc skill` at the start of 
 
 ## 3. Sign in
 
+In a sandbox, sign-in stops until the user approves each host that `usc` connects to. If you can change the allowed hosts of your environment, allow the hosts in the "Hosts" section now. If you cannot, open the sign-in link in your in-app browser. The user sees the approval requests there.
+
 Do the steps in the "Sign in" section of the skill.
 
 ## 4. Finish

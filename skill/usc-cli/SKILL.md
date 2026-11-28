@@ -48,11 +48,6 @@ The `--remote` page encrypts the user's input for your machine. Do not make a
 tunnel. Do not ask for a session file. If `--remote` fails, tell the user the
 error and stop.
 
-In a sandbox, sign-in stops until the user approves each host that `usc`
-connects to. Thus, open the `url` in your in-app browser if you have one. The
-user sees the approval requests there. If you can change the allowed hosts of
-your environment, allow the hosts in https://usc.sh/install.md before step 1.
-
 To make sure that a `127.0.0.1` page is available, do a `GET /healthz` on its
 host, for example `curl http://127.0.0.1:PORT/healthz`. It returns
 `{"status":"ok"}` until sign-in is complete or the page expires.
